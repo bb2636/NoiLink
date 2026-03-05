@@ -1,26 +1,203 @@
 import { motion } from 'framer-motion';
+import { useAuth } from '../hooks/useAuth';
+import { useHome } from '../hooks/useHome';
+import { useNavigate } from 'react-router-dom';
 
 /**
  * 홈 페이지
- * Figma 디자인 기반으로 구현 예정
+ * 이미지 기반 디자인 구현
  */
 export default function Home() {
+  const { user } = useAuth();
+  const { condition, quickStart, loading } = useHome(user?.id || null);
+  const navigate = useNavigate();
+  
+  // 뇌 지수 계산 (임시로 condition 점수 사용)
+  const brainIndex = condition?.score || 82;
+  const weeklyChange = 2; // 임시 값
+  
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#0A0A0A' }}>
+        <div className="text-white">로딩 중...</div>
+      </div>
+    );
+  }
+  
   return (
-    <div className="min-h-screen p-4">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="max-w-md mx-auto"
-      >
-        <h1 className="text-3xl font-bold text-center mb-8">
-          뇌지컬 트레이닝
-        </h1>
-        <p className="text-center text-gray-600 mb-8">
-          인지 능력을 테스트하고 훈련하세요
-        </p>
-        {/* TODO: Figma 디자인 기반 UI 구현 */}
-      </motion.div>
+    <div className="min-h-screen" style={{ backgroundColor: '#0A0A0A' }}>
+      <div className="max-w-md mx-auto px-4 py-6">
+        {/* 헤더 */}
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-white text-xl font-semibold">roi link</h1>
+          <button 
+            onClick={() => navigate('/device')}
+            className="text-white text-sm"
+          >
+            기기 관리 &gt;
+          </button>
+        </div>
+        
+        {/* 메인 비주얼 카드 - 뇌 3D 렌더링 */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="relative mb-6 rounded-2xl overflow-hidden"
+          style={{ backgroundColor: '#1A1A1A', aspectRatio: '16/9' }}
+        >
+          {/* 뇌 3D 렌더링 영역 */}
+          <div className="relative w-full h-full flex items-center justify-center">
+            {/* 뇌 아이콘/이미지 영역 */}
+            <div className="relative">
+              {/* 뇌 아이콘 (임시로 큰 이모지 사용) */}
+              <div className="text-8xl opacity-30" style={{ color: '#00D4FF' }}>
+                🧠
+              </div>
+              
+              {/* 네온 링 1 (시안/파란색) */}
+              <motion.div
+                animate={{ 
+                  scale: [1, 1.1, 1],
+                  opacity: [0.5, 0.8, 0.5]
+                }}
+                transition={{ 
+                  duration: 2,
+                  repeat: Infinity,
+                  ease: 'easeInOut'
+                }}
+                className="absolute top-0 left-0 w-32 h-32 rounded-full border-2"
+                style={{ 
+                  borderColor: '#00D4FF',
+                  boxShadow: '0 0 20px rgba(0, 212, 255, 0.5)'
+                }}
+              />
+              
+              {/* 네온 링 2 (라임 그린) */}
+              <motion.div
+                animate={{ 
+                  scale: [1, 1.15, 1],
+                  opacity: [0.5, 0.9, 0.5]
+                }}
+                transition={{ 
+                  duration: 2.5,
+                  repeat: Infinity,
+                  ease: 'easeInOut',
+                  delay: 0.5
+                }}
+                className="absolute bottom-0 right-0 w-28 h-28 rounded-full border-2"
+                style={{ 
+                  borderColor: '#AAED10',
+                  boxShadow: '0 0 20px rgba(170, 237, 16, 0.5)'
+                }}
+              />
+            </div>
+            
+            {/* 캐러셀 인디케이터 */}
+            <div className="absolute bottom-4 right-4 text-white text-sm bg-black bg-opacity-50 px-3 py-1 rounded-full">
+              1/5
+            </div>
+          </div>
+        </motion.div>
+        
+        {/* 프로필 요약 섹션 */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1 }}
+          className="mb-6"
+        >
+          <h2 className="text-white text-lg font-semibold mb-3">프로필 요약</h2>
+          
+          <div className="rounded-2xl p-4" style={{ backgroundColor: '#1A1A1A' }}>
+            <div className="text-white text-sm mb-2">뇌 지수 리포트</div>
+            <p className="text-gray-400 text-xs mb-4">
+              반응 · 집중 · 정확도를 기반으로 산출된 종합 뇌 지수입니다.
+            </p>
+            
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {/* 뇌 아이콘 */}
+                <div className="text-4xl">🧠</div>
+                <div className="text-white text-3xl font-bold">{brainIndex}점</div>
+              </div>
+              
+              {/* 주간 변화 버튼 */}
+              <button
+                className="px-3 py-1 rounded-full text-sm font-semibold"
+                style={{ 
+                  backgroundColor: '#AAED10',
+                  color: '#000000'
+                }}
+              >
+                주간 +{weeklyChange}
+              </button>
+            </div>
+          </div>
+        </motion.div>
+        
+        {/* 빠른 시작 섹션 */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+        >
+          <h2 className="text-white text-lg font-semibold mb-3">빠른 시작</h2>
+          
+          <div className="space-y-3">
+            {/* 포커스 카드 */}
+            <button
+              onClick={() => navigate('/training?mode=FOCUS')}
+              className="w-full rounded-2xl p-4 flex items-center justify-between"
+              style={{ backgroundColor: '#1A1A1A' }}
+            >
+              <div className="text-left">
+                <div className="text-white font-semibold mb-1">포커스</div>
+                <div className="text-gray-400 text-sm">
+                  집중 타겟 유지 및 방해요소 차단 능력을 강화합니다.
+                </div>
+              </div>
+              <div className="text-white text-xl">&gt;</div>
+            </button>
+            
+            {/* 시퀀스 카드 */}
+            <button
+              onClick={() => navigate('/training?mode=MEMORY')}
+              className="w-full rounded-2xl p-4 flex items-center justify-between"
+              style={{ backgroundColor: '#1A1A1A' }}
+            >
+              <div className="text-left">
+                <div className="text-white font-semibold mb-1">시퀀스</div>
+                <div className="text-gray-400 text-sm">
+                  제시된 순서를 기억하고 재현하는 훈련입니다.
+                </div>
+              </div>
+              <div className="text-white text-xl">&gt;</div>
+            </button>
+            
+            {/* 오늘의 추천 트레이닝 카드 */}
+            <button
+              onClick={() => {
+                if (quickStart) {
+                  navigate(`/training?mode=${quickStart.recommendedMode}&bpm=${quickStart.recommendedBPM}&level=${quickStart.recommendedLevel}`);
+                } else {
+                  navigate('/training');
+                }
+              }}
+              className="w-full rounded-2xl p-4 flex items-center justify-between"
+              style={{ backgroundColor: '#1A1A1A' }}
+            >
+              <div className="text-left">
+                <div className="text-white font-semibold mb-1">오늘의 추천 트레이닝</div>
+                <div className="text-gray-400 text-sm">
+                  당신에게 필요한 맞춤 트레이닝을 제공합니다.
+                </div>
+              </div>
+              <div className="text-white text-xl">&gt;</div>
+            </button>
+          </div>
+        </motion.div>
+      </div>
     </div>
   );
 }

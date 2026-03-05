@@ -79,7 +79,7 @@ router.post('/calculate', async (req: Request, res: Response) => {
         metricsScore.comprehension,
         metricsScore.focus,
         metricsScore.judgment,
-        metricsScore.multitasking,
+        metricsScore.agility,
         metricsScore.endurance,
       ].filter((s): s is number => s !== undefined);
       

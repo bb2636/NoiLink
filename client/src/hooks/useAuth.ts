@@ -1,0 +1,117 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import api from '../utils/api';
+import { STORAGE_KEYS } from '../utils/constants';
+import type { User } from '@noilink/shared';
+
+export function useAuth() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  
+  useEffect(() => {
+    checkAuth();
+  }, []);
+  
+  const checkAuth = async () => {
+    try {
+      const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
+      
+      // JWT 토큰이 있으면 /me 엔드포인트로 사용자 정보 조회
+      if (token) {
+        const response = await api.getMe();
+        if (response.success && response.data) {
+          setUser(response.data);
+        } else {
+          // 토큰이 유효하지 않으면 로그아웃 처리
+          localStorage.removeItem(STORAGE_KEYS.USER_ID);
+          localStorage.removeItem(STORAGE_KEYS.USERNAME);
+          localStorage.removeItem(STORAGE_KEYS.TOKEN);
+        }
+      } else {
+        // 토큰이 없으면 기존 방식으로 확인 (하위 호환성)
+        const userId = localStorage.getItem(STORAGE_KEYS.USER_ID);
+        if (userId) {
+          const response = await api.getUser(userId);
+          if (response.success && response.data) {
+            setUser(response.data);
+          } else {
+            localStorage.removeItem(STORAGE_KEYS.USER_ID);
+            localStorage.removeItem(STORAGE_KEYS.USERNAME);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Auth check failed:', error);
+      localStorage.removeItem(STORAGE_KEYS.USER_ID);
+      localStorage.removeItem(STORAGE_KEYS.USERNAME);
+      localStorage.removeItem(STORAGE_KEYS.TOKEN);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const login = async (email: string, password: string) => {
+    try {
+      const response = await api.login(email, password);
+      if (response.success && response.data) {
+        const user = response.data;
+        const token = (response as any).token;
+        
+        setUser(user);
+        localStorage.setItem(STORAGE_KEYS.USER_ID, user.id);
+        localStorage.setItem(STORAGE_KEYS.USERNAME, user.username);
+        
+        // JWT 토큰 저장
+        if (token) {
+          localStorage.setItem(STORAGE_KEYS.TOKEN, token);
+        }
+        
+        return { success: true };
+      }
+      return { success: false, error: response.error || '이메일 또는 비밀번호가 올바르지 않습니다' };
+    } catch (error) {
+      return { success: false, error: '로그인 실패' };
+    }
+  };
+  
+  const signup = async (userData: {
+    username: string;
+    email?: string;
+    name?: string;
+    age?: number;
+    password?: string;
+    phone?: string;
+    userType?: 'PERSONAL' | 'ORGANIZATION';
+  }) => {
+    try {
+      const response = await api.createUser(userData);
+      if (response.success && response.data) {
+        setUser(response.data);
+        localStorage.setItem(STORAGE_KEYS.USER_ID, response.data.id);
+        localStorage.setItem(STORAGE_KEYS.USERNAME, response.data.username);
+        return { success: true };
+      }
+      return { success: false, error: response.error || '회원가입 실패' };
+    } catch (error) {
+      return { success: false, error: '회원가입 실패' };
+    }
+  };
+  
+  const logout = () => {
+    setUser(null);
+    localStorage.removeItem(STORAGE_KEYS.USER_ID);
+    localStorage.removeItem(STORAGE_KEYS.USERNAME);
+    localStorage.removeItem(STORAGE_KEYS.TOKEN);
+    navigate('/login');
+  };
+  
+  return {
+    user,
+    loading,
+    login,
+    signup,
+    logout,
+    isAuthenticated: !!user,
+  };
+}

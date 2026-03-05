@@ -62,21 +62,18 @@ async function initializeDB(): Promise<IDatabase> {
 }
 
 // DB 초기화 (비동기)
-const dbPromise = initializeDB().catch((error) => {
+const dbPromise = initializeDB().catch(async (error) => {
   console.error('❌ Failed to initialize database:', error);
-  // Fallback: 메모리 기반 간단한 DB
-  return {
-    data: {} as Record<string, any>,
-    async get(key: string) { return this.data[key]; },
-    async set(key: string, value: any) { this.data[key] = value; },
-    async delete(key: string) { delete this.data[key]; },
-    async list() { return Object.keys(this.data); },
-    async query() { throw new Error('Not supported'); },
-    async transaction(callback: any) { return await callback(this); },
-    async connect() {},
-    async disconnect() {},
-    isConnected: () => true,
-  } as IDatabase;
+  if (error instanceof Error) {
+    console.error('   Error message:', error.message);
+  }
+  
+  // PostgreSQL 연결 실패 시 로컬 DB로 fallback
+  console.log('⚠️  Falling back to local JSON database...');
+  const { LocalDB } = await import('./db/local.js');
+  const localDB = new LocalDB();
+  await localDB.connect();
+  return localDB;
 });
 
 // 동기적으로 접근 가능한 래퍼

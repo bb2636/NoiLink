@@ -16,7 +16,7 @@ interface AggregatedScores {
   comprehension: number;
   focus: number;
   judgment: number;
-  multitasking: number;
+  agility: number;  // 기존 multitasking
   endurance: number;
 }
 
@@ -29,7 +29,7 @@ interface BrainimalWeights {
   comprehension: number;
   focus: number;
   judgment: number;
-  multitasking: number;
+  agility: number;  // 기존 multitasking
   endurance: number;
 }
 
@@ -40,7 +40,7 @@ const BRAINIMAL_WEIGHTS: Record<BrainimalType, BrainimalWeights> = {
     comprehension: 0.1,
     focus: 0.5,
     judgment: 0.1,
-    multitasking: 0.1,
+    agility: 0.1,
     endurance: 0.1,
   },
   
@@ -50,7 +50,7 @@ const BRAINIMAL_WEIGHTS: Record<BrainimalType, BrainimalWeights> = {
     comprehension: 0.1,
     focus: 0.1,
     judgment: 0.5,
-    multitasking: 0.1,
+    agility: 0.1,
     endurance: 0.1,
   },
   
@@ -60,7 +60,7 @@ const BRAINIMAL_WEIGHTS: Record<BrainimalType, BrainimalWeights> = {
     comprehension: 0.1,
     focus: 0.1,
     judgment: 0.1,
-    multitasking: 0.1,
+    agility: 0.1,
     endurance: 0.5,
   },
   
@@ -70,17 +70,17 @@ const BRAINIMAL_WEIGHTS: Record<BrainimalType, BrainimalWeights> = {
     comprehension: 0.4,
     focus: 0.05,
     judgment: 0.05,
-    multitasking: 0.05,
+    agility: 0.05,
     endurance: 0.05,
   },
   
-  // 5. 전략적인 호랑이: MULTITASKING High & COMPREHENSION High
+  // 5. 전략적인 호랑이: AGILITY High & COMPREHENSION High
   TIGER_STRATEGIC: {
     memory: 0.1,
     comprehension: 0.4,
     focus: 0.1,
     judgment: 0.1,
-    multitasking: 0.4,
+    agility: 0.4,
     endurance: 0.1,
   },
   
@@ -90,7 +90,7 @@ const BRAINIMAL_WEIGHTS: Record<BrainimalType, BrainimalWeights> = {
     comprehension: 0.167,
     focus: 0.167,
     judgment: 0.167,
-    multitasking: 0.167,
+    agility: 0.167,
     endurance: 0.167,
   },
   
@@ -100,7 +100,7 @@ const BRAINIMAL_WEIGHTS: Record<BrainimalType, BrainimalWeights> = {
     comprehension: 0.1,
     focus: 0.15,
     judgment: 0.1,
-    multitasking: 0.05,
+    agility: 0.05,
     endurance: 0.1,
   },
   
@@ -110,7 +110,7 @@ const BRAINIMAL_WEIGHTS: Record<BrainimalType, BrainimalWeights> = {
     comprehension: 0.5,
     focus: 0.1,
     judgment: 0.1,
-    multitasking: 0.1,
+    agility: 0.1,
     endurance: 0.1,
   },
   
@@ -120,17 +120,17 @@ const BRAINIMAL_WEIGHTS: Record<BrainimalType, BrainimalWeights> = {
     comprehension: 0.1,
     focus: 0.1,
     judgment: 0.5,
-    multitasking: 0.1,
+    agility: 0.1,
     endurance: 0.1,
   },
   
-  // 10. 사회적인 강아지: MULTITASKING High & 리듬감 Good
+  // 10. 사회적인 강아지: AGILITY High & 리듬감 Good
   DOG_SOCIAL: {
     memory: 0.1,
     comprehension: 0.1,
     focus: 0.1,
     judgment: 0.1,
-    multitasking: 0.5,
+    agility: 0.5,
     endurance: 0.1,
   },
   
@@ -140,17 +140,17 @@ const BRAINIMAL_WEIGHTS: Record<BrainimalType, BrainimalWeights> = {
     comprehension: 0.15,
     focus: 0.2,
     judgment: 0.2,
-    multitasking: 0.15,
+    agility: 0.15,
     endurance: 0.15,
   },
   
-  // 12. 창의적인 늑대: MEMORY High & MULTITASKING High & (기복 High OR 리듬 Good)
+  // 12. 창의적인 늑대: MEMORY High & AGILITY High & (기복 High OR 리듬 Good)
   WOLF_CREATIVE: {
     memory: 0.4,
     comprehension: 0.1,
     focus: 0.1,
     judgment: 0.1,
-    multitasking: 0.4,
+    agility: 0.4,
     endurance: 0.1,
   },
 };
@@ -166,7 +166,7 @@ function aggregateScores(scores: MetricsScore[]): AggregatedScores | null {
     comprehension: 0,
     focus: 0,
     judgment: 0,
-    multitasking: 0,
+    agility: 0,
     endurance: 0,
   };
   
@@ -189,9 +189,9 @@ function aggregateScores(scores: MetricsScore[]): AggregatedScores | null {
       sums.judgment += score.judgment;
       counts.judgment++;
     }
-    if (score.multitasking !== undefined) {
-      sums.multitasking += score.multitasking;
-      counts.multitasking++;
+    if (score.agility !== undefined) {
+      sums.agility += score.agility;
+      counts.agility++;
     }
     if (score.endurance !== undefined) {
       sums.endurance += score.endurance;
@@ -204,7 +204,7 @@ function aggregateScores(scores: MetricsScore[]): AggregatedScores | null {
     comprehension: counts.comprehension > 0 ? sums.comprehension / counts.comprehension : 0,
     focus: counts.focus > 0 ? sums.focus / counts.focus : 0,
     judgment: counts.judgment > 0 ? sums.judgment / counts.judgment : 0,
-    multitasking: counts.multitasking > 0 ? sums.multitasking / counts.multitasking : 0,
+    agility: counts.agility > 0 ? sums.agility / counts.agility : 0,
     endurance: counts.endurance > 0 ? sums.endurance / counts.endurance : 0,
   };
 }
@@ -246,7 +246,7 @@ export function determineBrainimalType(scores: MetricsScore[]): {
       (aggregated.comprehension * weights.comprehension) +
       (aggregated.focus * weights.focus) +
       (aggregated.judgment * weights.judgment) +
-      (aggregated.multitasking * weights.multitasking) +
+      (aggregated.agility * weights.agility) +
       (aggregated.endurance * weights.endurance);
     
     typeScores[type as BrainimalType] = weightedSum;
@@ -278,7 +278,7 @@ export function determineBrainimalType(scores: MetricsScore[]): {
       aggregated.comprehension +
       aggregated.focus +
       aggregated.judgment +
-      aggregated.multitasking +
+      aggregated.agility +
       aggregated.endurance
     ) / 6;
     
@@ -287,7 +287,7 @@ export function determineBrainimalType(scores: MetricsScore[]): {
       aggregated.comprehension,
       aggregated.focus,
       aggregated.judgment,
-      aggregated.multitasking,
+      aggregated.agility,
       aggregated.endurance,
     ];
     const sd = calculateSD(scoreValues);

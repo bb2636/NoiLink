@@ -8,6 +8,7 @@ export const GAME_CATEGORIES = {
   REACTION: 'reaction',
   LOGIC: 'logic',
   ATTENTION: 'attention',
+  AGILITY: 'agility',  // 순발력
 } as const;
 
 // 게임 난이도
@@ -22,6 +23,7 @@ export const STORAGE_KEYS = {
   USER_ID: 'noilink_user_id',
   USERNAME: 'noilink_username',
   DEVICE_ID: 'noilink_device_id',
+  TOKEN: 'noilink_token',
 } as const;
 
 // API 엔드포인트

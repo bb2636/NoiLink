@@ -6,6 +6,9 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Pretendard', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', 'sans-serif'],
+      },
       colors: {
         primary: {
           50: '#f0f9ff',
@@ -18,6 +21,14 @@ export default {
           700: '#0369a1',
           800: '#075985',
           900: '#0c4a6e',
+        },
+        lime: {
+          400: '#a3e635',
+          500: '#84cc16',
+          600: '#65a30d',
+        },
+        background: {
+          dark: '#0A0A0A',
         },
       },
     },

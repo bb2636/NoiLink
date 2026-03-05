@@ -53,7 +53,7 @@ router.post('/generate', async (req: Request, res: Response) => {
     const metricsScores = await db.get('metricsScores') || [];
     const recentScores = userSessions
       .map((s: Session) => metricsScores.find((m: MetricsScore) => m.sessionId === s.id))
-      .filter((m): m is MetricsScore => m !== undefined);
+      .filter((m: MetricsScore | undefined): m is MetricsScore => m !== undefined);
     
     if (recentScores.length < 3) {
       return res.status(400).json({

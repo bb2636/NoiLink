@@ -47,10 +47,11 @@ export async function initializeNormConfig(): Promise<void> {
         goReactionTime: { mu: 500, sigma: 100 },
       },
 
-      // 멀티태스킹 규준
-      multitasking: {
+      // 순발력 규준 (기존 멀티태스킹)
+      agility: {
         switchCost: { mu: 250, sigma: 100 },
         switchAccuracy: { mu: 0.85, sigma: 0.12 },
+        reactionTime: { mu: 400, sigma: 100 }, // 순발력 반응시간 규준 추가
       },
 
       // 지구력 규준

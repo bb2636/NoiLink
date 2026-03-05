@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 플레이스홀더 색상 통일 */
+input::placeholder {
+  color: #B6B6B9 !important;
+}
+
+/* 자동완성 시 배경색 유지 */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px #373C39 inset !important;
+  -webkit-text-fill-color: #ffffff !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
 /* 전역 스타일 */
 * {
   margin: 0;
@@ -10,19 +25,45 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: #0A0A0A;
+  color: #ffffff;
 }
 
 /* 모바일 최적화 */
 #root {
   min-height: 100vh;
+  min-height: -webkit-fill-available; /* iOS Safari 대응 */
   width: 100%;
   max-width: 100vw;
   overflow-x: hidden;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Safe area 지원 */
+@supports (padding: max(0px)) {
+  #root {
+    padding-top: max(env(safe-area-inset-top), 0px);
+    padding-bottom: max(env(safe-area-inset-bottom), 0px);
+  }
+}
+
+/* 모바일 반응형 기본 설정 */
+@media (max-width: 640px) {
+  body {
+    font-size: 14px;
+  }
+}
+
+/* 터치 영역 최소 크기 보장 */
+button, a {
+  min-height: 44px;
+  min-width: 44px;
 }
 
 /* 스크롤바 스타일링 (선택사항) */

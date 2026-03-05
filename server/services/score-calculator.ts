@@ -12,7 +12,7 @@ import type {
   ComprehensionRawMetrics,
   FocusRawMetrics,
   JudgmentRawMetrics,
-  MultitaskingRawMetrics,
+  AgilityRawMetrics,
   EnduranceRawMetrics,
   NormConfig,
 } from '@noilink/shared';
@@ -163,12 +163,12 @@ export async function calculateJudgmentScore(
     throw new Error('NormConfig not found');
   }
   
-  const { noGoSuccessRate, goReactionTime } = judgment;
+  const { noGoSuccessRate, avgGoReactionTime } = judgment;
   const { judgment: judgeNorm } = normConfig;
   
   // 인지 과제 Z-Score
   const zNoGo = calculateZScore(noGoSuccessRate, judgeNorm.noGoAccuracy.mu, judgeNorm.noGoAccuracy.sigma);
-  const zGoRT = -calculateZScore(goReactionTime, judgeNorm.goReactionTime.mu, judgeNorm.goReactionTime.sigma);
+  const zGoRT = -calculateZScore(avgGoReactionTime, judgeNorm.goReactionTime.mu, judgeNorm.goReactionTime.sigma);
   
   // 가중 합산 (80% 억제, 20% GO 속도)
   const zCognitive = (zNoGo * 0.8) + (zGoRT * 0.2);
@@ -184,12 +184,12 @@ export async function calculateJudgmentScore(
 }
 
 /**
- * 멀티태스킹 점수 계산
- * 명세서 7.2절 ⑤ 멀티태스킹
+ * 순발력 점수 계산
+ * 명세서 7.2절 ⑤ 순발력 (기존 멀티태스킹)
  * Logic: 전환 능력(80%) + 리듬감(20%)
  */
-export async function calculateMultitaskingScore(
-  multitasking: MultitaskingRawMetrics,
+export async function calculateAgilityScore(
+  agility: AgilityRawMetrics,
   rhythm?: RhythmRawMetrics
 ): Promise<number> {
   const normConfig = await getNormConfig();
@@ -197,15 +197,19 @@ export async function calculateMultitaskingScore(
     throw new Error('NormConfig not found');
   }
   
-  const { switchCost, switchAccuracy } = multitasking;
-  const { multitasking: multiNorm } = normConfig;
+  const { switchCost, footAccuracy, reactionTime } = agility;
+  const { agility: agilityNorm } = normConfig;
   
-  // 인지 과제 Z-Score (전환비용은 낮을수록 좋으므로 부호 반전)
-  const zCost = -calculateZScore(switchCost, multiNorm.switchCost.mu, multiNorm.switchCost.sigma);
-  const zAcc = calculateZScore(switchAccuracy, multiNorm.switchAccuracy.mu, multiNorm.switchAccuracy.sigma);
+  // 인지 과제 Z-Score (전환비용, 반응시간은 낮을수록 좋으므로 부호 반전)
+  const zCost = -calculateZScore(switchCost, agilityNorm.switchCost.mu, agilityNorm.switchCost.sigma);
+  // footAccuracy를 switchAccuracy로 사용 (발 정확도 = 전환 정확도)
+  const zAcc = calculateZScore(footAccuracy, agilityNorm.switchAccuracy.mu, agilityNorm.switchAccuracy.sigma);
+  const zRT = reactionTime !== undefined
+    ? -calculateZScore(reactionTime, agilityNorm.reactionTime.mu, agilityNorm.reactionTime.sigma)
+    : 0;
   
-  // 가중 합산 (70% 전환비용, 30% 전환정확도)
-  const zCognitive = (zCost * 0.7) + (zAcc * 0.3);
+  // 가중 합산 (50% 전환비용, 30% 전환정확도, 20% 반응시간)
+  const zCognitive = (zCost * 0.5) + (zAcc * 0.3) + (zRT * 0.2);
   
   // 리듬 점수 (20% 비중)
   const rhythmScore = rhythm ? calculateRhythmScore(rhythm) : 0;
@@ -285,9 +289,9 @@ export async function calculateAllMetrics(rawMetrics: RawMetrics): Promise<Metri
     scores.judgment = await calculateJudgmentScore(rawMetrics.judgment, rhythm);
   }
   
-  // 멀티태스킹
-  if (rawMetrics.multitasking) {
-    scores.multitasking = await calculateMultitaskingScore(rawMetrics.multitasking, rhythm);
+  // 순발력 (기존 멀티태스킹)
+  if (rawMetrics.agility) {
+    scores.agility = await calculateAgilityScore(rawMetrics.agility, rhythm);
   }
   
   // 지구력

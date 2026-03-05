@@ -2,7 +2,7 @@
  * Replit Database 어댑터
  */
 
-import { Database } from '@replit/database';
+import Database from '@replit/database';
 import type { IDatabase } from './interface.js';
 
 export class ReplitDB implements IDatabase {

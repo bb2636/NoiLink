@@ -155,7 +155,7 @@ interface RawMetrics {
   comprehension?: ComprehensionRawMetrics; // 이해력 메트릭
   focus?: FocusRawMetrics;             // 집중력 메트릭
   judgment?: JudgmentRawMetrics;       // 판단력 메트릭
-  multitasking?: MultitaskingRawMetrics; // 멀티태스킹 메트릭
+  agility?: AgilityRawMetrics;           // 순발력 메트릭 (기존 multitasking)
   endurance?: EnduranceRawMetrics;     // 지구력 메트릭
   createdAt: string;                   // 생성일시
 }
@@ -182,7 +182,7 @@ interface MetricsScore {
   comprehension?: number;              // 이해력 점수 (0~100)
   focus?: number;                      // 집중력 점수 (0~100)
   judgment?: number;                   // 판단력 점수 (0~100)
-  multitasking?: number;              // 멀티태스킹 점수 (0~100)
+  agility?: number;                     // 순발력 점수 (0~100, 기존 multitasking)
   endurance?: number;                  // 지구력 점수 (0~100)
   rhythm?: number;                     // 리듬 점수 (0~100, 공통)
   createdAt: string;                   // 생성일시
@@ -231,7 +231,7 @@ interface NormConfig {
   };
   
   // 멀티태스킹 규준
-  multitasking: {
+  agility: {
     switchCost: { mu: 250, sigma: 100 };
     switchAccuracy: { mu: 0.85, sigma: 0.12 };
   };

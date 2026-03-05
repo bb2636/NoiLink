@@ -28,7 +28,7 @@ export type TrainingMode =
   | 'COMPREHENSION'    // 이해력
   | 'FOCUS'            // 집중력
   | 'JUDGMENT'         // 판단력
-  | 'MULTITASKING'     // 멀티태스킹
+  | 'AGILITY'          // 순발력 (기존 MULTITASKING)
   | 'ENDURANCE'        // 지구력
   | 'COMPOSITE'        // 종합 트레이닝
   | 'FREE';            // 자유 트레이닝
@@ -55,7 +55,7 @@ export type BrainimalType =
   | 'WOLF_CREATIVE';       // 창의적인 늑대
 
 /** 회원 타입 */
-export type UserType = 'PERSONAL' | 'ORGANIZATION';
+export type UserType = 'PERSONAL' | 'ORGANIZATION' | 'ADMIN';
 
 /** 컨디션 배지 */
 export type ConditionBadge = 'EXCELLENT' | 'GOOD' | 'NORMAL' | 'POOR';
@@ -73,11 +73,14 @@ export interface User {
   username: string;                    // 사용자명 (로그인 ID)
   email?: string;                      // 이메일
   name: string;                        // 표시 이름
+  age?: number;                        // 나이
   userType: UserType;                  // 회원 타입
   organizationId?: string;            // 기업 회원인 경우 조직 ID
   deviceId?: string;                   // 기기 ID
   brainimalType?: BrainimalType;       // 브레이니멀 타입
   brainimalConfidence?: number;        // 신뢰도 (0~100)
+  brainAge?: number;                   // 뇌지컬 나이
+  previousBrainAge?: number;           // 이전 뇌지컬 나이 (변화 추이용)
   streak: number;                      // 연속 트레이닝 일수
   lastTrainingDate?: string;           // 마지막 트레이닝 일시
   createdAt: string;                  // 생성일시 (ISO 8601)
@@ -93,6 +96,23 @@ export interface Organization {
   memberUserIds: string[];             // 멤버 사용자 ID 목록
   createdAt: string;                  // 생성일시
   updatedAt?: string;                  // 수정일시
+}
+
+/** 약관 타입 */
+export type TermsType = 'SERVICE' | 'PRIVACY';
+
+/** 약관 정보 */
+export interface Terms {
+  id: string;                          // 고유 ID
+  type: TermsType;                     // 약관 타입 (서비스 이용약관, 개인정보 수집 및 이용)
+  title: string;                       // 약관 제목
+  content: string;                     // 약관 내용
+  version: number;                     // 약관 버전
+  isRequired: boolean;                 // 필수 여부
+  isActive: boolean;                   // 활성화 여부
+  createdAt: string;                   // 생성일시
+  updatedAt?: string;                   // 수정일시
+  createdBy?: string;                  // 생성자 ID (관리자)
 }
 
 // ============================================================================
@@ -183,13 +203,14 @@ export interface JudgmentRawMetrics {
   impulseCount: number;                // 충동 오류 횟수
 }
 
-/** 멀티태스킹 원시 메트릭 */
-export interface MultitaskingRawMetrics {
+/** 순발력 원시 메트릭 (기존 멀티태스킹) */
+export interface AgilityRawMetrics {
   footAccuracy: number;                 // 발 정확도 (0~1)
   anchorOmissionRate: number;           // 앵커 누락률 (0~1)
   simultaneousSuccessRate: number;     // 동시 성공률 (0~1)
   switchCost: number;                   // 전환 비용 (ms)
   syncError: number;                    // 동기화 오차 (ms)
+  reactionTime: number;                  // 반응 시간 (ms)
 }
 
 /** 지구력 원시 메트릭 */
@@ -217,7 +238,7 @@ export interface RawMetrics {
   comprehension?: ComprehensionRawMetrics; // 이해력 메트릭
   focus?: FocusRawMetrics;              // 집중력 메트릭
   judgment?: JudgmentRawMetrics;        // 판단력 메트릭
-  multitasking?: MultitaskingRawMetrics; // 멀티태스킹 메트릭
+  agility?: AgilityRawMetrics;           // 순발력 메트릭 (기존 multitasking)
   endurance?: EnduranceRawMetrics;      // 지구력 메트릭
   createdAt: string;                    // 생성일시
 }
@@ -230,7 +251,7 @@ export interface MetricsScore {
   comprehension?: number;               // 이해력 점수 (0~100)
   focus?: number;                      // 집중력 점수 (0~100)
   judgment?: number;                    // 판단력 점수 (0~100)
-  multitasking?: number;                // 멀티태스킹 점수 (0~100)
+  agility?: number;                     // 순발력 점수 (0~100, 기존 multitasking)
   endurance?: number;                  // 지구력 점수 (0~100)
   rhythm?: number;                     // 리듬 점수 (0~100, 공통)
   createdAt: string;                    // 생성일시
@@ -269,10 +290,11 @@ export interface NormConfig {
     goReactionTime: { mu: number; sigma: number }; // μ=500, σ=100
   };
   
-  // 멀티태스킹 규준
-  multitasking: {
+  // 순발력 규준 (기존 멀티태스킹)
+  agility: {
     switchCost: { mu: number; sigma: number };     // μ=250, σ=100
     switchAccuracy: { mu: number; sigma: number }; // μ=0.85, σ=0.12
+    reactionTime: { mu: number; sigma: number };  // μ=400, σ=100
   };
   
   // 지구력 규준

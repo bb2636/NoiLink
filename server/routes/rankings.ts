@@ -33,11 +33,11 @@ async function calculateRankings(): Promise<void> {
         ...s,
         weightedScore: (s.score || 0) * 1.2, // 가중치 1.2배
       }))
-      .sort((a, b) => b.weightedScore - a.weightedScore)
-      .slice(0, 3); // 상위 3회
+      .sort((a: Session & { weightedScore: number }, b: Session & { weightedScore: number }) => b.weightedScore - a.weightedScore)
+        .slice(0, 3); // 상위 3회
     
     if (compositeSessions.length > 0) {
-      const rankingScore = compositeSessions.reduce((sum, s) => sum + s.weightedScore, 0) / compositeSessions.length;
+      const rankingScore = compositeSessions.reduce((sum: number, s: Session & { weightedScore: number }) => sum + s.weightedScore, 0) / compositeSessions.length;
       
       rankings.push({
         userId: user.id,

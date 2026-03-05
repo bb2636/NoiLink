@@ -18,22 +18,77 @@ export class PostgresDB implements IDatabase {
       throw new Error('DATABASE_URL environment variable is required for PostgreSQL');
     }
     
-    this.pool = new Pool({
-      connectionString: connString,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-    });
+    // URL 파싱하여 개별 파라미터로 연결 시도 (IPv6 문제 우회)
+    try {
+      const url = new URL(connString.replace('postgresql://', 'http://'));
+      const host = url.hostname;
+      const port = parseInt(url.port || '5432');
+      const database = url.pathname.slice(1).split('?')[0] || 'postgres';
+      const user = url.username || 'postgres';
+      const password = url.password || '';
+      
+      this.pool = new Pool({
+        host,
+        port,
+        database,
+        user,
+        password,
+        ssl: {
+          rejectUnauthorized: false,
+        },
+        connectionTimeoutMillis: 15000,
+        idleTimeoutMillis: 30000,
+      });
+    } catch (error) {
+      // URL 파싱 실패 시 connectionString 사용
+      this.pool = new Pool({
+        connectionString: connString,
+        ssl: {
+          rejectUnauthorized: false,
+        },
+        connectionTimeoutMillis: 15000,
+        idleTimeoutMillis: 30000,
+      });
+    }
   }
   
   async connect(): Promise<void> {
     if (this.connected) return;
     
     try {
+      // 연결 타임아웃 설정
+      const connectPromise = this.pool!.connect();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Connection timeout after 15 seconds')), 15000)
+      );
+      
+      const testClient = await Promise.race([connectPromise, timeoutPromise]) as any;
+      await testClient.query('SELECT 1');
+      testClient.release();
+      
       this.client = await this.pool!.connect();
       await this.initTables();
       this.connected = true;
       console.log('✅ Connected to PostgreSQL (Neon/Supabase)');
     } catch (error) {
       console.error('❌ Failed to connect to PostgreSQL:', error);
+      if (error instanceof Error) {
+        console.error('   Error message:', error.message);
+        if (error.message.includes('password') || (error as any).code === '28P01') {
+          console.error('   → 비밀번호가 올바른지 확인하세요');
+        }
+        if (error.message.includes('ENOTFOUND') || error.message.includes('getaddrinfo') || (error as any).code === 'ENOTFOUND') {
+          console.error('   → 호스트 주소가 올바른지 확인하세요');
+          console.error('   → Supabase 프로젝트가 활성화되어 있는지 확인하세요');
+          console.error('   → 프로젝트 생성 후 몇 분 기다린 후 다시 시도하세요');
+        }
+        if (error.message.includes('timeout') || (error as any).code === 'ETIMEDOUT') {
+          console.error('   → 네트워크 연결을 확인하세요');
+        }
+        if ((error as any).code === 'ECONNREFUSED') {
+          console.error('   → 연결이 거부되었습니다. 포트와 호스트를 확인하세요');
+        }
+      }
       throw error;
     }
   }

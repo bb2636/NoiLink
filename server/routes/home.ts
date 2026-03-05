@@ -44,15 +44,15 @@ router.get('/condition/:userId', async (req: Request, res: Response) => {
       const metricsScores = await db.get('metricsScores') || [];
       const recentScores = recentSessions
         .map((s: Session) => metricsScores.find((m: MetricsScore) => m.sessionId === s.id))
-        .filter((m): m is MetricsScore => m !== undefined);
+        .filter((m: MetricsScore | undefined): m is MetricsScore => m !== undefined);
       
       // 컨디션 점수 계산
-      const avgRT = recentSessions.reduce((sum, s) => sum + (s.duration || 0), 0) / recentSessions.length;
+      const avgRT = recentSessions.reduce((sum: number, s: Session) => sum + (s.duration || 0), 0) / recentSessions.length;
       const avgAcc = recentScores.length > 0
-        ? recentScores.reduce((sum, m) => {
+        ? recentScores.reduce((sum: number, m: MetricsScore) => {
             const scores = [
               m.memory, m.comprehension, m.focus,
-              m.judgment, m.multitasking, m.endurance,
+              m.judgment, m.agility, m.endurance,
             ].filter((s): s is number => s !== undefined);
             return sum + (scores.reduce((a, b) => a + b, 0) / scores.length);
           }, 0) / recentScores.length
@@ -76,7 +76,7 @@ router.get('/condition/:userId', async (req: Request, res: Response) => {
         avgReactionTime: avgRT,
         avgAccuracy: avgAcc,
         errorCount: 0, // TODO: 실제 오류 횟수 계산
-        duration: recentSessions.reduce((sum, s) => sum + s.duration, 0),
+        duration: recentSessions.reduce((sum: number, s: Session) => sum + s.duration, 0),
         calculatedAt: new Date().toISOString(),
       };
       
@@ -119,19 +119,19 @@ router.get('/mission/:userId', async (req: Request, res: Response) => {
         .slice(0, 5);
       
       const avgBPM = recentSessions.length > 0
-        ? recentSessions.reduce((sum, s) => sum + s.bpm, 0) / recentSessions.length
+        ? recentSessions.reduce((sum: number, s: Session) => sum + s.bpm, 0) / recentSessions.length
         : 80;
       
       const metricsScores = await db.get('metricsScores') || [];
       const recentScores = recentSessions
         .map((s: Session) => metricsScores.find((m: MetricsScore) => m.sessionId === s.id))
-        .filter((m): m is MetricsScore => m !== undefined);
+        .filter((m: MetricsScore | undefined): m is MetricsScore => m !== undefined);
       
       const avgAccuracy = recentScores.length > 0
-        ? recentScores.reduce((sum, m) => {
+        ? recentScores.reduce((sum: number, m: MetricsScore) => {
             const scores = [
               m.memory, m.comprehension, m.focus,
-              m.judgment, m.multitasking, m.endurance,
+              m.judgment, m.agility, m.endurance,
             ].filter((s): s is number => s !== undefined);
             return sum + (scores.reduce((a, b) => a + b, 0) / scores.length);
           }, 0) / recentScores.length
@@ -192,7 +192,7 @@ router.get('/quickstart/:userId', async (req: Request, res: Response) => {
     const metricsScores = await db.get('metricsScores') || [];
     const recentScores = recentSessions
       .map((s: Session) => metricsScores.find((m: MetricsScore) => m.sessionId === s.id))
-      .filter((m): m is MetricsScore => m !== undefined);
+      .filter((m: MetricsScore | undefined): m is MetricsScore => m !== undefined);
     
     if (recentScores.length === 0) {
       return res.json({
@@ -212,7 +212,7 @@ router.get('/quickstart/:userId', async (req: Request, res: Response) => {
       { mode: 'COMPREHENSION', score: 0 },
       { mode: 'FOCUS', score: 0 },
       { mode: 'JUDGMENT', score: 0 },
-      { mode: 'MULTITASKING', score: 0 },
+      { mode: 'AGILITY', score: 0 },
       { mode: 'ENDURANCE', score: 0 },
     ];
     
@@ -221,7 +221,7 @@ router.get('/quickstart/:userId', async (req: Request, res: Response) => {
       if (score.comprehension) metrics[1].score += score.comprehension;
       if (score.focus) metrics[2].score += score.focus;
       if (score.judgment) metrics[3].score += score.judgment;
-      if (score.multitasking) metrics[4].score += score.multitasking;
+      if (score.agility) metrics[4].score += score.agility;
       if (score.endurance) metrics[5].score += score.endurance;
     }
     

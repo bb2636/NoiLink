@@ -1,12 +1,18 @@
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { db } from './db.js';
 import { initializeNormConfig } from './init-norm.js';
 import { runMigrations } from './utils/migration.js';
+import { seedAdminAccount } from './utils/seed-admin.js';
 
-// 환경 변수 로드
-dotenv.config();
+// 환경 변수 로드 (루트 .env 파일도 확인)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+dotenv.config({ path: join(__dirname, '.env') });
+dotenv.config({ path: join(__dirname, '..', '.env') });
 
 const app: Express = express();
 const PORT = process.env.PORT || 5000;
@@ -53,6 +59,8 @@ import metricsRoutes from './routes/metrics.js';
 import reportRoutes from './routes/reports.js';
 import rankingRoutes from './routes/rankings.js';
 import homeRoutes from './routes/home.js';
+import adminRoutes from './routes/admin.js';
+import termsRoutes from './routes/terms.js';
 
 app.use('/api/training', trainingRoutes);
 app.use('/api/scores', scoreRoutes);
@@ -62,6 +70,8 @@ app.use('/api/metrics', metricsRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/rankings', rankingRoutes);
 app.use('/api/home', homeRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/terms', termsRoutes);
 
 // 에러 핸들링 미들웨어
 app.use((err: Error, req: Request, res: Response, next: Function) => {
@@ -90,6 +100,9 @@ app.listen(PORT, async () => {
     
     // NormConfig 초기화
     await initializeNormConfig();
+    
+    // 관리자 시드 계정 생성
+    await seedAdminAccount();
   } catch (error) {
     console.error('⚠️  Failed to initialize database:', error);
   }
