@@ -67,7 +67,7 @@ export function useAuth() {
           localStorage.setItem(STORAGE_KEYS.TOKEN, token);
         }
         
-        return { success: true };
+        return { success: true, user };
       }
       return { success: false, error: response.error || '이메일 또는 비밀번호가 올바르지 않습니다' };
     } catch (error) {

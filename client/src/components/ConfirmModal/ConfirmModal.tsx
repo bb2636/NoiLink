@@ -1,13 +1,28 @@
 import { motion, AnimatePresence } from 'framer-motion';
 
+import { ReactNode } from 'react';
+
 interface ConfirmModalProps {
   isOpen: boolean;
   title: string;
-  message: string;
+  message: string | ReactNode;
   confirmText?: string;
   cancelText?: string;
   onConfirm: () => void;
   onCancel: () => void;
+  confirmButtonStyle?: {
+    backgroundColor?: string;
+    color?: string;
+  };
+  cancelButtonStyle?: {
+    backgroundColor?: string;
+    color?: string;
+  };
+  modalStyle?: {
+    backgroundColor?: string;
+    titleColor?: string;
+    messageColor?: string;
+  };
 }
 
 export default function ConfirmModal({
@@ -18,6 +33,9 @@ export default function ConfirmModal({
   cancelText = '아니요',
   onConfirm,
   onCancel,
+  confirmButtonStyle,
+  cancelButtonStyle,
+  modalStyle,
 }: ConfirmModalProps) {
   return (
     <AnimatePresence>
@@ -42,28 +60,28 @@ export default function ConfirmModal({
           >
             <div
               className="w-full max-w-sm rounded-2xl p-6"
-              style={{ backgroundColor: '#2A2A2A' }}
+              style={{ backgroundColor: modalStyle?.backgroundColor || '#2A2A2A' }}
             >
-              <h2 className="text-xl font-bold text-white mb-4">{title}</h2>
-              <p className="text-gray-300 mb-6">{message}</p>
+              <h2 className="text-xl font-bold mb-4 text-center" style={{ color: modalStyle?.titleColor || '#FFFFFF' }}>{title}</h2>
+              <p className="mb-6 text-center" style={{ color: modalStyle?.messageColor || '#D1D5DB' }}>{message}</p>
               
               <div className="flex gap-3">
                 <button
                   onClick={onCancel}
                   className="flex-1 py-3 px-4 rounded-lg font-medium transition-colors"
                   style={{ 
-                    backgroundColor: '#373C39',
-                    color: '#ffffff'
+                    backgroundColor: cancelButtonStyle?.backgroundColor || '#373C39',
+                    color: cancelButtonStyle?.color || '#ffffff'
                   }}
                 >
                   {cancelText}
                 </button>
                 <button
                   onClick={onConfirm}
-                  className="flex-1 py-3 px-4 rounded-lg font-medium transition-colors text-black"
+                  className="flex-1 py-3 px-4 rounded-lg font-medium transition-colors"
                   style={{ 
-                    backgroundColor: '#AAED10',
-                    color: '#000000'
+                    backgroundColor: confirmButtonStyle?.backgroundColor || '#AAED10',
+                    color: confirmButtonStyle?.color || '#000000'
                   }}
                 >
                   {confirmText}

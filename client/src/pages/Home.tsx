@@ -1,4 +1,5 @@
-import { motion } from 'framer-motion';
+import { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
 import { useHome } from '../hooks/useHome';
 import { useNavigate } from 'react-router-dom';
@@ -9,12 +10,50 @@ import { useNavigate } from 'react-router-dom';
  */
 export default function Home() {
   const { user } = useAuth();
-  const { condition, quickStart, loading } = useHome(user?.id || null);
+  const { condition, quickStart, banners, loading } = useHome(user?.id || null);
   const navigate = useNavigate();
+  const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
+  const autoSlideIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // 뇌 지수 계산 (임시로 condition 점수 사용)
   const brainIndex = condition?.score || 82;
   const weeklyChange = 2; // 임시 값
+  
+  // 배너가 없으면 기본 뇌 이미지 표시
+  const displayBanners = banners.length > 0 ? banners : [null];
+  const currentBanner = displayBanners[currentBannerIndex];
+  
+  // 자동 슬라이드 기능 (배너가 2개 이상일 때만)
+  useEffect(() => {
+    if (displayBanners.length <= 1) {
+      // 배너가 1개 이하면 자동 슬라이드 중지
+      if (autoSlideIntervalRef.current) {
+        clearInterval(autoSlideIntervalRef.current);
+        autoSlideIntervalRef.current = null;
+      }
+      return;
+    }
+    
+    // 기존 인터벌 정리
+    if (autoSlideIntervalRef.current) {
+      clearInterval(autoSlideIntervalRef.current);
+    }
+    
+    // 5초마다 자동으로 다음 배너로 이동
+    autoSlideIntervalRef.current = setInterval(() => {
+      setCurrentBannerIndex((prev) => 
+        prev === displayBanners.length - 1 ? 0 : prev + 1
+      );
+    }, 5000);
+    
+    // 컴포넌트 언마운트 시 정리
+    return () => {
+      if (autoSlideIntervalRef.current) {
+        clearInterval(autoSlideIntervalRef.current);
+        autoSlideIntervalRef.current = null;
+      }
+    };
+  }, [displayBanners.length, currentBannerIndex]);
   
   if (loading) {
     return (
@@ -38,7 +77,7 @@ export default function Home() {
           </button>
         </div>
         
-        {/* 메인 비주얼 카드 - 뇌 3D 렌더링 */}
+        {/* 메인 비주얼 카드 - 배너 캐러셀 */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -46,58 +85,116 @@ export default function Home() {
           className="relative mb-6 rounded-2xl overflow-hidden"
           style={{ backgroundColor: '#1A1A1A', aspectRatio: '16/9' }}
         >
-          {/* 뇌 3D 렌더링 영역 */}
-          <div className="relative w-full h-full flex items-center justify-center">
-            {/* 뇌 아이콘/이미지 영역 */}
-            <div className="relative">
-              {/* 뇌 아이콘 (임시로 큰 이모지 사용) */}
-              <div className="text-8xl opacity-30" style={{ color: '#00D4FF' }}>
-                🧠
-              </div>
-              
-              {/* 네온 링 1 (시안/파란색) */}
+          <AnimatePresence mode="wait">
+            {currentBanner ? (
+              // 배너 이미지가 있는 경우
               <motion.div
-                animate={{ 
-                  scale: [1, 1.1, 1],
-                  opacity: [0.5, 0.8, 0.5]
-                }}
-                transition={{ 
-                  duration: 2,
-                  repeat: Infinity,
-                  ease: 'easeInOut'
-                }}
-                className="absolute top-0 left-0 w-32 h-32 rounded-full border-2"
-                style={{ 
-                  borderColor: '#00D4FF',
-                  boxShadow: '0 0 20px rgba(0, 212, 255, 0.5)'
-                }}
-              />
-              
-              {/* 네온 링 2 (라임 그린) */}
+                key={currentBanner.id}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="relative w-full h-full"
+              >
+                <img
+                  src={currentBanner.imageUrl}
+                  alt={currentBanner.title}
+                  className="w-full h-full object-cover"
+                />
+                {/* 캐러셀 인디케이터 */}
+                {displayBanners.length > 1 && (
+                  <div className="absolute bottom-4 right-4 text-white text-sm bg-black bg-opacity-50 px-3 py-1 rounded-full z-10">
+                    {currentBannerIndex + 1}/{displayBanners.length}
+                  </div>
+                )}
+              </motion.div>
+            ) : (
+              // 기본 뇌 3D 렌더링 영역 (배너가 없는 경우)
               <motion.div
-                animate={{ 
-                  scale: [1, 1.15, 1],
-                  opacity: [0.5, 0.9, 0.5]
+                key="default-brain"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="relative w-full h-full flex items-center justify-center"
+              >
+                {/* 뇌 아이콘/이미지 영역 */}
+                <div className="relative">
+                  {/* 뇌 아이콘 (임시로 큰 이모지 사용) */}
+                  <div className="text-8xl opacity-30" style={{ color: '#00D4FF' }}>
+                    🧠
+                  </div>
+                  
+                  {/* 네온 링 1 (시안/파란색) */}
+                  <motion.div
+                    animate={{ 
+                      scale: [1, 1.1, 1],
+                      opacity: [0.5, 0.8, 0.5]
+                    }}
+                    transition={{ 
+                      duration: 2,
+                      repeat: Infinity,
+                      ease: 'easeInOut'
+                    }}
+                    className="absolute top-0 left-0 w-32 h-32 rounded-full border-2"
+                    style={{ 
+                      borderColor: '#00D4FF',
+                      boxShadow: '0 0 20px rgba(0, 212, 255, 0.5)'
+                    }}
+                  />
+                  
+                  {/* 네온 링 2 (라임 그린) */}
+                  <motion.div
+                    animate={{ 
+                      scale: [1, 1.15, 1],
+                      opacity: [0.5, 0.9, 0.5]
+                    }}
+                    transition={{ 
+                      duration: 2.5,
+                      repeat: Infinity,
+                      ease: 'easeInOut',
+                      delay: 0.5
+                    }}
+                    className="absolute bottom-0 right-0 w-28 h-28 rounded-full border-2"
+                    style={{ 
+                      borderColor: '#AAED10',
+                      boxShadow: '0 0 20px rgba(170, 237, 16, 0.5)'
+                    }}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          
+          {/* 배너 네비게이션 버튼 (배너가 2개 이상일 때만 표시) */}
+          {displayBanners.length > 1 && (
+            <>
+              <button
+                onClick={() => {
+                  // 수동 클릭 시 자동 슬라이드 재시작
+                  setCurrentBannerIndex((prev) => {
+                    const newIndex = prev === 0 ? displayBanners.length - 1 : prev - 1;
+                    return newIndex;
+                  });
                 }}
-                transition={{ 
-                  duration: 2.5,
-                  repeat: Infinity,
-                  ease: 'easeInOut',
-                  delay: 0.5
+                className="absolute left-4 top-1/2 transform -translate-y-1/2 text-white bg-black bg-opacity-50 rounded-full p-2 hover:bg-opacity-70 transition-opacity z-10"
+              >
+                &lt;
+              </button>
+              <button
+                onClick={() => {
+                  // 수동 클릭 시 자동 슬라이드 재시작
+                  setCurrentBannerIndex((prev) => {
+                    const newIndex = prev === displayBanners.length - 1 ? 0 : prev + 1;
+                    return newIndex;
+                  });
                 }}
-                className="absolute bottom-0 right-0 w-28 h-28 rounded-full border-2"
-                style={{ 
-                  borderColor: '#AAED10',
-                  boxShadow: '0 0 20px rgba(170, 237, 16, 0.5)'
-                }}
-              />
-            </div>
-            
-            {/* 캐러셀 인디케이터 */}
-            <div className="absolute bottom-4 right-4 text-white text-sm bg-black bg-opacity-50 px-3 py-1 rounded-full">
-              1/5
-            </div>
-          </div>
+                className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white bg-black bg-opacity-50 rounded-full p-2 hover:bg-opacity-70 transition-opacity z-10"
+              >
+                &gt;
+              </button>
+            </>
+          )}
         </motion.div>
         
         {/* 프로필 요약 섹션 */}

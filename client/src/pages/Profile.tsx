@@ -1,9 +1,9 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
 import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
-import api from '../utils/api';
+import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 
 /**
  * 프로필 페이지 (마이페이지)
@@ -11,8 +11,19 @@ import api from '../utils/api';
 export default function Profile() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [showSuccessBanner, setShowSuccessBanner] = useState(false);
+
+  // 프로필 수정 성공 시 배너 표시
+  useEffect(() => {
+    if (location.state?.profileUpdated) {
+      setShowSuccessBanner(true);
+      // URL state 제거
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   if (!user) {
     return (
@@ -47,11 +58,51 @@ export default function Profile() {
   };
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: '#0A0A0A' }}>
-      <div className="max-w-md mx-auto px-4 py-6">
+    <div 
+      className="min-h-screen" 
+      style={{ 
+        backgroundColor: '#0A0A0A',
+        touchAction: 'pan-y',
+        overscrollBehavior: 'none',
+        position: 'relative',
+        overflow: 'hidden'
+      }}
+    >
+      {/* 성공 배너 */}
+      <SuccessBanner
+        isOpen={showSuccessBanner}
+        message="프로필이 성공적으로 수정되었습니다."
+        onClose={() => setShowSuccessBanner(false)}
+        autoClose={true}
+        duration={3000}
+      />
+      
+      <div 
+        className="max-w-md mx-auto px-4 py-6"
+        style={{
+          paddingBottom: '100px',
+          overflowY: 'auto',
+          height: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom))',
+          maxHeight: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom))',
+          WebkitOverflowScrolling: 'touch'
+        }}
+      >
         {/* 헤더 */}
         <div className="flex items-center mb-6">
-          <div className="w-6 h-6 rounded-full mr-2" style={{ backgroundColor: '#AAED10' }}></div>
+          <svg 
+            className="w-6 h-6 mr-2" 
+            fill="none" 
+            stroke="currentColor" 
+            viewBox="0 0 24 24"
+            style={{ color: '#FFFFFF' }}
+          >
+            <path 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              strokeWidth={2} 
+              d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" 
+            />
+          </svg>
           <h1 className="text-lg font-semibold text-white">마이페이지</h1>
         </div>
 
@@ -136,7 +187,7 @@ export default function Profile() {
           <h3 className="text-sm font-medium text-gray-400 mb-3 px-2">고객지원</h3>
           <div className="space-y-1">
             <button
-              onClick={() => {}}
+              onClick={() => navigate('/support')}
               className="w-full flex items-center justify-between py-4 px-4 rounded-lg text-white transition-colors"
               style={{ backgroundColor: '#1A1A1A' }}
             >

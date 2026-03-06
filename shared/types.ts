@@ -73,6 +73,8 @@ export interface User {
   username: string;                    // 사용자명 (로그인 ID)
   email?: string;                      // 이메일
   name: string;                        // 표시 이름
+  nickname?: string;                   // 닉네임
+  phone?: string;                      // 휴대폰 번호
   age?: number;                        // 나이
   userType: UserType;                  // 회원 타입
   organizationId?: string;            // 기업 회원인 경우 조직 ID
@@ -84,8 +86,12 @@ export interface User {
   streak: number;                      // 연속 트레이닝 일수
   lastTrainingDate?: string;           // 마지막 트레이닝 일시
   createdAt: string;                  // 생성일시 (ISO 8601)
-  lastLoginAt: string;                 // 마지막 로그인 일시
+  lastLoginAt?: string;                 // 마지막 로그인 일시
   updatedAt?: string;                  // 수정일시
+  isDeleted?: boolean;                 // 삭제 여부
+  organizationName?: string;            // 기업명 (기업 회원인 경우)
+  approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED'; // 승인 상태 (기업 회원)
+  documents?: { name: string; url: string; size: number }[]; // 증빙 자료 (기업 회원)
 }
 
 /** 조직 정보 (기업 회원용) */

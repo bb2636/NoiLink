@@ -1,6 +1,6 @@
 /**
  * Home API 라우트
- * 홈 화면 데이터 (컨디션, 미션, 추천 트레이닝)
+ * 홈 화면 데이터 (컨디션, 미션, 추천 트레이닝, 배너)
  */
 
 import { Router, Request, Response } from 'express';
@@ -35,10 +35,21 @@ router.get('/condition/:userId', async (req: Request, res: Response) => {
         .slice(0, 3);
       
       if (recentSessions.length === 0) {
-        return res.status(404).json({
-          success: false,
-          error: 'No training data available',
-        });
+        // 데이터가 없을 때 기본 컨디션 반환
+        condition = {
+          userId,
+          date: today,
+          score: 70,
+          badge: 'NORMAL',
+          avgReactionTime: 0,
+          avgAccuracy: 0,
+          errorCount: 0,
+          duration: 0,
+          calculatedAt: new Date().toISOString(),
+        };
+        conditions.push(condition);
+        await db.set('dailyConditions', conditions);
+        return res.json({ success: true, data: condition });
       }
       
       const metricsScores = await db.get('metricsScores') || [];
@@ -258,6 +269,24 @@ router.get('/quickstart/:userId', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/home/banners
+ * 홈 화면 배너 목록 조회 (일반 유저용)
+ */
+router.get('/banners', async (req: Request, res: Response) => {
+  try {
+    const banners = await db.get('banners') || [];
+    // order 순서로 정렬
+    const sortedBanners = banners.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+    res.json({ success: true, data: sortedBanners });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });

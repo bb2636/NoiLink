@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import type { User } from '@noilink/shared';
 
 /**
  * 로그인 페이지
@@ -36,7 +37,13 @@ export default function Login() {
     const result = await login(email, password);
     
     if (result.success) {
-      navigate('/');
+      // 관리자 계정인 경우 관리자 페이지로 리다이렉트
+      const user = result.user as User | undefined;
+      if (user?.userType === 'ADMIN') {
+        navigate('/admin/users');
+      } else {
+        navigate('/');
+      }
     } else {
       setError(result.error || '로그인에 실패했습니다');
     }

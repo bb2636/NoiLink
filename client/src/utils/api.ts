@@ -1,4 +1,5 @@
 import type { ApiResponse, User, Game, UserStats, RankingEntry, Terms, TermsType } from '@noilink/shared';
+import { STORAGE_KEYS } from './constants';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -11,7 +12,7 @@ class ApiClient {
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
     try {
-      const token = localStorage.getItem('noilink_token');
+      const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         ...(options.headers as Record<string, string> || {}),
@@ -24,7 +25,7 @@ class ApiClient {
       
       // 하위 호환성을 위해 x-user-id도 유지 (토큰이 없을 때만)
       if (!token) {
-        const userId = localStorage.getItem('user_id') || localStorage.getItem('noilink_user_id');
+        const userId = localStorage.getItem('user_id') || localStorage.getItem(STORAGE_KEYS.USER_ID);
         if (userId) {
           headers['x-user-id'] = userId;
         }
@@ -36,8 +37,30 @@ class ApiClient {
       });
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(error.error || `HTTP error! status: ${response.status}`);
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        
+        // 401 에러인 경우 토큰이 만료되었거나 유효하지 않을 수 있음
+        if (response.status === 401) {
+          // 토큰 제거하고 로그인 페이지로 리다이렉트
+          localStorage.removeItem(STORAGE_KEYS.TOKEN);
+          localStorage.removeItem(STORAGE_KEYS.USER_ID);
+          localStorage.removeItem(STORAGE_KEYS.USERNAME);
+          
+          // 현재 페이지가 로그인 페이지가 아닐 때만 리다이렉트
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
+        }
+        
+        // 404 에러는 조용히 반환 (데이터가 없을 수 있음)
+        if (response.status === 404) {
+          return {
+            success: false,
+            error: errorData.error || 'Not found',
+          };
+        }
+        
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
       return await response.json();
@@ -301,6 +324,65 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ phone, password }),
     });
+  }
+
+  // Admin API
+  async getAdminUsers(params?: { page?: number; limit?: number; userType?: string }): Promise<ApiResponse<User[]>> {
+    const query = new URLSearchParams();
+    if (params?.page) query.append('page', String(params.page));
+    if (params?.limit) query.append('limit', String(params.limit));
+    if (params?.userType) query.append('userType', params.userType);
+    const queryString = query.toString() ? `?${query.toString()}` : '';
+    return this.request<User[]>(`/admin/users${queryString}`);
+  }
+
+  async getAdminBanners(): Promise<ApiResponse<any[]>> {
+    return this.request<any[]>('/admin/banners');
+  }
+
+  // Public Banners API (for home page)
+  async getBanners(): Promise<ApiResponse<any[]>> {
+    return this.request<any[]>('/home/banners');
+  }
+
+  async getAdminSessions(params?: { page?: number; limit?: number; userId?: string }): Promise<ApiResponse<any[]>> {
+    const query = new URLSearchParams();
+    if (params?.page) query.append('page', String(params.page));
+    if (params?.limit) query.append('limit', String(params.limit));
+    if (params?.userId) query.append('userId', params.userId);
+    const queryStr = query.toString() ? `?${query.toString()}` : '';
+    return this.request<any[]>(`/admin/sessions${queryStr}`);
+  }
+
+  async getAdminInquiries(): Promise<ApiResponse<any[]>> {
+    return this.request<any[]>('/admin/inquiries');
+  }
+
+  async answerInquiry(inquiryId: string, answer: string): Promise<ApiResponse<any>> {
+    return this.request<any>(`/admin/inquiries/${inquiryId}/answer`, {
+      method: 'POST',
+      body: JSON.stringify({ answer }),
+    });
+  }
+
+  // User Inquiry API
+  async createInquiry(title: string, content: string): Promise<ApiResponse<any>> {
+    const userId = localStorage.getItem(STORAGE_KEYS.USER_ID);
+    if (!userId) {
+      return Promise.resolve({ success: false, error: 'User not logged in' });
+    }
+    return this.request<any>('/users/inquiries', {
+      method: 'POST',
+      body: JSON.stringify({ userId, title, content }),
+    });
+  }
+
+  async getUserInquiries(): Promise<ApiResponse<any[]>> {
+    const userId = localStorage.getItem(STORAGE_KEYS.USER_ID);
+    if (!userId) {
+      return Promise.resolve({ success: false, error: 'User not logged in', data: [] });
+    }
+    return this.request<any[]>(`/users/inquiries/${userId}`);
   }
 }
 

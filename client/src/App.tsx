@@ -8,13 +8,21 @@ import Training from './pages/Training';
 import Result from './pages/Result';
 import Profile from './pages/Profile';
 import EditProfile from './pages/EditProfile';
+import Support from './pages/Support';
+import InquiryDetail from './pages/InquiryDetail';
 import Login from './pages/Login';
 import SignUp from './pages/SignUp';
 import FindPassword from './pages/FindPassword';
 import Ranking from './pages/Ranking';
 import Report from './pages/Report';
 import Record from './pages/Record';
-import Admin from './pages/Admin';
+import AdminLayout from './components/Admin/AdminLayout';
+import AdminIndex from './pages/admin/AdminIndex';
+import AdminUsers from './pages/admin/AdminUsers';
+import AdminBanners from './pages/admin/AdminBanners';
+import AdminReports from './pages/admin/AdminReports';
+import AdminSupport from './pages/admin/AdminSupport';
+import AdminTerms from './pages/admin/AdminTerms';
 
 // Protected Route Component
 function ProtectedRoute({ children }: { children: React.ReactElement }) {
@@ -50,7 +58,16 @@ function AdminRoute({ children }: { children: React.ReactElement }) {
   if (user.userType !== 'ADMIN') {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#0A0A0A' }}>
-        <div className="text-red-400">관리자 권한이 필요합니다</div>
+        <div className="text-center">
+          <div className="text-red-400 mb-4">관리자 권한이 필요합니다</div>
+          <button
+            onClick={() => window.location.href = '/login'}
+            className="px-6 py-2 rounded-lg text-white"
+            style={{ backgroundColor: '#AAED10', color: '#000000' }}
+          >
+            로그인 페이지로 이동
+          </button>
+        </div>
       </div>
     );
   }
@@ -69,7 +86,59 @@ function App() {
           path="/admin"
           element={
             <AdminRoute>
-              <Admin />
+              <AdminLayout>
+                <AdminIndex />
+              </AdminLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/users"
+          element={
+            <AdminRoute>
+              <AdminLayout>
+                <AdminUsers />
+              </AdminLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/banners"
+          element={
+            <AdminRoute>
+              <AdminLayout>
+                <AdminBanners />
+              </AdminLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/reports"
+          element={
+            <AdminRoute>
+              <AdminLayout>
+                <AdminReports />
+              </AdminLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/support"
+          element={
+            <AdminRoute>
+              <AdminLayout>
+                <AdminSupport />
+              </AdminLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/terms"
+          element={
+            <AdminRoute>
+              <AdminLayout>
+                <AdminTerms />
+              </AdminLayout>
             </AdminRoute>
           }
         />
@@ -115,6 +184,22 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <EditProfile />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/support"
+                  element={
+                    <ProtectedRoute>
+                      <Support />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/support/inquiry/:inquiryId"
+                  element={
+                    <ProtectedRoute>
+                      <InquiryDetail />
                     </ProtectedRoute>
                   }
                 />
