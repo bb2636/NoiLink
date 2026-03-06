@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import type { User } from '@noilink/shared';
+import Logo from '../components/Logo';
 
 /**
  * 로그인 페이지
@@ -60,7 +61,7 @@ export default function Login() {
           animate={{ opacity: 1, y: 0 }}
           className="mb-12"
         >
-          <h1 className="text-2xl font-bold text-white">noi link</h1>
+          <Logo size="lg" />
         </motion.div>
         
         {/* 타이틀 */}

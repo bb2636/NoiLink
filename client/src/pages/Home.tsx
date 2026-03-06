@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
 import { useHome } from '../hooks/useHome';
 import { useNavigate } from 'react-router-dom';
+import Logo from '../components/Logo';
 
 /**
  * 홈 페이지
@@ -64,7 +65,7 @@ export default function Home() {
   }
   
   return (
-    <div className="min-h-screen" style={{ backgroundColor: '#0A0A0A' }}>
+    <div style={{ backgroundColor: '#0A0A0A', minHeight: '100vh' }}>
       {/* 상단 헤더 (고정) */}
       <div 
         className="fixed top-0 left-0 right-0 z-40"
@@ -75,7 +76,7 @@ export default function Home() {
       >
         <div className="max-w-md mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <h1 className="text-white text-xl font-semibold">roi link</h1>
+            <Logo size="md" />
             <button 
               onClick={() => navigate('/device')}
               className="text-white text-sm"
@@ -89,8 +90,8 @@ export default function Home() {
       <div 
         className="max-w-md mx-auto px-4"
         style={{ 
-          paddingTop: `calc(60px + env(safe-area-inset-top))`,
-          paddingBottom: 'calc(80px + env(safe-area-inset-bottom))',
+          paddingTop: `calc(80px + env(safe-area-inset-top))`,
+          paddingBottom: 'calc(120px + env(safe-area-inset-bottom))',
         }}
       >
         

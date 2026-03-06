@@ -60,11 +60,13 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
   
   return (
     <div 
-      className="min-h-screen" 
+      className="min-h-screen overflow-y-auto" 
       style={{ 
         backgroundColor: '#0A0A0A',
         paddingTop: 'env(safe-area-inset-top)',
-        paddingBottom: 'calc(64px + env(safe-area-inset-bottom))' // 하단바 높이 + safe area
+        paddingBottom: 'calc(64px + env(safe-area-inset-bottom))', // 하단바 높이 + safe area
+        height: '100vh',
+        WebkitOverflowScrolling: 'touch'
       }}
     >
       {/* 메인 컨텐츠 */}

@@ -137,10 +137,18 @@ export default function Report() {
       <Card>
         <div className="flex items-center gap-4 mb-4">
           <div
-            className="text-6xl"
+            className="w-16 h-16 flex items-center justify-center"
             style={{ color: brainimalInfo.color }}
           >
-            {brainimalInfo.emoji}
+            {brainimalInfo.icon ? (
+              <img 
+                src={brainimalInfo.icon} 
+                alt={brainimalInfo.name}
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <span className="text-6xl">{brainimalInfo.emoji}</span>
+            )}
           </div>
           <div className="flex-1">
             <h2 className="text-xl font-bold">{user.name}</h2>

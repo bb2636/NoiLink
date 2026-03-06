@@ -116,15 +116,23 @@ export default function Profile() {
 
         {/* 프로필 섹션 */}
         <div className="flex flex-col items-center mb-6">
-          {/* 프로필 사진 (뇌 아이콘) */}
+          {/* 프로필 사진 (브레이니멀 아이콘) */}
           <div
-            className="w-24 h-24 rounded-full flex items-center justify-center mb-4 relative"
+            className="w-24 h-24 rounded-full flex items-center justify-center mb-4 relative overflow-hidden"
             style={{ 
               backgroundColor: '#1A1A1A',
               boxShadow: '0 0 20px rgba(170, 237, 16, 0.3)'
             }}
           >
-            <span className="text-5xl">{brainimalInfo.emoji}</span>
+            {brainimalInfo.icon ? (
+              <img 
+                src={brainimalInfo.icon} 
+                alt={brainimalInfo.name}
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <span className="text-5xl">{brainimalInfo.emoji}</span>
+            )}
           </div>
           
           {/* 이름 */}
