@@ -16,6 +16,7 @@ import FindPassword from './pages/FindPassword';
 import Ranking from './pages/Ranking';
 import Report from './pages/Report';
 import Record from './pages/Record';
+import Splash from './pages/Splash';
 import AdminLayout from './components/Admin/AdminLayout';
 import AdminIndex from './pages/admin/AdminIndex';
 import AdminUsers from './pages/admin/AdminUsers';
@@ -35,8 +36,20 @@ function ProtectedRoute({ children }: { children: React.ReactElement }) {
       </div>
     );
   }
+
+  if (isAuthenticated) {
+    return children;
+  }
+
+  // 비로그인 상태: 스플래시 노출 여부에 따라 분기
+  let hasSeenSplash = false;
+  try {
+    hasSeenSplash = localStorage.getItem('noilink_splash_seen') === 'true';
+  } catch {
+    hasSeenSplash = false;
+  }
   
-  return isAuthenticated ? children : <Navigate to="/login" replace />;
+  return <Navigate to={hasSeenSplash ? '/login' : '/splash'} replace />;
 }
 
 // Admin Protected Route Component
@@ -79,6 +92,7 @@ function App() {
   return (
     <Router>
       <Routes>
+        <Route path="/splash" element={<Splash />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/find-password" element={<FindPassword />} />
