@@ -481,7 +481,7 @@ export default function EditProfile() {
                 className="fixed bottom-0 left-0 right-0 max-w-md mx-auto px-4 z-40" 
                 style={{ 
                   bottom: 'calc(4rem + env(safe-area-inset-bottom))',
-                  paddingBottom: '1rem'
+                  paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))'
                 }}
               >
                 <button

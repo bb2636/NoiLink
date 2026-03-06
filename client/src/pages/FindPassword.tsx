@@ -255,10 +255,11 @@ export default function FindPassword() {
                   }
                 }}
                 disabled={!isVerified}
-                className="w-full py-4 rounded-3xl font-semibold transition-all fixed bottom-20 left-0 right-0 max-w-md mx-auto"
+                className="w-full py-4 rounded-3xl font-semibold transition-all fixed left-0 right-0 max-w-md mx-auto"
                 style={{
                   backgroundColor: isVerified ? '#373C39' : '#1A1A1A',
                   color: isVerified ? '#ffffff' : '#B6B6B9',
+                  bottom: `calc(5rem + env(safe-area-inset-bottom))`,
                 }}
               >
                 다음
@@ -365,8 +366,9 @@ export default function FindPassword() {
                 <button
                   type="submit"
                   disabled={loading || !password.trim() || !passwordConfirm.trim()}
-                  className="w-full py-4 rounded-3xl font-semibold transition-all fixed bottom-20 left-0 right-0 max-w-md mx-auto"
+                  className="w-full py-4 rounded-3xl font-semibold transition-all fixed left-0 right-0 max-w-md mx-auto"
                   style={{
+                    bottom: `calc(5rem + env(safe-area-inset-bottom))`,
                     backgroundColor: loading || !password.trim() || !passwordConfirm.trim() ? '#1A1A1A' : '#373C39',
                     color: loading || !password.trim() || !passwordConfirm.trim() ? '#B6B6B9' : '#ffffff',
                   }}

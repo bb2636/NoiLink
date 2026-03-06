@@ -21,6 +21,7 @@ NoiLink/
 │   │   │   ├── Card/        # 카드 컴포넌트
 │   │   │   ├── Layout/      # 레이아웃 컴포넌트 (MobileLayout)
 │   │   │   ├── ConfirmModal/# 확인 모달 컴포넌트
+│   │   │   ├── TermsModal/  # 약관 모달 컴포넌트
 │   │   │   ├── RadarChart/  # 레이더 차트
 │   │   │   └── LineChart/   # 라인 차트
 │   │   ├── pages/          # 페이지 컴포넌트
@@ -34,7 +35,12 @@ NoiLink/
 │   │   │   ├── Report.tsx   # 리포트 페이지
 │   │   │   ├── Ranking.tsx  # 랭킹 페이지
 │   │   │   ├── Record.tsx   # 기록 페이지
-│   │   │   └── Admin.tsx    # 관리자 페이지
+│   │   │   ├── Support.tsx  # 고객센터 (1:1 문의)
+│   │   │   ├── InquiryDetail.tsx # 문의 상세보기
+│   │   │   └── admin/       # 관리자 페이지
+│   │   │       ├── AdminSupport.tsx # 관리자 고객센터
+│   │   │       ├── AdminTerms.tsx   # 관리자 약관 관리
+│   │   │       └── ...
 │   │   ├── hooks/           # 커스텀 훅
 │   │   │   ├── useAuth.ts   # 인증 훅
 │   │   │   └── useHome.ts   # 홈 데이터 훅
@@ -169,6 +175,8 @@ npm start
 - `GET /api/users/:userId/stats` - 사용자 통계 조회
 - `GET /api/users/check-username/:username` - 닉네임 중복 확인
 - `GET /api/users/check-name/:name` - 이름 중복 확인
+- `POST /api/users/inquiries` - 문의 생성
+- `GET /api/users/inquiries/:userId` - 사용자 문의 목록 조회
 
 ### 세션 (Sessions)
 - `POST /api/sessions` - 세션 생성
@@ -195,6 +203,8 @@ npm start
 - `GET /api/admin/users` - 사용자 목록
 - `GET /api/admin/organizations` - 기관 목록
 - `GET /api/admin/sessions` - 세션 목록
+- `GET /api/admin/inquiries` - 문의 목록 조회
+- `POST /api/admin/inquiries/:id/answer` - 문의 답변 등록
 - `GET /api/admin/terms` - 약관 목록
 - `POST /api/admin/terms` - 약관 생성
 - `PUT /api/admin/terms/:id` - 약관 수정
@@ -227,6 +237,8 @@ npm start
 - 토큰은 `localStorage`에 `noilink_token` 키로 저장됩니다
 - API 요청 시 `Authorization: Bearer {token}` 헤더로 전송됩니다
 - 토큰 만료 시간: 7일 (환경 변수로 설정 가능)
+- **자동 리디렉션**: 토큰이 없거나 만료된 경우 자동으로 로그인 페이지로 리디렉션됩니다
+- **보호된 라우트**: `ProtectedRoute` 컴포넌트로 인증이 필요한 페이지를 보호합니다
 
 ### 사용자 역할
 
@@ -244,18 +256,22 @@ npm start
 
 ### 사용자 기능
 - ✅ 회원가입 (개인/기업 구분)
-- ✅ 로그인/로그아웃 (JWT 인증)
+- ✅ 로그인/로그아웃 (JWT 인증, 토큰 없을 시 자동 리디렉션)
 - ✅ 비밀번호 찾기 (휴대폰 인증)
 - ✅ 프로필 수정 (이메일/비밀번호 확인 후 수정)
-- ✅ 마이페이지 (브레이니멀 타입, 뇌지컬 나이 표시)
-- ✅ 홈 화면 (오늘의 컨디션, 미션, 빠른 시작)
+- ✅ 마이페이지 (브레이니멀 타입, 뇌지컬 나이 표시, 약관 조회)
+- ✅ 홈 화면 (오늘의 컨디션, 미션, 빠른 시작, 배너 자동 슬라이드)
 - ✅ 리포트 (6대 지표 시각화, 트렌드 분석)
 - ✅ 랭킹 (종합 점수, 시간, 스트릭)
-- ✅ 약관 동의 (회원가입 시)
+- ✅ 고객센터 (1:1 문의하기, 문의 내역 조회, 문의 상세보기)
+- ✅ 약관 동의 (회원가입 시, 마이페이지에서 조회)
 
 ### 관리자 기능
 - ✅ 대시보드 (통계, 사용자 현황)
 - ✅ 사용자 관리
+- ✅ 고객센터 관리 (문의 목록 조회, 답변 등록, 상태 관리)
+- ✅ 배너 관리 (CRUD)
+- ✅ 리포트 관리
 - ✅ 약관 관리 (CRUD)
 
 ### 데이터 분석
@@ -268,10 +284,13 @@ npm start
 
 - 다크 테마 (#0A0A0A 배경)
 - 모바일 최적화 (반응형 디자인)
-- Safe Area 지원 (iOS 노치, 하단 네비게이션 바)
-- 고정 하단 네비게이션 바
+- **Safe Area 지원** (iOS 노치, 하단 네비게이션 바, 시스템 UI 영역 자동 조정)
+- **고정 하단 네비게이션 바** (타원형 버튼 디자인, 활성 상태 표시)
+- **홈 화면 배너 자동 슬라이드** (5초 간격, 카운트 표시)
 - Pretendard 폰트 사용
 - Framer Motion 애니메이션
+- **약관 모달 컴포넌트** (재사용 가능한 약관 표시)
+- **문의 상세보기 페이지** (모달 대신 전용 페이지)
 
 ## 📝 개발 참고사항
 

@@ -82,16 +82,18 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
         }}
       >
         <div 
-          className="max-w-md mx-auto rounded-t-2xl border shadow-lg"
+          className="max-w-md mx-auto rounded-full border shadow-lg"
           style={{ 
             backgroundColor: '#1A1A1A',
             borderColor: '#333333',
-            paddingTop: '12px',
-            paddingBottom: '12px',
+            paddingTop: '8px',
+            paddingBottom: '8px',
+            paddingLeft: '8px',
+            paddingRight: '8px',
           }}
         >
           <div className="flex justify-around items-center">
-            {navItems.map((item, index) => {
+            {navItems.map((item) => {
               const isActive = location.pathname === item.path || 
                 (item.path === '/record' && location.pathname.startsWith('/record')) ||
                 (item.path === '/ranking' && location.pathname.startsWith('/ranking'));

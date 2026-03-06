@@ -161,19 +161,19 @@ export default function Login() {
         </form>
         
         {/* 비밀번호 찾기 / 회원가입 */}
-        <div className="flex items-center justify-center gap-2 mb-8">
+        <div className="flex items-center justify-center gap-3 mb-8">
           <Link
             to="/find-password"
-            className="text-sm hover:opacity-80 transition-opacity"
-            style={{ color: '#B6B6B9' }}
+            className="text-sm hover:opacity-80 transition-opacity flex items-center"
+            style={{ color: '#FFFFFF' }}
           >
             비밀번호 찾기
           </Link>
-          <span style={{ color: '#B6B6B9' }}>|</span>
+          <span className="text-sm" style={{ color: '#B6B6B9' }}>|</span>
           <Link
             to="/signup"
-            className="text-sm hover:opacity-80 transition-opacity"
-            style={{ color: '#B6B6B9' }}
+            className="text-sm hover:opacity-80 transition-opacity flex items-center"
+            style={{ color: '#FFFFFF' }}
           >
             회원가입하기
           </Link>

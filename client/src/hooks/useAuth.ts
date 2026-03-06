@@ -17,28 +17,36 @@ export function useAuth() {
     try {
       const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
       
-      // JWT 토큰이 있으면 /me 엔드포인트로 사용자 정보 조회
-      if (token) {
-        const response = await api.getMe();
-        if (response.success && response.data) {
-          setUser(response.data);
-        } else {
-          // 토큰이 유효하지 않으면 로그아웃 처리
+      // JWT 토큰이 없으면 즉시 로그인 페이지로 리디렉션
+      if (!token) {
+        // 로그인 페이지가 아닐 때만 리디렉션
+        if (window.location.pathname !== '/login' && 
+            window.location.pathname !== '/signup' && 
+            window.location.pathname !== '/find-password') {
           localStorage.removeItem(STORAGE_KEYS.USER_ID);
           localStorage.removeItem(STORAGE_KEYS.USERNAME);
           localStorage.removeItem(STORAGE_KEYS.TOKEN);
+          navigate('/login', { replace: true });
         }
+        setLoading(false);
+        return;
+      }
+      
+      // JWT 토큰이 있으면 /me 엔드포인트로 사용자 정보 조회
+      const response = await api.getMe();
+      if (response.success && response.data) {
+        setUser(response.data);
       } else {
-        // 토큰이 없으면 기존 방식으로 확인 (하위 호환성)
-        const userId = localStorage.getItem(STORAGE_KEYS.USER_ID);
-        if (userId) {
-          const response = await api.getUser(userId);
-          if (response.success && response.data) {
-            setUser(response.data);
-          } else {
-            localStorage.removeItem(STORAGE_KEYS.USER_ID);
-            localStorage.removeItem(STORAGE_KEYS.USERNAME);
-          }
+        // 토큰이 유효하지 않으면 로그아웃 처리
+        localStorage.removeItem(STORAGE_KEYS.USER_ID);
+        localStorage.removeItem(STORAGE_KEYS.USERNAME);
+        localStorage.removeItem(STORAGE_KEYS.TOKEN);
+        
+        // 로그인 페이지가 아닐 때만 리디렉션
+        if (window.location.pathname !== '/login' && 
+            window.location.pathname !== '/signup' && 
+            window.location.pathname !== '/find-password') {
+          navigate('/login', { replace: true });
         }
       }
     } catch (error) {
@@ -46,6 +54,13 @@ export function useAuth() {
       localStorage.removeItem(STORAGE_KEYS.USER_ID);
       localStorage.removeItem(STORAGE_KEYS.USERNAME);
       localStorage.removeItem(STORAGE_KEYS.TOKEN);
+      
+      // 로그인 페이지가 아닐 때만 리디렉션
+      if (window.location.pathname !== '/login' && 
+          window.location.pathname !== '/signup' && 
+          window.location.pathname !== '/find-password') {
+        navigate('/login', { replace: true });
+      }
     } finally {
       setLoading(false);
     }

@@ -71,7 +71,9 @@ export default function Profile() {
         touchAction: 'pan-y',
         overscrollBehavior: 'none',
         position: 'relative',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)'
       }}
     >
       {/* 성공 배너 */}
