@@ -38,9 +38,12 @@ NoiLink/
 │   │   │   ├── Support.tsx  # 고객센터 (1:1 문의)
 │   │   │   ├── InquiryDetail.tsx # 문의 상세보기
 │   │   │   └── admin/       # 관리자 페이지
-│   │   │       ├── AdminSupport.tsx # 관리자 고객센터
-│   │   │       ├── AdminTerms.tsx   # 관리자 약관 관리
-│   │   │       └── ...
+│   │   │       ├── AdminIndex.tsx    # 관리자 대시보드
+│   │   │       ├── AdminUsers.tsx    # 사용자 관리
+│   │   │       ├── AdminBanners.tsx  # 배너 관리
+│   │   │       ├── AdminReports.tsx # 리포트 관리
+│   │   │       ├── AdminSupport.tsx  # 고객센터 관리
+│   │   │       └── AdminTerms.tsx   # 약관 관리
 │   │   ├── hooks/           # 커스텀 훅
 │   │   │   ├── useAuth.ts   # 인증 훅
 │   │   │   └── useHome.ts   # 홈 데이터 훅
