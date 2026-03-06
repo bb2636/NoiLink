@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
+import TermsModal from '../components/TermsModal/TermsModal';
 
 /**
  * 회원가입 페이지
@@ -31,9 +32,11 @@ export default function SignUp() {
     privacy: false,
   });
   const [terms, setTerms] = useState<{
-    service?: { title: string; content: string };
-    privacy?: { title: string; content: string };
+    service?: { id: string; title: string; content: string; version?: number; createdAt?: string; updatedAt?: string };
+    privacy?: { id: string; title: string; content: string; version?: number; createdAt?: string; updatedAt?: string };
   }>({});
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [selectedTermsType, setSelectedTermsType] = useState<'SERVICE' | 'PRIVACY' | null>(null);
   const [fileCount, setFileCount] = useState(0);
   const [verificationCodeSent, setVerificationCodeSent] = useState(false);
   const [devVerificationCode, setDevVerificationCode] = useState('');
@@ -103,8 +106,12 @@ export default function SignUp() {
           setTerms(prev => ({
             ...prev,
             service: {
+              id: serviceRes.data!.id,
               title: serviceRes.data!.title,
               content: serviceRes.data!.content,
+              version: serviceRes.data!.version,
+              createdAt: serviceRes.data!.createdAt,
+              updatedAt: serviceRes.data!.updatedAt,
             },
           }));
         }
@@ -113,8 +120,12 @@ export default function SignUp() {
           setTerms(prev => ({
             ...prev,
             privacy: {
+              id: privacyRes.data!.id,
               title: privacyRes.data!.title,
               content: privacyRes.data!.content,
+              version: privacyRes.data!.version,
+              createdAt: privacyRes.data!.createdAt,
+              updatedAt: privacyRes.data!.updatedAt,
             },
           }));
         }
@@ -916,11 +927,8 @@ export default function SignUp() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (terms.service) {
-                            alert(terms.service.content);
-                          } else {
-                            alert('약관 내용을 불러오는 중입니다');
-                          }
+                          setSelectedTermsType('SERVICE');
+                          setShowTermsModal(true);
                         }}
                         className="text-lime-500 text-sm hover:underline"
                       >
@@ -943,11 +951,8 @@ export default function SignUp() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (terms.privacy) {
-                            alert(terms.privacy.content);
-                          } else {
-                            alert('약관 내용을 불러오는 중입니다');
-                          }
+                          setSelectedTermsType('PRIVACY');
+                          setShowTermsModal(true);
                         }}
                         className="text-lime-500 text-sm hover:underline"
                       >
@@ -1016,6 +1021,43 @@ export default function SignUp() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* 약관 모달 */}
+      <TermsModal
+        isOpen={showTermsModal}
+        onClose={() => {
+          setShowTermsModal(false);
+          setSelectedTermsType(null);
+        }}
+        terms={
+          selectedTermsType === 'SERVICE' && terms.service
+            ? { 
+                id: terms.service.id, 
+                type: 'SERVICE', 
+                title: terms.service.title, 
+                content: terms.service.content, 
+                isRequired: true, 
+                isActive: true, 
+                version: terms.service.version || 1, 
+                createdAt: terms.service.createdAt || '', 
+                updatedAt: terms.service.updatedAt 
+              }
+            : selectedTermsType === 'PRIVACY' && terms.privacy
+            ? { 
+                id: terms.privacy.id, 
+                type: 'PRIVACY', 
+                title: terms.privacy.title, 
+                content: terms.privacy.content, 
+                isRequired: true, 
+                isActive: true, 
+                version: terms.privacy.version || 1, 
+                createdAt: terms.privacy.createdAt || '', 
+                updatedAt: terms.privacy.updatedAt 
+              }
+            : null
+        }
+        title={selectedTermsType === 'SERVICE' ? terms.service?.title : terms.privacy?.title}
+      />
     </div>
   );
 }

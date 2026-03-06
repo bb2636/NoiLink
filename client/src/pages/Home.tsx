@@ -65,17 +65,34 @@ export default function Home() {
   
   return (
     <div className="min-h-screen" style={{ backgroundColor: '#0A0A0A' }}>
-      <div className="max-w-md mx-auto px-4 py-6">
-        {/* 헤더 */}
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-white text-xl font-semibold">roi link</h1>
-          <button 
-            onClick={() => navigate('/device')}
-            className="text-white text-sm"
-          >
-            기기 관리 &gt;
-          </button>
+      {/* 상단 헤더 (고정) */}
+      <div 
+        className="fixed top-0 left-0 right-0 z-40"
+        style={{ 
+          backgroundColor: '#0A0A0A',
+          paddingTop: 'env(safe-area-inset-top)',
+        }}
+      >
+        <div className="max-w-md mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <h1 className="text-white text-xl font-semibold">roi link</h1>
+            <button 
+              onClick={() => navigate('/device')}
+              className="text-white text-sm"
+            >
+              기기 관리 &gt;
+            </button>
+          </div>
         </div>
+      </div>
+      
+      <div 
+        className="max-w-md mx-auto px-4"
+        style={{ 
+          paddingTop: `calc(60px + env(safe-area-inset-top))`,
+          paddingBottom: 'calc(80px + env(safe-area-inset-bottom))',
+        }}
+      >
         
         {/* 메인 비주얼 카드 - 배너 캐러셀 */}
         <motion.div

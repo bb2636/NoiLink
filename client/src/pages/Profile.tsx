@@ -4,6 +4,9 @@ import { useAuth } from '../hooks/useAuth';
 import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
 import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
+import TermsModal from '../components/TermsModal/TermsModal';
+import api from '../utils/api';
+import type { Terms } from '@noilink/shared';
 
 /**
  * 프로필 페이지 (마이페이지)
@@ -15,6 +18,9 @@ export default function Profile() {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [showSuccessBanner, setShowSuccessBanner] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [selectedTerms, setSelectedTerms] = useState<Terms | null>(null);
+  const [selectedTermsTitle, setSelectedTermsTitle] = useState<string>('');
 
   // 프로필 수정 성공 시 배너 표시
   useEffect(() => {
@@ -198,7 +204,21 @@ export default function Profile() {
             </button>
             
             <button
-              onClick={() => {}}
+              onClick={async () => {
+                try {
+                  const response = await api.getTermByType('PRIVACY');
+                  if (response.success && response.data) {
+                    setSelectedTerms(response.data);
+                    setSelectedTermsTitle('개인정보처리방침');
+                    setShowTermsModal(true);
+                  } else {
+                    alert('약관을 불러올 수 없습니다.');
+                  }
+                } catch (error) {
+                  console.error('Failed to load privacy terms:', error);
+                  alert('약관을 불러올 수 없습니다.');
+                }
+              }}
               className="w-full flex items-center justify-between py-4 px-4 rounded-lg text-white transition-colors"
               style={{ backgroundColor: '#1A1A1A' }}
             >
@@ -209,7 +229,21 @@ export default function Profile() {
             </button>
             
             <button
-              onClick={() => {}}
+              onClick={async () => {
+                try {
+                  const response = await api.getTermByType('SERVICE');
+                  if (response.success && response.data) {
+                    setSelectedTerms(response.data);
+                    setSelectedTermsTitle('서비스 이용약관');
+                    setShowTermsModal(true);
+                  } else {
+                    alert('약관을 불러올 수 없습니다.');
+                  }
+                } catch (error) {
+                  console.error('Failed to load service terms:', error);
+                  alert('약관을 불러올 수 없습니다.');
+                }
+              }}
               className="w-full flex items-center justify-between py-4 px-4 rounded-lg text-white transition-colors"
               style={{ backgroundColor: '#1A1A1A' }}
             >
@@ -242,6 +276,18 @@ export default function Profile() {
         cancelText="아니요"
         onConfirm={handleWithdraw}
         onCancel={() => setShowWithdrawModal(false)}
+      />
+
+      {/* 약관 모달 */}
+      <TermsModal
+        isOpen={showTermsModal}
+        onClose={() => {
+          setShowTermsModal(false);
+          setSelectedTerms(null);
+          setSelectedTermsTitle('');
+        }}
+        terms={selectedTerms}
+        title={selectedTermsTitle}
       />
     </div>
   );
