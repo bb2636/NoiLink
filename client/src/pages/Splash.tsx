@@ -14,9 +14,9 @@ export default function Splash() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // 스플래시 노출 여부 저장 (첫 접속 판단용)
+    // 스플래시 노출 여부 저장 (세션 내 첫 접속 판단용 - 탭/앱 열 때마다 스플래시)
     try {
-      localStorage.setItem('noilink_splash_seen', 'true');
+      sessionStorage.setItem('noilink_splash_seen', 'true');
     } catch {
       // localStorage 사용 불가한 환경은 무시
     }

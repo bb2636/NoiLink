@@ -68,7 +68,7 @@ export default function TermsModal({ isOpen, onClose, terms, title }: TermsModal
 
               {/* 내용 */}
               <div 
-                className="flex-1 overflow-y-auto px-4 pb-6"
+                className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-6"
                 style={{ 
                   paddingBottom: `calc(24px + env(safe-area-inset-bottom))`,
                 }}

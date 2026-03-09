@@ -41,10 +41,10 @@ function ProtectedRoute({ children }: { children: React.ReactElement }) {
     return children;
   }
 
-  // 비로그인 상태: 스플래시 노출 여부에 따라 분기
+  // 비로그인 상태: 스플래시 노출 여부에 따라 분기 (세션마다 스플래시)
   let hasSeenSplash = false;
   try {
-    hasSeenSplash = localStorage.getItem('noilink_splash_seen') === 'true';
+    hasSeenSplash = sessionStorage.getItem('noilink_splash_seen') === 'true';
   } catch {
     hasSeenSplash = false;
   }

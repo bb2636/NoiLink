@@ -60,7 +60,7 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
   
   return (
     <div 
-      className="min-h-screen overflow-y-auto" 
+      className="min-h-screen overflow-y-auto scrollbar-hide" 
       style={{ 
         backgroundColor: '#0A0A0A',
         paddingTop: 'env(safe-area-inset-top)',

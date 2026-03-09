@@ -17,16 +17,18 @@ export function useAuth() {
     try {
       const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
       
-      // JWT 토큰이 없으면 즉시 로그인 페이지로 리디렉션
+      // JWT 토큰이 없으면 스플래시 노출 여부에 따라 분기
       if (!token) {
-        // 로그인 페이지가 아닐 때만 리디렉션
+        // 로그인/가입 관련 페이지가 아닐 때만 리디렉션
         if (window.location.pathname !== '/login' && 
             window.location.pathname !== '/signup' && 
-            window.location.pathname !== '/find-password') {
+            window.location.pathname !== '/find-password' &&
+            window.location.pathname !== '/splash') {
           localStorage.removeItem(STORAGE_KEYS.USER_ID);
           localStorage.removeItem(STORAGE_KEYS.USERNAME);
           localStorage.removeItem(STORAGE_KEYS.TOKEN);
-          navigate('/login', { replace: true });
+          const hasSeenSplash = sessionStorage.getItem('noilink_splash_seen') === 'true';
+          navigate(hasSeenSplash ? '/login' : '/splash', { replace: true });
         }
         setLoading(false);
         return;
@@ -45,8 +47,10 @@ export function useAuth() {
         // 로그인 페이지가 아닐 때만 리디렉션
         if (window.location.pathname !== '/login' && 
             window.location.pathname !== '/signup' && 
-            window.location.pathname !== '/find-password') {
-          navigate('/login', { replace: true });
+            window.location.pathname !== '/find-password' &&
+            window.location.pathname !== '/splash') {
+          const hasSeenSplash = sessionStorage.getItem('noilink_splash_seen') === 'true';
+          navigate(hasSeenSplash ? '/login' : '/splash', { replace: true });
         }
       }
     } catch (error) {
@@ -58,8 +62,10 @@ export function useAuth() {
       // 로그인 페이지가 아닐 때만 리디렉션
       if (window.location.pathname !== '/login' && 
           window.location.pathname !== '/signup' && 
-          window.location.pathname !== '/find-password') {
-        navigate('/login', { replace: true });
+          window.location.pathname !== '/find-password' &&
+          window.location.pathname !== '/splash') {
+        const hasSeenSplash = sessionStorage.getItem('noilink_splash_seen') === 'true';
+        navigate(hasSeenSplash ? '/login' : '/splash', { replace: true });
       }
     } finally {
       setLoading(false);

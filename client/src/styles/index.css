@@ -69,6 +69,15 @@ button, a {
   min-width: 44px;
 }
 
+/* 스크롤바 숨김 (모바일 레이아웃 등) */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* 스크롤바 스타일링 (선택사항) */
 ::-webkit-scrollbar {
   width: 8px;
