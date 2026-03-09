@@ -17,6 +17,9 @@ import Ranking from './pages/Ranking';
 import Report from './pages/Report';
 import Record from './pages/Record';
 import Splash from './pages/Splash';
+import Device from './pages/Device';
+import DeviceAdd from './pages/DeviceAdd';
+import DeviceDetail from './pages/DeviceDetail';
 import AdminLayout from './components/Admin/AdminLayout';
 import AdminIndex from './pages/admin/AdminIndex';
 import AdminUsers from './pages/admin/AdminUsers';
@@ -238,6 +241,30 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <Report />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/device"
+                  element={
+                    <ProtectedRoute>
+                      <Device />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/device/add"
+                  element={
+                    <ProtectedRoute>
+                      <DeviceAdd />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/device/:deviceId"
+                  element={
+                    <ProtectedRoute>
+                      <DeviceDetail />
                     </ProtectedRoute>
                   }
                 />
