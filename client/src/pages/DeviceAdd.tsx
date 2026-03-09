@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
+import { STORAGE_KEYS } from '../utils/constants';
 
 interface ScanResult {
   id: string;
@@ -33,7 +34,13 @@ export default function DeviceAdd() {
 
   const handleConnect = (device: ScanResult) => {
     // TODO: 블루투스 연결 로직
-    console.log('Connect:', device);
+    try {
+      localStorage.setItem(STORAGE_KEYS.CONNECTED_DEVICE, JSON.stringify({
+        id: device.id,
+        name: device.name,
+        deviceId: `NP-${device.id.replace('scan-', '')}`,
+      }));
+    } catch {}
     navigate('/device');
   };
 

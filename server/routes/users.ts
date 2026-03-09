@@ -516,6 +516,54 @@ router.get('/inquiries/:userId', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/users/organization-members
+ * 현재 사용자 조직의 멤버 목록 (기업 회원) / 개인 회원은 본인만
+ * JWT 인증 필요
+ */
+router.get('/organization-members', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = extractTokenFromHeader(authHeader);
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    const payload = verifyToken(token);
+    if (!payload) {
+      return res.status(401).json({ success: false, error: 'Invalid or expired token' });
+    }
+
+    const users = await db.get('users') || [];
+    const organizations = await db.get('organizations') || [];
+    const currentUser = users.find((u: any) => u.id === payload.userId);
+
+    if (!currentUser) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    // 개인 회원: 본인만 반환
+    if (currentUser.userType === 'PERSONAL') {
+      return res.json({ success: true, data: [currentUser] });
+    }
+
+    // 기업 회원: 동일 조직의 회원들 포함
+    if (currentUser.organizationId) {
+      const org = organizations.find((o: any) => o.id === currentUser.organizationId);
+      const memberIds = org?.memberUserIds || [currentUser.id];
+      const members = users.filter((u: any) => memberIds.includes(u.id) && !u.isDeleted);
+      return res.json({ success: true, data: members });
+    }
+
+
+    return res.json({ success: true, data: [currentUser] });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
  * GET /api/users/:userId
  * 특정 사용자 정보 조회
  */

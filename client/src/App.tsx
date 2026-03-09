@@ -16,6 +16,7 @@ import FindPassword from './pages/FindPassword';
 import Ranking from './pages/Ranking';
 import Report from './pages/Report';
 import Record from './pages/Record';
+import TrainingSetup from './pages/TrainingSetup';
 import Splash from './pages/Splash';
 import Device from './pages/Device';
 import DeviceAdd from './pages/DeviceAdd';
@@ -177,6 +178,14 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <Training />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/training/setup/:mode"
+                  element={
+                    <ProtectedRoute>
+                      <TrainingSetup />
                     </ProtectedRoute>
                   }
                 />

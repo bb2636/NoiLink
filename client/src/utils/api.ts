@@ -303,6 +303,10 @@ class ApiClient {
     return this.request<User>('/users/me');
   }
 
+  async getOrganizationMembers(): Promise<ApiResponse<User[]>> {
+    return this.request<User[]>('/users/organization-members');
+  }
+
   async updateProfile(data: {
     username?: string;
     currentPassword?: string;

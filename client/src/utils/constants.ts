@@ -24,6 +24,7 @@ export const STORAGE_KEYS = {
   USERNAME: 'noilink_username',
   DEVICE_ID: 'noilink_device_id',
   TOKEN: 'noilink_token',
+  CONNECTED_DEVICE: 'noilink_connected_device',
 } as const;
 
 // API 엔드포인트

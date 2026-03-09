@@ -66,7 +66,8 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'calc(64px + env(safe-area-inset-bottom))', // 하단바 높이 + safe area
         height: '100vh',
-        WebkitOverflowScrolling: 'touch'
+        WebkitOverflowScrolling: 'touch',
+        overscrollBehaviorY: 'none',
       }}
     >
       {/* 메인 컨텐츠 */}
@@ -97,6 +98,7 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
           <div className="flex justify-around items-center">
             {navItems.map((item) => {
               const isActive = location.pathname === item.path || 
+                (item.path === '/training' && location.pathname.startsWith('/training')) ||
                 (item.path === '/record' && location.pathname.startsWith('/record')) ||
                 (item.path === '/ranking' && location.pathname.startsWith('/ranking'));
               

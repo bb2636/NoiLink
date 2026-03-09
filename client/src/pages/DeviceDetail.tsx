@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
+import { STORAGE_KEYS } from '../utils/constants';
 import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 
 const MOCK_DEVICE = {
@@ -73,6 +74,16 @@ export default function DeviceDetail() {
             배터리 | {device.battery}% &nbsp;&nbsp; 신호 | {device.signal}
           </div>
           <button
+            onClick={() => {
+              try {
+                const raw = localStorage.getItem(STORAGE_KEYS.CONNECTED_DEVICE);
+                const data = raw ? JSON.parse(raw) : null;
+                if (data?.id === device.id) {
+                  localStorage.removeItem(STORAGE_KEYS.CONNECTED_DEVICE);
+                }
+              } catch {}
+              navigate('/device');
+            }}
             className="w-full py-2 rounded-lg text-sm font-semibold"
             style={{ backgroundColor: '#2A2A2A', color: '#FFFFFF' }}
           >

@@ -2,9 +2,10 @@
  * 기기 관리 페이지
  * 등록된 기기 목록, 연결/해제, 기기 추가 이동
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
+import { STORAGE_KEYS } from '../utils/constants';
 
 export interface DeviceInfo {
   id: string;
@@ -15,13 +16,46 @@ export interface DeviceInfo {
   signal?: '안정적' | '불안정' | null;
 }
 
+function getConnectedDeviceId(): string | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.CONNECTED_DEVICE);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    return data?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export default function Device() {
   const navigate = useNavigate();
-  // TODO: 나중에 연결 시 API/블루투스에서 가져오기
+  const [connectedId, setConnectedId] = useState<string | null>(getConnectedDeviceId);
+  // TODO: 나중에 API/블루투스에서 가져오기
   const [devices] = useState<DeviceInfo[]>([
-    { id: '1', name: 'NoiPod', deviceId: 'NP-49231', isConnected: true, battery: 78, signal: '안정적' },
+    { id: '1', name: 'NoiPod', deviceId: 'NP-49231', isConnected: false, battery: 78, signal: '안정적' },
     { id: '2', name: 'NoiPod', deviceId: 'NP-40231', isConnected: false, battery: undefined, signal: null },
   ]);
+
+  // 연결된 기기 ID와 동기화
+  const devicesWithConnection = devices.map(d => ({
+    ...d,
+    isConnected: connectedId === d.id,
+  }));
+
+  useEffect(() => {
+    const handler = () => setConnectedId(getConnectedDeviceId());
+    window.addEventListener('storage', handler);
+    return () => window.removeEventListener('storage', handler);
+  }, []);
+
+  const handleConnectAction = (device: typeof devicesWithConnection[0]) => {
+    if (device.isConnected) {
+      localStorage.removeItem(STORAGE_KEYS.CONNECTED_DEVICE);
+      setConnectedId(null);
+    } else {
+      navigate('/device/add');
+    }
+  };
 
   return (
     <MobileLayout>
@@ -44,7 +78,7 @@ export default function Device() {
 
         {/* 기기 목록 */}
         <div className="space-y-4 mb-6">
-          {devices.map((device) => (
+          {devicesWithConnection.map((device) => (
             <div
               key={device.id}
               className="rounded-2xl p-4"
@@ -67,6 +101,7 @@ export default function Device() {
                 </div>
                 <button
                   onClick={() => navigate(`/device/${device.id}`)}
+                  type="button"
                   className="flex items-center gap-1"
                   style={{ color: device.isConnected ? '#AAED10' : '#EF4444', fontSize: '14px' }}
                 >
@@ -78,13 +113,7 @@ export default function Device() {
                 배터리 | {device.battery != null ? `${device.battery}%` : '-'} &nbsp;&nbsp; 신호 | {device.signal || '-'}
               </div>
               <button
-                onClick={() => {
-                  if (device.isConnected) {
-                    navigate(`/device/${device.id}`);
-                  } else {
-                    navigate('/device/add');
-                  }
-                }}
+                onClick={() => handleConnectAction(device)}
                 className="w-full py-2 rounded-lg text-sm font-semibold"
                 style={{
                   backgroundColor: device.isConnected ? '#2A2A2A' : '#AAED10',
