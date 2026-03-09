@@ -19,8 +19,8 @@ const PORT = process.env.PORT || 5000;
 
 // 미들웨어 설정
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '30mb' })); // 배너 이미지 base64 업로드 지원
+app.use(express.urlencoded({ extended: true, limit: '30mb' }));
 
 // 기본 라우트
 app.get('/', (req: Request, res: Response) => {

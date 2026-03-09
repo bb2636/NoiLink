@@ -16,6 +16,7 @@ export default function FindPassword() {
   const [verificationCode, setVerificationCode] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -257,8 +258,8 @@ export default function FindPassword() {
                 disabled={!isVerified}
                 className="w-full py-4 rounded-3xl font-semibold transition-all fixed left-0 right-0 max-w-md mx-auto"
                 style={{
-                  backgroundColor: isVerified ? '#373C39' : '#1A1A1A',
-                  color: isVerified ? '#ffffff' : '#B6B6B9',
+                  backgroundColor: isVerified ? '#AAED10' : '#1A1A1A',
+                  color: isVerified ? '#000000' : '#B6B6B9',
                   bottom: `calc(5rem + env(safe-area-inset-bottom))`,
                 }}
               >
@@ -280,9 +281,9 @@ export default function FindPassword() {
               <form onSubmit={handleResetPassword}>
                 {/* 비밀번호 입력 필드 통합 박스 */}
                 <div className="border border-gray-700 rounded-2xl overflow-hidden mb-4" style={{ backgroundColor: '#373C39' }}>
-                  <div className="px-4 py-3 border-b border-gray-700">
+                  <div className="px-4 py-3 border-b border-gray-700 relative">
                     <input
-                      type="password"
+                      type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => {
                         setPassword(e.target.value);
@@ -291,9 +292,26 @@ export default function FindPassword() {
                         }
                       }}
                       placeholder="영문과 숫자를 포함하여 8~16자로 입력해 주세요."
-                      className="w-full bg-transparent text-white focus:outline-none"
+                      className="w-full bg-transparent text-white focus:outline-none pr-12"
                       style={{ color: password ? '#ffffff' : '#B6B6B9' }}
                     />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-300"
+                    >
+                      {showPassword ? (
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                      ) : (
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
                   </div>
                   <div className="px-4 py-3 relative">
                     <input
@@ -311,6 +329,7 @@ export default function FindPassword() {
                     />
                     <button
                       type="button"
+                      tabIndex={-1}
                       onClick={() => setShowPasswordConfirm(!showPasswordConfirm)}
                       className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-300"
                     >
@@ -369,8 +388,8 @@ export default function FindPassword() {
                   className="w-full py-4 rounded-3xl font-semibold transition-all fixed left-0 right-0 max-w-md mx-auto"
                   style={{
                     bottom: `calc(5rem + env(safe-area-inset-bottom))`,
-                    backgroundColor: loading || !password.trim() || !passwordConfirm.trim() ? '#1A1A1A' : '#373C39',
-                    color: loading || !password.trim() || !passwordConfirm.trim() ? '#B6B6B9' : '#ffffff',
+                    backgroundColor: loading || !password.trim() || !passwordConfirm.trim() ? '#1A1A1A' : '#AAED10',
+                    color: loading || !password.trim() || !passwordConfirm.trim() ? '#B6B6B9' : '#000000',
                   }}
                 >
                   {loading ? '처리 중...' : '다음'}

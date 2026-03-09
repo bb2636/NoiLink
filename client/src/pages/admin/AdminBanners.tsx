@@ -33,6 +33,8 @@ export default function AdminBanners() {
   const [loading, setLoading] = useState(true);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const dragStartPos = useRef<{ x: number; y: number } | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const LONG_PRESS_MS = 500;
 
   const itemsPerPage = 10;
 
@@ -266,10 +268,26 @@ export default function AdminBanners() {
     }
   };
 
-  const handleDragStart = (index: number, e: React.MouseEvent | React.TouchEvent) => {
+  const clearLongPressTimer = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  const handlePressStart = (index: number, e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setDraggedIndex(index);
+    clearLongPressTimer();
+    longPressTimer.current = setTimeout(() => {
+      longPressTimer.current = null;
+      setDraggedIndex(index);
+    }, LONG_PRESS_MS);
+  };
+
+  const handlePressEnd = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    clearLongPressTimer();
   };
 
   const handleDragEnd = () => {
@@ -426,12 +444,17 @@ export default function AdminBanners() {
                           opacity: draggedIndex === globalIndex ? 0.5 : 1,
                         }}
                       >
-                        {/* 드래그 핸들 */}
+                        {/* 드래그 핸들 - 꾹 눌러서 드래그 활성화 */}
                         <td 
                           className="px-2 py-4 text-center cursor-move select-none"
-                          onMouseDown={(e) => handleDragStart(globalIndex, e)}
-                          onTouchStart={(e) => handleDragStart(globalIndex, e)}
+                          onMouseDown={(e) => handlePressStart(globalIndex, e)}
+                          onMouseUp={handlePressEnd}
+                          onMouseLeave={handlePressEnd}
+                          onTouchStart={(e) => handlePressStart(globalIndex, e)}
+                          onTouchEnd={handlePressEnd}
+                          onTouchCancel={handlePressEnd}
                           style={{ userSelect: 'none' }}
+                          title={`${LONG_PRESS_MS / 1000}초 이상 눌러서 순서 변경`}
                         >
                           <div className="flex flex-col items-center gap-1" style={{ color: '#999999' }}>
                             <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
