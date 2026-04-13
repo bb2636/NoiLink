@@ -15,7 +15,7 @@ dotenv.config({ path: join(__dirname, '.env') });
 dotenv.config({ path: join(__dirname, '..', '.env') });
 
 const app: Express = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3001;
 
 // 미들웨어 설정
 app.use(cors());
