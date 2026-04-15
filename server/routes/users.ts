@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
+import type { User } from '@noilink/shared';
 import { generateToken, extractTokenFromHeader, verifyToken } from '../utils/jwt.js';
 
 const router = Router();
@@ -72,8 +73,16 @@ router.post('/', async (req: Request, res: Response) => {
     
     users.push(newUser);
     await db.set('users', users);
-    
-    res.status(201).json({ success: true, data: newUser });
+
+    // 이메일+비밀번호로 가입한 경우 로그인과 동일하게 JWT 발급(가입 직후 API·트레이닝 연동)
+    const issuedToken =
+      password && email ? generateToken(newUser as User) : undefined;
+
+    res.status(201).json({
+      success: true,
+      data: newUser,
+      ...(issuedToken ? { token: issuedToken } : {}),
+    });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -321,6 +330,71 @@ router.put('/me', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * POST /api/users/me/organization-approval-request
+ * 기업(ORGANIZATION) 회원 기관 승인 요청 — approvalStatus → PENDING
+ */
+router.post('/me/organization-approval-request', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = extractTokenFromHeader(authHeader);
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    const payload = verifyToken(token);
+    if (!payload) {
+      return res.status(401).json({ success: false, error: 'Invalid or expired token' });
+    }
+
+    const users = (await db.get('users')) || [];
+    const userIndex = users.findIndex((u: any) => u.id === payload.userId);
+    if (userIndex === -1) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const user = users[userIndex] as User;
+    if (user.userType !== 'ORGANIZATION') {
+      return res.status(403).json({
+        success: false,
+        error: '기업 회원만 신청할 수 있습니다.',
+      });
+    }
+
+    if (user.approvalStatus === 'APPROVED') {
+      return res.json({
+        success: true,
+        data: user,
+        message: '이미 승인된 계정입니다.',
+      });
+    }
+
+    if (user.approvalStatus === 'PENDING') {
+      return res.json({
+        success: true,
+        data: user,
+        message: '이미 승인 검토 중입니다.',
+      });
+    }
+
+    user.approvalStatus = 'PENDING';
+    user.updatedAt = new Date().toISOString();
+    users[userIndex] = user;
+    await db.set('users', users);
+
+    const { password: _, ...safe } = user as any;
+    res.json({
+      success: true,
+      data: safe,
+      message: '기관 승인 요청이 접수되었습니다. 관리자 검토 후 반영됩니다.',
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 });

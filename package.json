@@ -17,7 +17,9 @@
     "build:client": "cd client && npm run build",
     "build:server": "cd server && npm run build",
     "start": "cd server && npm start",
-    "install:all": "npm install && cd client && npm install && cd ../server && npm install && cd ../shared && npm install"
+    "install:all": "npm install && cd client && npm install && cd ../server && npm install && cd ../shared && npm install",
+    "install:mobile": "cd mobile && npm install",
+    "dev:mobile": "cd mobile && npm start"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",

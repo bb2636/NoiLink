@@ -404,6 +404,7 @@ export default function SignUp() {
     });
     
     if (result.success) {
+      setLoading(false);
       navigate('/');
     } else {
       setErrors({

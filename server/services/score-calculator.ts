@@ -197,19 +197,13 @@ export async function calculateAgilityScore(
     throw new Error('NormConfig not found');
   }
   
-  const { switchCost, footAccuracy, reactionTime } = agility;
+  const { switchCost, footAccuracy } = agility;
   const { agility: agilityNorm } = normConfig;
-  
-  // 인지 과제 Z-Score (전환비용, 반응시간은 낮을수록 좋으므로 부호 반전)
+
+  // 명세 7.2 ⑤: Z_cognitive = (Z_inv(Cost) * 0.7) + (Z(ACC_switch) * 0.3)
   const zCost = -calculateZScore(switchCost, agilityNorm.switchCost.mu, agilityNorm.switchCost.sigma);
-  // footAccuracy를 switchAccuracy로 사용 (발 정확도 = 전환 정확도)
   const zAcc = calculateZScore(footAccuracy, agilityNorm.switchAccuracy.mu, agilityNorm.switchAccuracy.sigma);
-  const zRT = reactionTime !== undefined
-    ? -calculateZScore(reactionTime, agilityNorm.reactionTime.mu, agilityNorm.reactionTime.sigma)
-    : 0;
-  
-  // 가중 합산 (50% 전환비용, 30% 전환정확도, 20% 반응시간)
-  const zCognitive = (zCost * 0.5) + (zAcc * 0.3) + (zRT * 0.2);
+  const zCognitive = zCost * 0.7 + zAcc * 0.3;
   
   // 리듬 점수 (20% 비중)
   const rhythmScore = rhythm ? calculateRhythmScore(rhythm) : 0;

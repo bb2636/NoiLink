@@ -86,7 +86,7 @@ class ApiClient {
     return this.request<User>('/users', {
       method: 'POST',
       body: JSON.stringify(userData),
-    });
+    }) as Promise<ApiResponse<User> & { token?: string }>;
   }
 
   async getUser(userId: string) {
@@ -126,11 +126,6 @@ class ApiClient {
   async getGameScores(gameId: string, limit?: number) {
     const params = limit ? `?limit=${limit}` : '';
     return this.request<any[]>(`/scores/game/${gameId}${params}`);
-  }
-
-  async getLeaderboard(limit?: number) {
-    const params = limit ? `?limit=${limit}` : '';
-    return this.request<RankingEntry[]>(`/scores/leaderboard${params}`);
   }
 
   // Training API
@@ -199,14 +194,30 @@ class ApiClient {
     const params = limit ? `?limit=${limit}` : '';
     return this.request<any[]>(`/reports/user/${userId}${params}`);
   }
+
+  async getOrganizationInsightReport(organizationId: string) {
+    return this.request<any>(`/reports/organization/${organizationId}`);
+  }
+
+  async generateOrganizationInsightReport(organizationId: string) {
+    return this.request<any>('/reports/organization/generate', {
+      method: 'POST',
+      body: JSON.stringify({ organizationId }),
+    });
+  }
+
+  async getOrganizationSessionsForTrend(organizationId: string) {
+    return this.request<any[]>(`/sessions/organization/${organizationId}/trend`);
+  }
   
   // Rankings API
-  async getRankings(type?: string, limit?: number) {
+  async getRankings(type?: string, limit?: number, organizationId?: string) {
     const params = new URLSearchParams();
     if (type) params.append('type', type);
     if (limit) params.append('limit', String(limit));
+    if (organizationId) params.append('organizationId', organizationId);
     const query = params.toString() ? `?${params.toString()}` : '';
-    return this.request<any>(`/rankings${query}`);
+    return this.request<Record<string, RankingEntry[]>>(`/rankings${query}`);
   }
   
   // Generic GET method
@@ -316,6 +327,13 @@ class ApiClient {
       method: 'PUT',
       body: JSON.stringify(data),
     });
+  }
+
+  /** 기업 회원 기관 승인 요청(서버에서 approvalStatus → PENDING) */
+  async requestOrganizationApproval(): Promise<ApiResponse<User> & { message?: string }> {
+    return this.request<User>('/users/me/organization-approval-request', {
+      method: 'POST',
+    }) as Promise<ApiResponse<User> & { message?: string }>;
   }
 
   // Password Reset API

@@ -5,7 +5,9 @@
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
-import type { Session, PhaseMeta, TrainingMode, Level } from '@noilink/shared';
+import type { Session, PhaseMeta, TrainingMode, Level, MetricsScore, User } from '@noilink/shared';
+import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
+import { userCanActOnTargetUserId, canAccessOrganizationResource } from '../utils/session-user-policy.js';
 
 const router = Router();
 
@@ -13,8 +15,16 @@ const router = Router();
  * POST /api/sessions
  * 새 트레이닝 세션 생성
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', optionalAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required',
+      });
+    }
+
     const {
       userId,
       mode,
@@ -31,6 +41,14 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({
         success: false,
         error: 'Missing required fields: userId, mode, bpm, level',
+      });
+    }
+
+    const users: User[] = (await db.get('users')) || [];
+    if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Cannot create session for this user',
       });
     }
     
@@ -53,8 +71,7 @@ router.post('/', async (req: Request, res: Response) => {
     await db.set('sessions', sessions);
     
     // 사용자 정보 업데이트 (lastTrainingDate, streak)
-    const users = await db.get('users') || [];
-    const userIndex = users.findIndex((u: any) => u.id === userId);
+    const userIndex = users.findIndex((u: User) => u.id === userId);
     if (userIndex !== -1) {
       const today = new Date().toISOString().split('T')[0];
       const lastDate = users[userIndex].lastTrainingDate
@@ -91,9 +108,17 @@ router.post('/', async (req: Request, res: Response) => {
  * GET /api/sessions/user/:userId
  * 사용자별 세션 조회
  */
-router.get('/user/:userId', async (req: Request, res: Response) => {
+router.get('/user/:userId', optionalAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
     const { userId } = req.params;
+    const users: User[] = (await db.get('users')) || [];
+    if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
     const { limit = 50, mode, isComposite, isValid } = req.query;
     
     const sessions = await db.get('sessions') || [];
@@ -127,18 +152,98 @@ router.get('/user/:userId', async (req: Request, res: Response) => {
   }
 });
 
+function avgMetric(list: MetricsScore[], key: keyof MetricsScore): number | undefined {
+  const vals = list
+    .map((m) => m[key])
+    .filter((v): v is number => typeof v === 'number');
+  if (vals.length === 0) return undefined;
+  return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+}
+
+/**
+ * GET /api/sessions/organization/:organizationId/trend
+ * 기관 소속 종합 세션을 일별로 묶어 팀 평균 지표 추이 (최근 10일)
+ */
+router.get('/organization/:organizationId/trend', optionalAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    const { organizationId } = req.params;
+    if (!canAccessOrganizationResource(authReq.user, organizationId)) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+    const users: User[] = (await db.get('users')) || [];
+    const memberIds = new Set(
+      users.filter((u) => u.organizationId === organizationId && !u.isDeleted).map((u) => u.id)
+    );
+    if (memberIds.size === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const sessions: Session[] = (await db.get('sessions')) || [];
+    const metricsScores: MetricsScore[] = (await db.get('metricsScores')) || [];
+
+    const relevant = sessions.filter(
+      (s) => memberIds.has(s.userId) && s.isComposite && s.isValid
+    );
+
+    const dayMap = new Map<string, MetricsScore[]>();
+    for (const s of relevant) {
+      const m = metricsScores.find((ms) => ms.sessionId === s.id);
+      if (!m) continue;
+      const day = s.createdAt.slice(0, 10);
+      if (!dayMap.has(day)) dayMap.set(day, []);
+      dayMap.get(day)!.push(m);
+    }
+
+    const sortedDays = [...dayMap.keys()].sort();
+    const last10 = sortedDays.slice(-10);
+
+    const points = last10.map((day) => {
+      const list = dayMap.get(day)!;
+      return {
+        date: `${day}T12:00:00.000Z`,
+        memory: avgMetric(list, 'memory'),
+        comprehension: avgMetric(list, 'comprehension'),
+        focus: avgMetric(list, 'focus'),
+        judgment: avgMetric(list, 'judgment'),
+        agility: avgMetric(list, 'agility'),
+        endurance: avgMetric(list, 'endurance'),
+      };
+    });
+
+    res.json({ success: true, data: points });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 /**
  * GET /api/sessions/:sessionId
  * 특정 세션 조회
  */
-router.get('/:sessionId', async (req: Request, res: Response) => {
+router.get('/:sessionId', optionalAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
     const { sessionId } = req.params;
     const sessions = await db.get('sessions') || [];
     const session = sessions.find((s: Session) => s.id === sessionId);
     
     if (!session) {
       return res.status(404).json({ success: false, error: 'Session not found' });
+    }
+
+    const users: User[] = (await db.get('users')) || [];
+    if (!userCanActOnTargetUserId(authReq.user, session.userId, users)) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
     }
     
     res.json({ success: true, data: session });
@@ -154,8 +259,12 @@ router.get('/:sessionId', async (req: Request, res: Response) => {
  * PUT /api/sessions/:sessionId
  * 세션 업데이트
  */
-router.put('/:sessionId', async (req: Request, res: Response) => {
+router.put('/:sessionId', optionalAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
     const { sessionId } = req.params;
     const updateData = req.body;
     
@@ -164,6 +273,15 @@ router.put('/:sessionId', async (req: Request, res: Response) => {
     
     if (sessionIndex === -1) {
       return res.status(404).json({ success: false, error: 'Session not found' });
+    }
+
+    const users: User[] = (await db.get('users')) || [];
+    const existing = sessions[sessionIndex] as Session;
+    if (!userCanActOnTargetUserId(authReq.user, existing.userId, users)) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+    if (updateData.userId != null && updateData.userId !== existing.userId) {
+      return res.status(403).json({ success: false, error: 'Cannot change session userId' });
     }
     
     sessions[sessionIndex] = {

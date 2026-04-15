@@ -77,17 +77,20 @@ export function useAuth() {
       const response = await api.login(email, password);
       if (response.success && response.data) {
         const user = response.data;
-        const token = (response as any).token;
-        
+        const token = response.token;
+
+        if (!token) {
+          return {
+            success: false,
+            error: '서버에서 인증 토큰을 받지 못했습니다. 관리자에게 문의해 주세요.',
+          };
+        }
+
         setUser(user);
         localStorage.setItem(STORAGE_KEYS.USER_ID, user.id);
         localStorage.setItem(STORAGE_KEYS.USERNAME, user.username);
-        
-        // JWT 토큰 저장
-        if (token) {
-          localStorage.setItem(STORAGE_KEYS.TOKEN, token);
-        }
-        
+        localStorage.setItem(STORAGE_KEYS.TOKEN, token);
+
         return { success: true, user };
       }
       return { success: false, error: response.error || '이메일 또는 비밀번호가 올바르지 않습니다' };
@@ -108,9 +111,22 @@ export function useAuth() {
     try {
       const response = await api.createUser(userData);
       if (response.success && response.data) {
-        setUser(response.data);
-        localStorage.setItem(STORAGE_KEYS.USER_ID, response.data.id);
-        localStorage.setItem(STORAGE_KEYS.USERNAME, response.data.username);
+        const user = response.data;
+        const token = response.token;
+
+        if (userData.password && userData.email) {
+          if (!token) {
+            return {
+              success: false,
+              error: '가입은 되었으나 로그인 토큰을 받지 못했습니다. 로그인 화면에서 다시 시도해 주세요.',
+            };
+          }
+          localStorage.setItem(STORAGE_KEYS.TOKEN, token);
+        }
+
+        setUser(user);
+        localStorage.setItem(STORAGE_KEYS.USER_ID, user.id);
+        localStorage.setItem(STORAGE_KEYS.USERNAME, user.username);
         return { success: true };
       }
       return { success: false, error: response.error || '회원가입 실패' };
@@ -126,6 +142,17 @@ export function useAuth() {
     localStorage.removeItem(STORAGE_KEYS.TOKEN);
     navigate('/login');
   };
+
+  const refreshUser = async () => {
+    try {
+      const response = await api.getMe();
+      if (response.success && response.data) {
+        setUser(response.data);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
   
   return {
     user,
@@ -133,6 +160,7 @@ export function useAuth() {
     login,
     signup,
     logout,
+    refreshUser,
     isAuthenticated: !!user,
   };
 }

@@ -30,7 +30,7 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
     },
     { 
       path: '/record', 
-      label: '랭킹', 
+      label: '기록', 
       icon: (
         <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
           <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
@@ -100,9 +100,9 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
               const isActive = location.pathname === item.path || 
                 (item.path === '/training' && location.pathname.startsWith('/training')) ||
                 (item.path === '/record' && location.pathname.startsWith('/record')) ||
-                (item.path === '/ranking' && location.pathname.startsWith('/ranking'));
+                (item.path === '/ranking' && location.pathname.startsWith('/ranking')) ||
+                (item.path === '/profile' && location.pathname.startsWith('/profile'));
               
-              // 기록/통계 아이템은 라벨 없이 원형 배경만 표시
               const isRecordItem = item.path === '/record';
               
               return (
@@ -137,17 +137,15 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
                       </div>
                     )}
                   </motion.div>
-                  {!isRecordItem && (
-                    <span
-                      className="text-xs mt-1"
-                      style={{ 
-                        color: isActive ? '#AAED10' : '#999999',
-                        fontWeight: isActive ? '600' : '400'
-                      }}
-                    >
-                      {item.label}
-                    </span>
-                  )}
+                  <span
+                    className="text-xs mt-1"
+                    style={{ 
+                      color: isActive ? '#AAED10' : '#999999',
+                      fontWeight: isActive ? '600' : '400'
+                    }}
+                  >
+                    {item.label}
+                  </span>
                 </Link>
               );
             })}

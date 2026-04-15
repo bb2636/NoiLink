@@ -15,8 +15,10 @@ import SignUp from './pages/SignUp';
 import FindPassword from './pages/FindPassword';
 import Ranking from './pages/Ranking';
 import Report from './pages/Report';
+import OrganizationReport from './pages/OrganizationReport';
 import Record from './pages/Record';
 import TrainingSetup from './pages/TrainingSetup';
+import TrainingSessionPlay from './pages/TrainingSessionPlay';
 import Splash from './pages/Splash';
 import Device from './pages/Device';
 import DeviceAdd from './pages/DeviceAdd';
@@ -190,6 +192,14 @@ function App() {
                   }
                 />
                 <Route
+                  path="/training/session"
+                  element={
+                    <ProtectedRoute>
+                      <TrainingSessionPlay />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
                   path="/result"
                   element={
                     <ProtectedRoute>
@@ -242,6 +252,14 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <Ranking />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/report/organization"
+                  element={
+                    <ProtectedRoute>
+                      <OrganizationReport />
                     </ProtectedRoute>
                   }
                 />

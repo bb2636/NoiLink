@@ -153,12 +153,25 @@ export interface Session {
   isComposite: boolean;                // 종합 트레이닝 여부
   isValid: boolean;                    // 유효한 세션 여부 (300초 완주 등)
   phases: PhaseMeta[];                 // Phase 메타데이터 배열
+  /** 확장 메타(JSON), phases 외 부가 정보 */
+  meta?: Record<string, unknown>;
   createdAt: string;                   // 생성일시 (ISO 8601)
 }
 
 // ============================================================================
 // 3. 원시 메트릭 및 지표 점수
 // ============================================================================
+
+/**
+ * 원시·파생 지표 (명세)
+ * — RT: t_on → t_input (ms)
+ * — SD: 반응속도 표준편차 (낮을수록 안정)
+ * — Commission: 방해 자극 오선택
+ * — Omission: 타겟 미응답(t_window 내)
+ * — Drift: (Late_RT − Early_RT) / Early_RT
+ * — Switch Cost: 규칙 변경 후 첫 정답까지 지연(ms)
+ * — Norm: μ, σ 기반 0~100 T-Score 변환은 NormConfig + training-spec
+ */
 
 /** 리듬 Phase 원시 데이터 */
 export interface RhythmRawMetrics {
@@ -239,6 +252,8 @@ export interface RawMetrics {
   hitCount: number;                     // 정답 횟수
   rtMean: number;                       // 평균 반응 시간 (ms)
   rtSD: number;                         // 반응 시간 표준편차 (ms)
+  /** 모드별 원시·파생 부가 필드 (JSON 호환) */
+  byModeMetrics?: Record<string, unknown>;
   rhythm?: RhythmRawMetrics;           // 리듬 메트릭
   memory?: MemoryRawMetrics;            // 기억력 메트릭
   comprehension?: ComprehensionRawMetrics; // 이해력 메트릭
@@ -340,6 +355,20 @@ export interface DailyMission {
 // 6. 리포트 및 분석
 // ============================================================================
 
+/** 지표별 근거 카드 (템플릿 기반) */
+export interface MetricEvidenceCard {
+  key: string;                         // memory, focus 등
+  label: string;                       // 표시명 (기억력)
+  body: string;                        // 근거 설명
+}
+
+/** 추천 롤모델 (템플릿 기반) */
+export interface RecommendedRoleModel {
+  name: string;                        // 롤모델 이름
+  oneLiner: string;                    // 한 줄 요약
+  description: string;                 // 상세
+}
+
 /** 리포트 데이터 */
 export interface Report {
   id: string;                          // 리포트 ID
@@ -348,13 +377,45 @@ export interface Report {
   brainimalType: BrainimalType;         // 브레이니멀 타입
   confidence: number;                   // 신뢰도 (0~100)
   metricsScore: MetricsScore;           // 6대 지표 점수
-  factText: string;                     // Fact 문구
-  lifeText: string;                     // Life 문구
-  hintText: string;                     // Hint 문구
+  factText: string;                     // Fact 문구 (종합 평가 요약)
+  lifeText: string;                     // Life 문구 (상세 분석)
+  hintText: string;                     // Hint 문구 (생활 밀착 피드백)
+  strengthText: string;                 // 강점
+  weaknessText: string;                 // 보완점
+  metricEvidenceCards: MetricEvidenceCard[];
+  recommendedRoleModel: RecommendedRoleModel;
   recommendedMode?: TrainingMode;        // 추천 트레이닝 모드
   recommendedBPM?: number;              // 추천 BPM
   recommendedLevel?: Level;             // 추천 레벨
   createdAt: string;                    // 생성일시
+}
+
+/** 기관 인사이트 리포트 (홈/명세 UI용 상세) */
+export interface OrganizationInsightReport {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  managedMemberCount: number;           // 관리(소속) 인원
+  avgBrainAge: number;                  // 평균 뇌지컬 나이
+  cohortActualAvgAge: number;         // 소속 실제 평균 나이
+  /** 뇌지컬 나이 − 실제 평균 나이 (음수면 뇌 나이가 더 젊음) */
+  brainAgeVsChronologicalDelta: number;
+  representativeBrainimal: BrainimalType;
+  representativeBrainimalLabel: string;
+  avgMetricsScore: MetricsScore;        // 팀 평균 6대 지표 (합성 sessionId 등은 더미)
+  factText: string;
+  lifeText: string;
+  hintText: string;
+  strengthText: string;
+  weaknessText: string;
+  metricEvidenceCards: MetricEvidenceCard[];
+  brainimalDistribution: { type: BrainimalType; count: number; percent: number }[];
+  memberStatusSummary: string;          // 소속 인원 현황 요약 문구
+  /** ORG_REPORT_001: KPI·트렌드·코치 액션 */
+  orgReport?: OrgReport;
+  /** 리스크 탐지(WARN/WATCH) */
+  riskMembers?: RiskMember[];
+  createdAt: string;
 }
 
 /** 기관 리포트 (ORG_REPORT) */

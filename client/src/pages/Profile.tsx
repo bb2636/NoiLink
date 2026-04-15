@@ -12,12 +12,14 @@ import type { Terms } from '@noilink/shared';
  * 프로필 페이지 (마이페이지)
  */
 export default function Profile() {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [showSuccessBanner, setShowSuccessBanner] = useState(false);
+  const [bannerMessage, setBannerMessage] = useState('프로필이 성공적으로 수정되었습니다.');
+  const [orgApprovalLoading, setOrgApprovalLoading] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [selectedTerms, setSelectedTerms] = useState<Terms | null>(null);
   const [selectedTermsTitle, setSelectedTermsTitle] = useState<string>('');
@@ -25,6 +27,7 @@ export default function Profile() {
   // 프로필 수정 성공 시 배너 표시
   useEffect(() => {
     if (location.state?.profileUpdated) {
+      setBannerMessage('프로필이 성공적으로 수정되었습니다.');
       setShowSuccessBanner(true);
       // URL state 제거
       window.history.replaceState({}, document.title);
@@ -79,7 +82,7 @@ export default function Profile() {
       {/* 성공 배너 */}
       <SuccessBanner
         isOpen={showSuccessBanner}
-        message="프로필이 성공적으로 수정되었습니다."
+        message={bannerMessage}
         onClose={() => setShowSuccessBanner(false)}
         autoClose={true}
         duration={3000}
@@ -145,17 +148,74 @@ export default function Profile() {
             {user.email || '이메일 없음'}
           </p>
 
-          {/* 기관 승인 요청 버튼 (기업 회원인 경우) */}
-          {user.userType === 'ORGANIZATION' && (
+          <div className="w-full space-y-2 mb-6">
             <button
-              className="w-full py-3 px-4 rounded-lg font-medium mb-6"
-              style={{ 
-                backgroundColor: '#AAED10',
-                color: '#000000'
-              }}
+              type="button"
+              onClick={() => navigate('/report')}
+              className="w-full py-3 px-4 rounded-lg font-medium border border-gray-600 text-white"
+              style={{ backgroundColor: '#1A1A1A' }}
             >
-              기관 승인 요청
+              나의 리포트
             </button>
+          </div>
+
+          {/* 기업 회원: 승인 상태 · 기관 리포트 */}
+          {user.userType === 'ORGANIZATION' && (
+            <div className="space-y-2 mb-6 w-full">
+              {user.approvalStatus === 'APPROVED' && (
+                <p className="text-center text-xs py-2 rounded-lg" style={{ backgroundColor: '#1A2A1A', color: '#AAED10' }}>
+                  기관 승인 완료
+                </p>
+              )}
+              {user.approvalStatus === 'PENDING' && (
+                <p className="text-center text-xs py-2 rounded-lg" style={{ backgroundColor: '#2A2A1A', color: '#ccc' }}>
+                  기관 승인 검토 중입니다
+                </p>
+              )}
+              {user.approvalStatus === 'REJECTED' && (
+                <p className="text-center text-xs py-2 rounded-lg" style={{ backgroundColor: '#2A1818', color: '#f99' }}>
+                  승인이 반려되었습니다. 필요 시 다시 신청해 주세요.
+                </p>
+              )}
+              {user.approvalStatus !== 'APPROVED' && user.approvalStatus !== 'PENDING' && (
+                <button
+                  type="button"
+                  disabled={orgApprovalLoading}
+                  className="w-full py-3 px-4 rounded-lg font-medium disabled:opacity-60"
+                  style={{
+                    backgroundColor: '#AAED10',
+                    color: '#000000',
+                  }}
+                  onClick={async () => {
+                    setOrgApprovalLoading(true);
+                    try {
+                      const res = await api.requestOrganizationApproval();
+                      if (res.success) {
+                        setBannerMessage(res.message || '요청이 접수되었습니다.');
+                        setShowSuccessBanner(true);
+                        await refreshUser();
+                      } else {
+                        alert(res.error || '요청에 실패했습니다.');
+                      }
+                    } finally {
+                      setOrgApprovalLoading(false);
+                    }
+                  }}
+                >
+                  {orgApprovalLoading ? '처리 중…' : '기관 승인 요청'}
+                </button>
+              )}
+              {user.organizationId && (
+                <button
+                  type="button"
+                  onClick={() => navigate('/report/organization')}
+                  className="w-full py-3 px-4 rounded-lg font-medium border border-gray-600 text-white"
+                  style={{ backgroundColor: '#1A1A1A' }}
+                >
+                  기관 리포트 보기
+                </button>
+              )}
+            </div>
           )}
         </div>
 

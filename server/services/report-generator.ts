@@ -9,6 +9,8 @@ import type {
   BrainimalType,
   TrainingMode,
   Level,
+  MetricEvidenceCard,
+  RecommendedRoleModel,
 } from '@noilink/shared';
 
 /**
@@ -241,6 +243,163 @@ const REPORT_TEMPLATES: Record<BrainimalType, ReportTemplate> = {
   },
 };
 
+const SIX_METRICS: { key: keyof MetricsScore; label: string }[] = [
+  { key: 'memory', label: '기억력' },
+  { key: 'comprehension', label: '이해력' },
+  { key: 'focus', label: '집중력' },
+  { key: 'judgment', label: '판단력' },
+  { key: 'agility', label: '순발력' },
+  { key: 'endurance', label: '지구력' },
+];
+
+function metricValue(scores: MetricsScore, key: keyof MetricsScore): number {
+  const v = scores[key];
+  return typeof v === 'number' ? v : 0;
+}
+
+function scoreTier(v: number): 'low' | 'mid' | 'high' {
+  if (v < 45) return 'low';
+  if (v < 72) return 'mid';
+  return 'high';
+}
+
+export function buildMetricEvidenceCards(scores: MetricsScore): MetricEvidenceCard[] {
+  const bodies: Record<string, Record<'low' | 'mid' | 'high', string>> = {
+    memory: {
+      low: '순서·패턴 기억 과제에서 {score}점으로, 단기 기억 정확도를 높이는 훈련이 우선입니다.',
+      mid: '{score}점대로 기본 기억 용량은 갖추었고, 길이·난이도를 올리며 안정화할 수 있습니다.',
+      high: '{score}점으로 순서 재현·패턴 유지가 안정적입니다. 복합 과제로 응용을 넓혀 보세요.',
+    },
+    comprehension: {
+      low: '{score}점으로 규칙 전환·규칙 추론에서 추가 연습이 필요합니다.',
+      mid: '{score}점대로 새 규칙 적응 속도는 평균 수준입니다. 전환 빈도를 높인 트레이닝을 권합니다.',
+      high: '{score}점으로 규칙 변화에 빠르게 적응하는 편입니다.',
+    },
+    focus: {
+      low: '{score}점으로 방해 자극 억제·타겟 유지에 집중이 필요합니다.',
+      mid: '{score}점대로 집중은 무난하나, 장시간 유지 훈련을 병행하면 좋습니다.',
+      high: '{score}점으로 핵심 목표에 주의를 유지하는 능력이 뚜렷합니다.',
+    },
+    judgment: {
+      low: '{score}점으로 억제·판단 과제에서 정확도를 끌어올릴 여지가 있습니다.',
+      mid: '{score}점대로 판단 속도와 정확도의 균형을 맞추는 단계입니다.',
+      high: '{score}점으로 GO/NO-GO·복합 판단에서 안정적인 선택이 관찰됩니다.',
+    },
+    agility: {
+      low: '{score}점으로 다채널·동시 과제 처리 역량을 키우는 것이 좋습니다.',
+      mid: '{score}점대로 멀티태스킹 기본기는 갖추었습니다.',
+      high: '{score}점으로 손·발 채널을 동시에 운용하는 능력이 강합니다.',
+    },
+    endurance: {
+      low: '{score}점으로 후반부 수행 저하가 있을 수 있어 지구력 루틴이 필요합니다.',
+      mid: '{score}점대로 전반·후반 격차를 줄이는 훈련이 효과적입니다.',
+      high: '{score}점으로 피로 구간에서도 수행을 유지하는 편입니다.',
+    },
+  };
+
+  return SIX_METRICS.map(({ key, label }) => {
+    const v = Math.round(metricValue(scores, key));
+    const tier = scoreTier(v);
+    const raw = bodies[key as string][tier];
+    const body = raw.replace(/\{score\}/g, String(v));
+    return { key: key as string, label, body };
+  });
+}
+
+export function buildStrengthWeakness(scores: MetricsScore): { strength: string; weakness: string } {
+  const ranked = SIX_METRICS.map(({ key, label }) => ({
+    label,
+    score: metricValue(scores, key),
+  })).sort((a, b) => b.score - a.score);
+
+  const top = ranked.slice(0, 2);
+  const bottom = ranked.slice(-2).reverse();
+
+  const strength = `${top.map((t) => `${t.label}(${Math.round(t.score)}점)`).join(', ')}이(가) 상대적으로 강한 영역입니다.`;
+  const weakness = `${bottom.map((t) => `${t.label}(${Math.round(t.score)}점)`).join(', ')}은(는) 보완하면 전체 균형이 좋아집니다.`;
+
+  return { strength, weakness };
+}
+
+const ROLE_MODELS: Record<BrainimalType, RecommendedRoleModel> = {
+  OWL_FOCUS: {
+    name: '몰입형 리더',
+    oneLiner: '한 번에 하나를 깊이 파고드는 집중 스타일',
+    description:
+      '방해를 걸러내고 핵심 과제에 오래 머무는 패턴입니다. 장기 프로젝트·정밀 작업에서 강점을 살리되, 전환 과제로 유연성을 보완해 보세요.',
+  },
+  CHEETAH_JUDGMENT: {
+    name: '신속 판단형 실행가',
+    oneLiner: '짧은 시간에 결론을 내리는 스타일',
+    description:
+      '빠른 의사결정이 돋보입니다. 정확도 검증·이중 검토 루틴을 더하면 실수를 줄일 수 있습니다.',
+  },
+  BEAR_ENDURANCE: {
+    name: '지구력형 퍼포머',
+    oneLiner: '후반까지 흔들림 없이 밀어붙이는 스타일',
+    description:
+      '장시간 수행 유지가 강점입니다. 스프린트형 과제를 섞어 순발력과의 균형을 맞춰 보세요.',
+  },
+  DOLPHIN_BRILLIANT: {
+    name: '학습·기억 균형형',
+    oneLiner: '이해와 암기를 함께 끌어올리는 스타일',
+    description:
+      '정보를 빠르게 받아들이고 구조화하는 데 유리합니다. 단일 지표 극대화보다 종합 루틴이 잘 맞습니다.',
+  },
+  TIGER_STRATEGIC: {
+    name: '전환·실행 병행형',
+    oneLiner: '규칙을 읽고 바로 손에 옮기는 스타일',
+    description:
+      '복잡한 상황을 이해한 뒤 동시에 여러 동작을 처리하는 데 강합니다. 휴식 루틴으로 과부하를 관리하세요.',
+  },
+  FOX_BALANCED: {
+    name: '올라운드 플레이어',
+    oneLiner: '특출한 약점 없이 고르게 가는 스타일',
+    description:
+      '특정 영역에 치우치지 않습니다. 목표가 정해지면 그 방향으로만 파고드는 심화 트레이닝이 효과적입니다.',
+  },
+  CAT_DELICATE: {
+    name: '디테일 기억형',
+    oneLiner: '미세한 차이를 기억·재현하는 스타일',
+    description:
+      '정확도와 세밀함이 강점입니다. 시간 제한을 짧게 두는 과제로 속도를 보완해 보세요.',
+  },
+  EAGLE_INSIGHT: {
+    name: '적응형 학습자',
+    oneLiner: '새 규칙에 빨리 올라타는 스타일',
+    description:
+      '환경 변화에 빠르게 맞춥니다. 장기 기억·복습 루틴을 더하면 학습이 더 오래 남습니다.',
+  },
+  LION_BOLD: {
+    name: '과감한 결정가',
+    oneLiner: '속도를 중시하는 결단 스타일',
+    description:
+      '빠른 선택이 강점입니다. NO-GO 상황에서 한 박자 쉬는 훈련으로 충동 오류를 줄일 수 있습니다.',
+  },
+  DOG_SOCIAL: {
+    name: '멀티채널 협업형',
+    oneLiner: '여러 입력을 동시에 처리하는 스타일',
+    description:
+      '동시 과제 처리에 강합니다. 단일 목표 몰입 시간을 늘리는 훈련으로 집중도를 보완해 보세요.',
+  },
+  KOALA_CALM: {
+    name: '안정형 수행자',
+    oneLiner: '기복 없이 일정한 리듬을 유지하는 스타일',
+    description:
+      '변동이 작고 신뢰도 높은 결과를 냅니다. 변화가 잦은 과제로 적응력을 넓히면 좋습니다.',
+  },
+  WOLF_CREATIVE: {
+    name: '연결·속도형 사고',
+    oneLiner: '기억한 정보를 빠르게 조합하는 스타일',
+    description:
+      '정보를 엮어 새로운 시도를 하는 데 유리합니다. 지구력 트레이닝으로 후반 집중을 지키세요.',
+  },
+};
+
+function pickRoleModel(type: BrainimalType): RecommendedRoleModel {
+  return ROLE_MODELS[type];
+}
+
 /**
  * 문자열 해시 함수 (Seed 생성용)
  */
@@ -248,10 +407,54 @@ function hashString(str: string): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash;
   }
   return Math.abs(hash);
+}
+
+/** 육각형(6대 지표) 산포 — 편차 작음·큼 판별 */
+function profileSpread(metrics: MetricsScore): { sd: number; range: number; values: number[] } {
+  const values = [
+    metrics.memory,
+    metrics.comprehension,
+    metrics.focus,
+    metrics.judgment,
+    metrics.agility,
+    metrics.endurance,
+  ].filter((v): v is number => v !== undefined && !Number.isNaN(v));
+  if (values.length < 3) return { sd: 999, range: 999, values };
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length;
+  const sd = Math.sqrt(variance);
+  const range = Math.max(...values) - Math.min(...values);
+  return { sd, range, values };
+}
+
+/** 최저 지표 보완 vs 종합(Full) 권장 — 명세 3.3 */
+function shouldRecommendCompositeTraining(metrics: MetricsScore): boolean {
+  const { sd, range } = profileSpread(metrics);
+  if (sd < 9) return true;
+  if (range > 32) return true;
+  return false;
+}
+
+/** 피로 보호: Drift/놓침 비율 높음 프록시 → BPM−8, Level−1 */
+function fatigueAdjustment(metrics: MetricsScore): { active: boolean; bpm: number; level: Level } {
+  const baseBpm = 80;
+  const baseLevel: Level = 3;
+  const rhythm = metrics.rhythm ?? 62;
+  const end = metrics.endurance ?? 70;
+  const foc = metrics.focus ?? 70;
+  const active = end < 55 && foc < 55 && rhythm < 52;
+  if (!active) {
+    return { active: false, bpm: baseBpm, level: baseLevel };
+  }
+  return {
+    active: true,
+    bpm: Math.max(60, baseBpm - 8),
+    level: Math.max(1, baseLevel - 1) as Level,
+  };
 }
 
 /**
@@ -294,34 +497,42 @@ export function generateReport(
   metricsScore: MetricsScore,
   confidence: number
 ): Report {
+  // 명세 3.2: Seed = hash(user_id + report_version + type_name)
   const seed = hashString(`${userId}_${reportVersion}_${brainimalType}`);
   const template = REPORT_TEMPLATES[brainimalType];
   
-  // Seed 기반 템플릿 선택
+  const modeScores = [
+    { mode: 'MEMORY' as TrainingMode, score: metricsScore.memory || 0 },
+    { mode: 'COMPREHENSION' as TrainingMode, score: metricsScore.comprehension || 0 },
+    { mode: 'FOCUS' as TrainingMode, score: metricsScore.focus || 0 },
+    { mode: 'JUDGMENT' as TrainingMode, score: metricsScore.judgment || 0 },
+    { mode: 'AGILITY' as TrainingMode, score: metricsScore.agility || 0 },
+    { mode: 'ENDURANCE' as TrainingMode, score: metricsScore.endurance || 0 },
+  ];
+  const weakest = modeScores.reduce((min, curr) => (curr.score < min.score ? curr : min));
+  const recommendFull = shouldRecommendCompositeTraining(metricsScore);
+  const recommendedMode: TrainingMode = recommendFull ? 'COMPOSITE' : weakest.mode;
+  const fatigue = fatigueAdjustment(metricsScore);
+  const recommendedBPM = fatigue.bpm;
+  const recommendedLevel: Level = fatigue.level;
+
   const factIndex = seed % template.fact.length;
   const lifeIndex = (seed * 2) % template.life.length;
   const hintIndex = (seed * 3) % template.hint.length;
-  
+
   const factText = generateSentence(template.fact[factIndex], userName, metricsScore, reportVersion);
   const lifeText = generateSentence(template.life[lifeIndex], userName, metricsScore, reportVersion);
-  const hintText = generateSentence(template.hint[hintIndex], userName, metricsScore, reportVersion);
-  
-  // 추천 트레이닝 결정
-    const scores = [
-      { mode: 'MEMORY' as TrainingMode, score: metricsScore.memory || 0 },
-      { mode: 'COMPREHENSION' as TrainingMode, score: metricsScore.comprehension || 0 },
-      { mode: 'FOCUS' as TrainingMode, score: metricsScore.focus || 0 },
-      { mode: 'JUDGMENT' as TrainingMode, score: metricsScore.judgment || 0 },
-      { mode: 'AGILITY' as TrainingMode, score: metricsScore.agility || 0 },
-      { mode: 'ENDURANCE' as TrainingMode, score: metricsScore.endurance || 0 },
-    ];
-  
-  const weakest = scores.reduce((min, curr) => curr.score < min.score ? curr : min);
-  const recommendedMode = weakest.mode;
-  
-  // 추천 BPM 및 Level (기본값)
-  const recommendedBPM = 80;
-  const recommendedLevel: Level = 3;
+  let hintText = generateSentence(template.hint[hintIndex], userName, metricsScore, reportVersion);
+  if (recommendFull) {
+    hintText += ` 육각형 프로필이 한쪽으로 치우치거나 지표 간 편차가 작아, 종합 트레이닝으로 재밸런스하는 편이 좋습니다.`;
+  }
+  if (fatigue.active) {
+    hintText += ` 후반 피로·리듬 저하 신호가 있어 다음 세션은 BPM ${fatigue.bpm}, 레벨 ${fatigue.level}부터 시작하는 편이 안전합니다.`;
+  }
+
+  const { strength, weakness } = buildStrengthWeakness(metricsScore);
+  const metricEvidenceCards = buildMetricEvidenceCards(metricsScore);
+  const recommendedRoleModel = pickRoleModel(brainimalType);
   
   return {
     id: `report_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -333,9 +544,33 @@ export function generateReport(
     factText,
     lifeText,
     hintText,
+    strengthText: strength,
+    weaknessText: weakness,
+    metricEvidenceCards,
+    recommendedRoleModel,
     recommendedMode,
     recommendedBPM,
     recommendedLevel,
     createdAt: new Date().toISOString(),
+  };
+}
+
+/** 기관 평균 지표용 요약 문장 (팀 이름을 name 자리에 사용) */
+export function generateOrganizationNarrative(
+  organizationName: string,
+  brainimalType: BrainimalType,
+  avgMetrics: MetricsScore,
+  version: number
+): { factText: string; lifeText: string; hintText: string } {
+  const displayName = `${organizationName} 소속`;
+  const seed = hashString(`org_${organizationName}_${version}_${brainimalType}`);
+  const template = REPORT_TEMPLATES[brainimalType];
+  const factIndex = seed % template.fact.length;
+  const lifeIndex = (seed * 2) % template.life.length;
+  const hintIndex = (seed * 3) % template.hint.length;
+  return {
+    factText: generateSentence(template.fact[factIndex], displayName, avgMetrics, version),
+    lifeText: generateSentence(template.life[lifeIndex], displayName, avgMetrics, version),
+    hintText: generateSentence(template.hint[hintIndex], displayName, avgMetrics, version),
   };
 }

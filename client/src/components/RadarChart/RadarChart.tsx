@@ -10,6 +10,8 @@ interface RadarChartProps {
     endurance?: number;
   };
   size?: number;
+  /** 꼭짓점(데이터 점) 근처 클릭 시 — 툴팁용 */
+  onPointClick?: (metricLabel: string, value: number) => void;
   onPointHover?: (metric: string, value: number) => void;
 }
 
@@ -25,6 +27,7 @@ const METRICS = [
 export default function RadarChart({
   data,
   size = 200,
+  onPointClick,
   onPointHover,
 }: RadarChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -117,10 +120,9 @@ export default function RadarChart({
     });
   }, [data, size, center, radius]);
 
-  const handlePointClick = (metric: string, value: number) => {
-    if (onPointHover) {
-      onPointHover(metric, value);
-    }
+  const emitPoint = (metricLabel: string, value: number) => {
+    onPointClick?.(metricLabel, value);
+    onPointHover?.(metricLabel, value);
   };
 
   return (
@@ -132,22 +134,23 @@ export default function RadarChart({
         className="cursor-pointer"
         onClick={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
-          const x = e.clientX - rect.left - center;
-          const y = e.clientY - rect.top - center;
-          const distance = Math.sqrt(x * x + y * y);
-          
-          if (distance < radius + 10) {
-            const angle = (Math.atan2(y, x) * 180) / Math.PI + 90;
-            const normalizedAngle = ((angle % 360) + 360) % 360;
-            
-            const metric = METRICS.find(
-              (m) => Math.abs(m.angle - normalizedAngle) < 30
-            );
-            
-            if (metric) {
-              const value = data[metric.key as keyof typeof data] || 0;
-              handlePointClick(metric.label, value);
+          const px = e.clientX - rect.left;
+          const py = e.clientY - rect.top;
+          let best: { label: string; value: number; d: number } | null = null;
+          METRICS.forEach((metric) => {
+            const value = data[metric.key as keyof typeof data] || 0;
+            const normalizedValue = value / 100;
+            const rad = ((metric.angle - 90) * Math.PI) / 180;
+            const vx = center + radius * normalizedValue * Math.cos(rad);
+            const vy = center + radius * normalizedValue * Math.sin(rad);
+            const d = Math.hypot(px - vx, py - vy);
+            if (!best || d < best.d) {
+              best = { label: metric.label, value, d };
             }
+          });
+          const hit = 26;
+          if (best && best.d <= hit) {
+            emitPoint(best.label, best.value);
           }
         }}
       />

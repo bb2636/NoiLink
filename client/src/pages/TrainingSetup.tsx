@@ -1,17 +1,17 @@
 /**
  * 트레이닝 설정 화면
- * 상단 이미지, Pod 연결, 진행 회원, 세트 수/시간/난이도, 시작하기
+ * 상단 이미지, Pod 연결, 진행 회원, 세트 수/시간, BPM·레벨, 시작하기
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
 import { STORAGE_KEYS } from '../utils/constants';
-import { TRAINING_LIST } from '../utils/trainingConfig';
+import { TRAINING_BY_ID } from '../utils/trainingConfig';
 import MemberSelectModal from '../components/MemberSelectModal/MemberSelectModal';
-import type { User } from '@noilink/shared';
-
-const TRAINING_BY_ID = Object.fromEntries(TRAINING_LIST.map((t) => [t.id, t]));
+import type { User, Level, TrainingMode } from '@noilink/shared';
+import { SESSION_MAX_MS, suggestNextSessionParams } from '@noilink/shared';
+import type { TrainingRunState } from './TrainingSessionPlay';
 
 export default function TrainingSetup() {
   const navigate = useNavigate();
@@ -22,10 +22,31 @@ export default function TrainingSetup() {
   const [showMemberModal, setShowMemberModal] = useState(false);
   const [setCount, setSetCount] = useState<number | null>(null);
   const [setTime, setSetTime] = useState<number | null>(null);
-  const [difficulty, setDifficulty] = useState<string | null>(null);
+  const [bpm, setBpm] = useState(100);
+  const [level, setLevel] = useState<Level>(3);
+  const [freeDurationSec, setFreeDurationSec] = useState<number | null>(null);
+  const [previousScore] = useState(72);
 
   const info = mode ? TRAINING_BY_ID[mode] : null;
   const title = info?.title ?? '트레이닝';
+  const isComposite = mode === 'COMPOSITE' || mode === 'TAU';
+  const isFree = mode === 'FREE';
+  const maxSec = SESSION_MAX_MS / 1000;
+
+  const totalDurationSec = useMemo(() => {
+    if (isComposite) return Math.min(300, maxSec);
+    if (isFree) {
+      if (freeDurationSec == null) return 0;
+      return Math.min(freeDurationSec, maxSec);
+    }
+    if (setCount === null || setTime === null) return 0;
+    return Math.min(setCount * setTime, maxSec);
+  }, [isComposite, isFree, freeDurationSec, setCount, setTime, maxSec]);
+
+  const suggestion = useMemo(
+    () => suggestNextSessionParams({ previousScore, currentBpm: bpm, currentLevel: level }),
+    [previousScore, bpm, level]
+  );
 
   useEffect(() => {
     if (user) setSelectedMember(user);
@@ -46,7 +67,10 @@ export default function TrainingSetup() {
   }, []);
 
   const isStartEnabled =
-    !!connectedDevice && !!selectedMember && setCount !== null && setTime !== null && difficulty !== null;
+    !!connectedDevice &&
+    !!selectedMember &&
+    totalDurationSec > 0 &&
+    (isComposite || isFree ? (isFree ? freeDurationSec !== null : true) : setCount !== null && setTime !== null);
 
   return (
     <MobileLayout>
@@ -89,6 +113,11 @@ export default function TrainingSetup() {
             </p>
           </div>
         )}
+
+        <p className="text-xs leading-relaxed mb-4 px-1" style={{ color: '#888888' }}>
+          공통 정책: 세션 최대 {maxSec}초 · 리듬/인지 페이즈 · Lv1~5 혼합색 0%~35% · 직전 성과에 따른 BPM/레벨
+          자동 제안(시작 전 수정 가능)
+        </p>
 
         {/* Pod 연결 */}
         <div className="mb-6">
@@ -151,42 +180,120 @@ export default function TrainingSetup() {
             트레이닝 설정
           </h2>
           <div className="space-y-4">
-            <OptionRow label="세트 수">
-              {[1, 3, 5].map((n) => (
+            <OptionRow label="BPM">
+              {[80, 100, 120, 140].map((n) => (
                 <OptionBtn
                   key={n}
                   label={String(n)}
-                  selected={setCount === n}
-                  onClick={() => setSetCount(n)}
+                  selected={bpm === n}
+                  onClick={() => setBpm(n)}
                 />
               ))}
             </OptionRow>
-            <OptionRow label="세트 시간">
-              {[30, 45, 60].map((n) => (
+            <OptionRow label="레벨 (1~5)">
+              {([1, 2, 3, 4, 5] as const).map((n) => (
                 <OptionBtn
                   key={n}
-                  label={`${n}초`}
-                  selected={setTime === n}
-                  onClick={() => setSetTime(n)}
+                  label={`Lv${n}`}
+                  selected={level === n}
+                  onClick={() => setLevel(n)}
                 />
               ))}
             </OptionRow>
-            <OptionRow label="난이도">
-              {['쉬움', '보통', '어려움'].map((d) => (
-                <OptionBtn
-                  key={d}
-                  label={d}
-                  selected={difficulty === d}
-                  onClick={() => setDifficulty(d)}
-                />
-              ))}
-            </OptionRow>
+            <div
+              className="rounded-xl p-3 text-xs mb-2"
+              style={{ backgroundColor: '#1A1A1A', color: '#B0B0B0' }}
+            >
+              <div className="font-semibold mb-1" style={{ color: '#FFFFFF' }}>
+                자동 난이도 제안 (직전 {previousScore}점)
+              </div>
+              <p className="mb-2">{suggestion.reason}</p>
+              <p style={{ color: '#AAED10' }}>
+                → BPM {suggestion.suggestedBpm}, Lv{suggestion.suggestedLevel}
+              </p>
+              <button
+                type="button"
+                className="mt-2 px-3 py-1 rounded-lg text-sm font-semibold"
+                style={{ backgroundColor: '#AAED10', color: '#000000' }}
+                onClick={() => {
+                  setBpm(suggestion.suggestedBpm);
+                  setLevel(suggestion.suggestedLevel);
+                }}
+              >
+                제안 적용
+              </button>
+            </div>
+            {isComposite && (
+              <p className="text-sm" style={{ color: '#999999' }}>
+                종합 트레이닝: 총 {totalDurationSec}초 고정 — RHYTHM 30초 ↔ COGNITIVE 30초 교차(기기·서버 시퀀스).
+              </p>
+            )}
+            {!isComposite && !isFree && (
+              <>
+                <OptionRow label="세트 수">
+                  {[1, 3, 5].map((n) => (
+                    <OptionBtn
+                      key={n}
+                      label={String(n)}
+                      selected={setCount === n}
+                      onClick={() => setSetCount(n)}
+                    />
+                  ))}
+                </OptionRow>
+                <OptionRow label="세트 시간">
+                  {[30, 45, 60].map((n) => (
+                    <OptionBtn
+                      key={n}
+                      label={`${n}초`}
+                      selected={setTime === n}
+                      onClick={() => setSetTime(n)}
+                    />
+                  ))}
+                </OptionRow>
+              </>
+            )}
+            {isFree && (
+              <>
+                <OptionRow label="자유 연습 시간">
+                  {[60, 120, 180, 300].map((n) => (
+                    <OptionBtn
+                      key={n}
+                      label={`${n}초`}
+                      selected={freeDurationSec === n}
+                      onClick={() => setFreeDurationSec(n)}
+                    />
+                  ))}
+                </OptionRow>
+                <p className="text-xs" style={{ color: '#888888' }}>
+                  점수 미산출 · 합계 시간·스트릭에만 반영
+                </p>
+              </>
+            )}
+            {!isComposite && !isFree && (
+              <p className="text-xs" style={{ color: '#777777' }}>
+                예상 총 시간: {totalDurationSec}초 (상한 {maxSec}초) · BPM {bpm} · Lv{level}
+              </p>
+            )}
           </div>
         </div>
 
         {/* 시작하기 버튼 */}
         <button
-          onClick={() => isStartEnabled && navigate('/training')}
+          onClick={() => {
+            if (!isStartEnabled || !selectedMember || !info || !mode) return;
+            const run: TrainingRunState = {
+              catalogId: mode,
+              apiMode: info.apiMode as TrainingMode,
+              userId: selectedMember.id,
+              title: info.title,
+              totalDurationSec,
+              bpm,
+              level,
+              yieldsScore: !isFree,
+              isComposite: isComposite || info.apiMode === 'COMPOSITE',
+            };
+            navigate('/training/session', { state: run });
+          }}
           disabled={!isStartEnabled}
           className="w-full py-4 rounded-3xl font-semibold transition-all"
           style={{
