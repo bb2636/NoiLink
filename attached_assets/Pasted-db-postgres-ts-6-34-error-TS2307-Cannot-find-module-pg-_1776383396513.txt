@@ -1,0 +1,299 @@
+db/postgres.ts:6:34 - error TS2307: Cannot find module 'pg' or its corresponding type declarations.
+
+6 import { Pool, PoolClient } from 'pg';
+                                   ~~~~
+
+db/postgres.ts:190:28 - error TS7006: Parameter 'row' implicitly has an 'any' type.
+
+190     return result.rows.map(row => row.key);
+                               ~~~
+
+db/postgres.ts:244:34 - error TS7006: Parameter 'row' implicitly has an 'any' type.
+
+244           return result.rows.map(row => row.key);
+                                     ~~~
+
+db/replit.ts:5:22 - error TS2307: Cannot find module '@replit/database' or its corresponding type declarations.
+
+5 import Database from '@replit/database';
+                       ~~~~~~~~~~~~~~~~~~
+
+index.ts:1:53 - error TS2307: Cannot find module 'express' or its corresponding type declarations.
+
+1 import express, { Express, Request, Response } from 'express';
+                                                      ~~~~~~~~~
+
+index.ts:2:18 - error TS2307: Cannot find module 'cors' or its corresponding type declarations.
+
+2 import cors from 'cors';
+                   ~~~~~~
+
+index.ts:3:20 - error TS2307: Cannot find module 'dotenv' or its corresponding type declarations.
+
+3 import dotenv from 'dotenv';
+                     ~~~~~~~~
+
+middleware/auth.ts:4:49 - error TS2307: Cannot find module 'express' or its corresponding type declarations.
+
+4 import { Request, Response, NextFunction } from 'express';
+                                                  ~~~~~~~~~
+
+middleware/auth.ts:19:28 - error TS2339: Property 'headers' does not exist on type 'AuthRequest'.
+
+19     const authHeader = req.headers.authorization;
+                              ~~~~~~~
+
+middleware/auth.ts:62:28 - error TS2339: Property 'headers' does not exist on type 'AuthRequest'.
+
+62     const authHeader = req.headers.authorization;
+                              ~~~~~~~
+
+middleware/auth.ts:105:28 - error TS2339: Property 'headers' does not exist on type 'AuthRequest'.
+
+105     const authHeader = req.headers.authorization;
+                               ~~~~~~~
+
+routes/admin.ts:5:34 - error TS2307: Cannot find module 'express' or its corresponding type declarations.
+
+5 import { Router, Response } from 'express';
+                                   ~~~~~~~~~
+
+routes/admin.ts:55:52 - error TS2339: Property 'query' does not exist on type 'AuthRequest'.
+
+55     const { page = 1, limit = 50, userType } = req.query;
+                                                      ~~~~~
+
+routes/admin.ts:107:50 - error TS2339: Property 'query' does not exist on type 'AuthRequest'.
+
+107     const { page = 1, limit = 50, userId } = req.query;
+                                                     ~~~~~
+
+routes/admin.ts:159:54 - error TS2339: Property 'body' does not exist on type 'AuthRequest'.
+
+159     const { type, title, content, isRequired } = req.body;
+                                                         ~~~~
+
+routes/admin.ts:206:24 - error TS2339: Property 'params' does not exist on type 'AuthRequest'.
+
+206     const { id } = req.params;
+                           ~~~~~~
+
+routes/admin.ts:207:58 - error TS2339: Property 'body' does not exist on type 'AuthRequest'.
+
+207     const { title, content, isRequired, isActive } = req.body;
+                                                             ~~~~
+
+routes/admin.ts:245:24 - error TS2339: Property 'params' does not exist on type 'AuthRequest'.
+
+245     const { id } = req.params;
+                           ~~~~~~
+
+routes/admin.ts:295:29 - error TS2339: Property 'headers' does not exist on type 'AuthRequest'.
+
+295     const contentType = req.headers['content-type'] || '';
+                                ~~~~~~~
+
+routes/admin.ts:311:50 - error TS2339: Property 'body' does not exist on type 'AuthRequest'.
+
+311     const { title, imageUrl, imageBase64 } = req.body;
+                                                     ~~~~
+
+routes/admin.ts:363:24 - error TS2339: Property 'params' does not exist on type 'AuthRequest'.
+
+363     const { id } = req.params;
+                           ~~~~~~
+
+routes/admin.ts:364:44 - error TS2339: Property 'body' does not exist on type 'AuthRequest'.
+
+364     const { order, title, imageUrl } = req.body;
+                                               ~~~~
+
+routes/admin.ts:397:24 - error TS2339: Property 'params' does not exist on type 'AuthRequest'.
+
+397     const { id } = req.params;
+                           ~~~~~~
+
+routes/admin.ts:434:24 - error TS2339: Property 'params' does not exist on type 'AuthRequest'.
+
+434     const { id } = req.params;
+                           ~~~~~~
+
+routes/admin.ts:435:28 - error TS2339: Property 'body' does not exist on type 'AuthRequest'.
+
+435     const { answer } = req.body;
+                               ~~~~
+
+routes/home.ts:1:43 - error TS2307: Cannot find module 'express' or its corresponding type declarations.
+
+1 import { Router, Request, Response } from 'express';
+                                            ~~~~~~~~~
+
+routes/metrics.ts:6:43 - error TS2307: Cannot find module 'express' or its corresponding type declarations.
+
+6 import { Router, Request, Response } from 'express';
+                                            ~~~~~~~~~
+
+routes/rankings.ts:5:43 - error TS2307: Cannot find module 'express' or its corresponding type declarations.
+
+5 import { Router, Request, Response } from 'express';
+                                            ~~~~~~~~~
+
+routes/reports.ts:6:43 - error TS2307: Cannot find module 'express' or its corresponding type declarations.
+
+6 import { Router, Request, Response } from 'express';
+                                            ~~~~~~~~~
+
+routes/scores.ts:1:43 - error TS2307: Cannot find module 'express' or its corresponding type declarations.
+
+1 import { Router, Request, Response } from 'express';
+                                            ~~~~~~~~~
+
+routes/sessions.ts:6:43 - error TS2307: Cannot find module 'express' or its corresponding type declarations.
+
+6 import { Router, Request, Response } from 'express';
+                                            ~~~~~~~~~
+
+routes/terms.ts:5:43 - error TS2307: Cannot find module 'express' or its corresponding type declarations.
+
+5 import { Router, Request, Response } from 'express';
+                                            ~~~~~~~~~
+
+routes/training.ts:1:43 - error TS2307: Cannot find module 'express' or its corresponding type declarations.
+
+1 import { Router, Request, Response } from 'express';
+                                            ~~~~~~~~~
+
+routes/users.ts:1:43 - error TS2307: Cannot find module 'express' or its corresponding type declarations.
+
+1 import { Router, Request, Response } from 'express';
+                                            ~~~~~~~~~
+
+scripts/check-db.ts:4:20 - error TS2307: Cannot find module 'dotenv' or its corresponding type declarations.
+
+4 import dotenv from 'dotenv';
+                     ~~~~~~~~
+
+scripts/check-env.ts:4:20 - error TS2307: Cannot find module 'dotenv' or its corresponding type declarations.
+
+4 import dotenv from 'dotenv';
+                     ~~~~~~~~
+
+scripts/fix-db.ts:7:20 - error TS2307: Cannot find module 'dotenv' or its corresponding type declarations.
+
+7 import dotenv from 'dotenv';
+                     ~~~~~~~~
+
+scripts/start-with-supabase.ts:4:20 - error TS2307: Cannot find module 'dotenv' or its corresponding type declarations.
+
+4 import dotenv from 'dotenv';
+                     ~~~~~~~~
+
+scripts/test-all-connection-methods.ts:4:20 - error TS2307: Cannot find module 'dotenv' or its corresponding type declarations.
+
+4 import dotenv from 'dotenv';
+                     ~~~~~~~~
+
+scripts/test-all-connection-methods.ts:7:22 - error TS2307: Cannot find module 'pg' or its corresponding type declarations.
+
+7 import { Pool } from 'pg';
+                       ~~~~
+
+scripts/test-connection-pooling.ts:5:20 - error TS2307: Cannot find module 'dotenv' or its corresponding type declarations.
+
+5 import dotenv from 'dotenv';
+                     ~~~~~~~~
+
+scripts/test-connection-pooling.ts:8:22 - error TS2307: Cannot find module 'pg' or its corresponding type declarations.
+
+8 import { Pool } from 'pg';
+                       ~~~~
+
+scripts/test-direct-connection.ts:4:20 - error TS2307: Cannot find module 'dotenv' or its corresponding type declarations.
+
+4 import dotenv from 'dotenv';
+                     ~~~~~~~~
+
+scripts/test-direct-connection.ts:7:22 - error TS2307: Cannot find module 'pg' or its corresponding type declarations.
+
+7 import { Pool } from 'pg';
+                       ~~~~
+
+scripts/test-new-pooling-url.ts:4:20 - error TS2307: Cannot find module 'dotenv' or its corresponding type declarations.
+
+4 import dotenv from 'dotenv';
+                     ~~~~~~~~
+
+scripts/test-new-pooling-url.ts:7:22 - error TS2307: Cannot find module 'pg' or its corresponding type declarations.
+
+7 import { Pool } from 'pg';
+                       ~~~~
+
+scripts/test-supabase-connection.ts:4:20 - error TS2307: Cannot find module 'dotenv' or its corresponding type declarations.
+
+4 import dotenv from 'dotenv';
+                     ~~~~~~~~
+
+scripts/test-with-pooling.ts:5:20 - error TS2307: Cannot find module 'dotenv' or its corresponding type declarations.
+
+5 import dotenv from 'dotenv';
+                     ~~~~~~~~
+
+scripts/test-with-pooling.ts:8:22 - error TS2307: Cannot find module 'pg' or its corresponding type declarations.
+
+8 import { Pool } from 'pg';
+                       ~~~~
+
+scripts/verify-supabase-url.ts:4:20 - error TS2307: Cannot find module 'dotenv' or its corresponding type declarations.
+
+4 import dotenv from 'dotenv';
+                     ~~~~~~~~
+
+utils/jwt.ts:4:17 - error TS2307: Cannot find module 'jsonwebtoken' or its corresponding type declarations.
+
+4 import jwt from 'jsonwebtoken';
+                  ~~~~~~~~~~~~~~
+
+utils/password.ts:1:20 - error TS2307: Cannot find module 'bcryptjs' or its corresponding type declarations.
+
+1 import bcrypt from 'bcryptjs';
+                     ~~~~~~~~~~
+
+
+Found 52 errors in 27 files.
+
+Errors  Files
+     3  db/postgres.ts:6
+     1  db/replit.ts:5
+     3  index.ts:1
+     4  middleware/auth.ts:4
+    14  routes/admin.ts:5
+     1  routes/home.ts:1
+     1  routes/metrics.ts:6
+     1  routes/rankings.ts:5
+     1  routes/reports.ts:6
+     1  routes/scores.ts:1
+     1  routes/sessions.ts:6
+     1  routes/terms.ts:5
+     1  routes/training.ts:1
+     1  routes/users.ts:1
+     1  scripts/check-db.ts:4
+     1  scripts/check-env.ts:4
+     1  scripts/fix-db.ts:7
+     1  scripts/start-with-supabase.ts:4
+     2  scripts/test-all-connection-methods.ts:4
+     2  scripts/test-connection-pooling.ts:5
+     2  scripts/test-direct-connection.ts:4
+     2  scripts/test-new-pooling-url.ts:4
+     1  scripts/test-supabase-connection.ts:4
+     2  scripts/test-with-pooling.ts:5
+     1  scripts/verify-supabase-url.ts:4
+     1  utils/jwt.ts:4
+     1  utils/password.ts:1
+npm error Lifecycle script `build` failed with error:
+npm error code 2
+npm error path C:\NoiLink\server
+npm error workspace @noilink/server@1.0.0
+npm error location C:\NoiLink\server
+npm error command failed
+npm error command C:\WINDOWS\system32\cmd.exe /d /s /c tsc
+PS C:\NoiLink\server>
