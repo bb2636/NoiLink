@@ -91,7 +91,7 @@ app.use((req: Request, res: Response) => {
 // 서버 시작
 app.listen(PORT, async () => {
   console.log(`🚀 Server is running on port ${PORT}`);
-  console.log(`📊 Database: Replit Database`);
+  console.log(`📊 Database: ${process.env.DB_TYPE || 'auto-detect'}`);
   console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
   
   // 데이터베이스 초기화
