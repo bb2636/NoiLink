@@ -4,13 +4,7 @@ import type { User } from '@noilink/shared';
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@admin.com';
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (() => {
-  if (process.env.NODE_ENV === 'production') {
-    console.warn('⚠️  ADMIN_PASSWORD not set — skipping admin seed in production');
-    return '';
-  }
-  return 'admin1234';
-})();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin1234';
 
 export async function seedAdminAccount(): Promise<void> {
   try {
