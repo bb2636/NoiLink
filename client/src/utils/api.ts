@@ -18,17 +18,8 @@ class ApiClient {
         ...(options.headers as Record<string, string> || {}),
       };
       
-      // JWT 토큰이 있으면 Authorization 헤더에 추가
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
-      }
-      
-      // 하위 호환성을 위해 x-user-id도 유지 (토큰이 없을 때만)
-      if (!token) {
-        const userId = localStorage.getItem('user_id') || localStorage.getItem(STORAGE_KEYS.USER_ID);
-        if (userId) {
-          headers['x-user-id'] = userId;
-        }
       }
       
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {

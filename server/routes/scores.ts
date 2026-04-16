@@ -1,14 +1,18 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
+import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
+import { userCanActOnTargetUserId } from '../utils/session-user-policy.js';
+import type { User } from '@noilink/shared';
 
 const router = Router();
 
-/**
- * POST /api/scores
- * 사용자 점수 저장
- */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', optionalAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
     const { userId, gameId, score, accuracy, timeSpent, level } = req.body;
     
     if (!userId || !gameId || score === undefined) {
@@ -16,6 +20,11 @@ router.post('/', async (req: Request, res: Response) => {
         success: false,
         error: 'Missing required fields: userId, gameId, score'
       });
+    }
+
+    const users: User[] = (await db.get('users')) || [];
+    if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
     }
     
     const scoreData = {
@@ -29,25 +38,22 @@ router.post('/', async (req: Request, res: Response) => {
       createdAt: new Date().toISOString()
     };
     
-    // scores 배열에 추가
     const scores = await db.get('scores') || [];
     scores.push(scoreData);
     await db.set('scores', scores);
     
-    // 사용자의 최고 점수 업데이트
     const userScores = scores.filter((s: any) => s.userId === userId && s.gameId === gameId);
     const bestScore = Math.max(...userScores.map((s: any) => s.score));
     
-    // users 데이터 업데이트
-    const users = await db.get('users') || [];
     const userIndex = users.findIndex((u: any) => u.id === userId);
     
     if (userIndex !== -1) {
-      if (!users[userIndex].bestScores) {
-        users[userIndex].bestScores = {};
+      const u = users[userIndex] as any;
+      if (!u.bestScores) {
+        u.bestScores = {};
       }
-      users[userIndex].bestScores[gameId] = bestScore;
-      users[userIndex].totalGamesPlayed = (users[userIndex].totalGamesPlayed || 0) + 1;
+      u.bestScores[gameId] = bestScore;
+      u.totalGamesPlayed = (u.totalGamesPlayed || 0) + 1;
       await db.set('users', users);
     }
     
@@ -60,13 +66,18 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/scores/user/:userId
- * 특정 사용자의 모든 점수 조회
- */
-router.get('/user/:userId', async (req: Request, res: Response) => {
+router.get('/user/:userId', optionalAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
     const { userId } = req.params;
+    const users: User[] = (await db.get('users')) || [];
+    if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+
     const scores = await db.get('scores') || [];
     const userScores = scores.filter((s: any) => s.userId === userId);
     
@@ -79,12 +90,13 @@ router.get('/user/:userId', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/scores/game/:gameId
- * 특정 게임의 랭킹 조회
- */
-router.get('/game/:gameId', async (req: Request, res: Response) => {
+router.get('/game/:gameId', optionalAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
     const { gameId } = req.params;
     const { limit = 100 } = req.query;
     
@@ -103,38 +115,26 @@ router.get('/game/:gameId', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/scores/leaderboard
- * 전체 랭킹 조회
- */
-router.get('/leaderboard', async (req: Request, res: Response) => {
+router.get('/leaderboard', optionalAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
     const { limit = 100 } = req.query;
     
     const scores = await db.get('scores') || [];
     const users = await db.get('users') || [];
     
-    // 사용자별 최고 점수 집계
-    const userBestScores: Record<string, number> = {};
-    
-    scores.forEach((score: any) => {
-      const key = `${score.userId}_${score.gameId}`;
-      if (!userBestScores[key] || score.score > userBestScores[key]) {
-        userBestScores[key] = score.score;
-      }
-    });
-    
-    // 전체 점수 합계 계산
     const leaderboard = users.map((user: any) => {
       const userScores = scores.filter((s: any) => s.userId === user.id);
       const totalScore = userScores.reduce((sum: number, s: any) => sum + s.score, 0);
-      const bestScores = user.bestScores || {};
       
       return {
         userId: user.id,
         username: user.username || user.name,
         totalScore,
-        bestScores,
         gamesPlayed: userScores.length,
         averageScore: userScores.length > 0 ? totalScore / userScores.length : 0
       };

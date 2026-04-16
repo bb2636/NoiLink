@@ -53,11 +53,16 @@ export default function Admin() {
         return;
       }
 
-      // 관리자 API 호출 시 헤더에 userId 포함
+      const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
+      const authHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        authHeaders['Authorization'] = `Bearer ${token}`;
+      }
+
       const dashboardRes = await fetch('/api/admin/dashboard', {
-        headers: {
-          'x-user-id': userId,
-        },
+        headers: authHeaders,
       });
 
       if (!dashboardRes.ok) {
@@ -70,9 +75,7 @@ export default function Admin() {
       }
 
       const usersRes = await fetch('/api/admin/users?limit=100', {
-        headers: {
-          'x-user-id': userId,
-        },
+        headers: authHeaders,
       });
 
       if (usersRes.ok) {

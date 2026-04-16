@@ -516,14 +516,16 @@ router.post('/reset-password', async (req: Request, res: Response) => {
  * POST /api/users/inquiries
  * 문의 생성 (회원용)
  */
-router.post('/inquiries', async (req: Request, res: Response) => {
+router.post('/inquiries', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { userId, title, content } = req.body;
+    const authReq = req as AuthRequest;
+    const { title, content } = req.body;
+    const userId = authReq.user!.id;
     
-    if (!userId || !title || !content) {
+    if (!title || !content) {
       return res.status(400).json({
         success: false,
-        error: 'userId, title, and content are required'
+        error: 'title and content are required'
       });
     }
     
@@ -564,11 +566,17 @@ router.post('/inquiries', async (req: Request, res: Response) => {
 
 /**
  * GET /api/users/inquiries/:userId
- * 사용자별 문의 목록 조회 (회원용)
+ * 사용자별 문의 목록 조회 (본인 또는 관리자만)
  */
-router.get('/inquiries/:userId', async (req: Request, res: Response) => {
+router.get('/inquiries/:userId', requireAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
     const { userId } = req.params;
+
+    if (authReq.user!.id !== userId && authReq.user!.userType !== 'ADMIN') {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+
     const inquiries = await db.get('inquiries') || [];
     const userInquiries = inquiries.filter((i: any) => i.userId === userId);
     
@@ -638,12 +646,18 @@ router.get('/organization-members', async (req: Request, res: Response) => {
 
 /**
  * GET /api/users/:userId
- * 특정 사용자 정보 조회
+ * 특정 사용자 정보 조회 (본인 또는 관리자만)
  */
-router.get('/:userId', async (req: Request, res: Response) => {
+router.get('/:userId', requireAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
     const { userId } = req.params;
     const users = await db.get('users') || [];
+
+    if (authReq.user!.id !== userId && authReq.user!.userType !== 'ADMIN') {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+
     const user = users.find((u: any) => u.id === userId);
     
     if (!user) {
@@ -705,9 +719,15 @@ router.put('/:userId', requireAuth, async (req: Request, res: Response) => {
  * GET /api/users/:userId/stats
  * 사용자 통계 조회
  */
-router.get('/:userId/stats', async (req: Request, res: Response) => {
+router.get('/:userId/stats', requireAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
     const { userId } = req.params;
+
+    if (authReq.user!.id !== userId && authReq.user!.userType !== 'ADMIN') {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+
     const users = await db.get('users') || [];
     const scores = await db.get('scores') || [];
     

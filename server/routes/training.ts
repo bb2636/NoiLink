@@ -1,12 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
+import { requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
-/**
- * GET /api/training/games
- * 모든 트레이닝 게임 목록 조회
- */
 router.get('/games', async (req: Request, res: Response) => {
   try {
     const games = await db.get('games') || [];
@@ -19,10 +16,6 @@ router.get('/games', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/training/games/:gameId
- * 특정 게임 정보 조회
- */
 router.get('/games/:gameId', async (req: Request, res: Response) => {
   try {
     const { gameId } = req.params;
@@ -42,23 +35,23 @@ router.get('/games/:gameId', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * POST /api/training/games
- * 새 게임 생성 (관리자용)
- */
-router.post('/games', async (req: Request, res: Response) => {
+router.post('/games', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const gameData = req.body;
+    const { name, description, category, difficulty } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'Game name is required' });
+    }
+
     const games = await db.get('games') || [];
     
     const newGame = {
-      id: gameData.id || `game_${Date.now()}`,
-      name: gameData.name,
-      description: gameData.description,
-      category: gameData.category,
-      difficulty: gameData.difficulty,
+      id: `game_${Date.now()}`,
+      name,
+      description: description || '',
+      category: category || 'general',
+      difficulty: difficulty || 'medium',
       createdAt: new Date().toISOString(),
-      ...gameData
     };
     
     games.push(newGame);

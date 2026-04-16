@@ -1,31 +1,31 @@
-/**
- * Home API 라우트
- * 홈 화면 데이터 (컨디션, 미션, 추천 트레이닝, 배너)
- */
-
 import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
 import type { DailyCondition, DailyMission, Session, MetricsScore, User } from '@noilink/shared';
+import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
+import { userCanActOnTargetUserId } from '../utils/session-user-policy.js';
 
 const router = Router();
 
-/**
- * GET /api/home/condition/:userId
- * 오늘의 컨디션 조회
- */
-router.get('/condition/:userId', async (req: Request, res: Response) => {
+router.get('/condition/:userId', optionalAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
     const { userId } = req.params;
+    const users: User[] = (await db.get('users')) || [];
+    if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+
     const today = new Date().toISOString().split('T')[0];
     
-    // 오늘의 컨디션 조회
     const conditions = await db.get('dailyConditions') || [];
     let condition = conditions.find((c: DailyCondition) => 
       c.userId === userId && c.date === today
     );
     
     if (!condition) {
-      // 최근 3회 트레이닝 데이터로 계산
       const sessions = await db.get('sessions') || [];
       const recentSessions = sessions
         .filter((s: Session) => s.userId === userId && s.isValid)
@@ -35,7 +35,6 @@ router.get('/condition/:userId', async (req: Request, res: Response) => {
         .slice(0, 3);
       
       if (recentSessions.length === 0) {
-        // 데이터가 없을 때 기본 컨디션 반환
         condition = {
           userId,
           date: today,
@@ -57,7 +56,6 @@ router.get('/condition/:userId', async (req: Request, res: Response) => {
         .map((s: Session) => metricsScores.find((m: MetricsScore) => m.sessionId === s.id))
         .filter((m: MetricsScore | undefined): m is MetricsScore => m !== undefined);
       
-      // 컨디션 점수 계산
       const avgRT = recentSessions.reduce((sum: number, s: Session) => sum + (s.duration || 0), 0) / recentSessions.length;
       const avgAcc = recentScores.length > 0
         ? recentScores.reduce((sum: number, m: MetricsScore) => {
@@ -86,7 +84,7 @@ router.get('/condition/:userId', async (req: Request, res: Response) => {
         badge,
         avgReactionTime: avgRT,
         avgAccuracy: avgAcc,
-        errorCount: 0, // TODO: 실제 오류 횟수 계산
+        errorCount: 0,
         duration: recentSessions.reduce((sum: number, s: Session) => sum + s.duration, 0),
         calculatedAt: new Date().toISOString(),
       };
@@ -104,23 +102,26 @@ router.get('/condition/:userId', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/home/mission/:userId
- * 오늘의 미션 조회
- */
-router.get('/mission/:userId', async (req: Request, res: Response) => {
+router.get('/mission/:userId', optionalAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
     const { userId } = req.params;
+    const users: User[] = (await db.get('users')) || [];
+    if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+
     const today = new Date().toISOString().split('T')[0];
     
-    // 오늘의 미션 조회
     const missions = await db.get('dailyMissions') || [];
     let mission = missions.find((m: DailyMission) => 
       m.userId === userId && m.date === today
     );
     
     if (!mission) {
-      // 최근 세션 데이터로 미션 생성
       const sessions = await db.get('sessions') || [];
       const recentSessions = sessions
         .filter((s: Session) => s.userId === userId && s.isValid)
@@ -173,22 +174,23 @@ router.get('/mission/:userId', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/home/quickstart/:userId
- * AI 맞춤 트레이닝 추천
- */
-router.get('/quickstart/:userId', async (req: Request, res: Response) => {
+router.get('/quickstart/:userId', optionalAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
     const { userId } = req.params;
-    
-    // 사용자 정보 조회
-    const users = await db.get('users') || [];
+    const users: User[] = (await db.get('users')) || [];
+    if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+
     const user = users.find((u: User) => u.id === userId);
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
     
-    // 최근 7일 6대 지표 평균 계산
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     
@@ -217,7 +219,6 @@ router.get('/quickstart/:userId', async (req: Request, res: Response) => {
       });
     }
     
-    // 최저 지표 찾기
     const metrics = [
       { mode: 'MEMORY', score: 0 },
       { mode: 'COMPREHENSION', score: 0 },
@@ -245,7 +246,6 @@ router.get('/quickstart/:userId', async (req: Request, res: Response) => {
       curr.score < min.score ? curr : min
     );
     
-    // 최근 3회 컨디션 변화율 계산 (피로도)
     const recentSessions3 = recentSessions.slice(0, 3);
     const fatigueLevel = recentSessions3.length >= 2
       ? Math.abs((recentSessions3[0].score || 0) - (recentSessions3[recentSessions3.length - 1].score || 0))
@@ -273,14 +273,9 @@ router.get('/quickstart/:userId', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/home/banners
- * 홈 화면 배너 목록 조회 (일반 유저용)
- */
 router.get('/banners', async (req: Request, res: Response) => {
   try {
     const banners = await db.get('banners') || [];
-    // order 순서로 정렬
     const sortedBanners = banners.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
     res.json({ success: true, data: sortedBanners });
   } catch (error) {
