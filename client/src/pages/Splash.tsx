@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Logo from '../components/Logo';
+import splashLogo from '../assets/noilogo.png';
 import splashBg from '../assets/brainimals/noi_splash.png';
 
 /**
@@ -39,7 +39,7 @@ export default function Splash() {
       }}
     >
       <div className="flex flex-col items-center" style={{ gap: '16px' }}>
-        <Logo size="lg" />
+        <img src={splashLogo} alt="NoiLink" className="h-12 w-auto object-contain" />
         <p
           className="text-sm"
           style={{ color: '#FFFFFF', marginTop: '12px' }}
