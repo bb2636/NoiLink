@@ -149,8 +149,9 @@ export default function RadarChart({
             }
           });
           const hit = 26;
-          if (best && best.d <= hit) {
-            emitPoint(best.label, best.value);
+          const found = best as { label: string; value: number; d: number } | null;
+          if (found && found.d <= hit) {
+            emitPoint(found.label, found.value);
           }
         }}
       />
