@@ -6,7 +6,7 @@ import { SESSION_MAX_MS } from '@noilink/shared';
 import { colors } from '../theme';
 import { trainingById } from '../training/trainingConfig';
 import type { RootStackParamList } from '../navigation/types';
-import { connectDevice, subscribeReactionSignal } from '../ble/noiPodBle';
+import { bleManager } from '../ble/BleManager';
 import { useConnectedPod } from '../context/ConnectedPodContext';
 import { submitTrainingToServer } from '../api/trainingSubmit';
 import { getStoredToken, resolveTrainingUserId } from '../auth/storage';
@@ -38,11 +38,15 @@ export default function TrainingSessionScreen({
     (async () => {
       if (!pod) return;
       try {
-        const device = await connectDevice(pod.id);
+        await bleManager.connect(pod.id);
         if (!mounted) return;
-        subRef.current = subscribeReactionSignal(device, () => {
-          setReactionCount((c) => c + 1);
-        });
+        subRef.current = bleManager.subscribeToCharacteristic(
+          '00000000-0000-0000-0000-000000000000',
+          '00000000-0000-0000-0000-000000000001',
+          (_base64) => {
+            setReactionCount((c) => c + 1);
+          }
+        );
       } catch {
         /* 연결 실패 시에도 타이머 뼈대는 동작 */
       }

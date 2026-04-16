@@ -36,6 +36,9 @@ export default function TrainingListScreen({ navigation }: { navigation: Nav }) 
           )
         ) : null}
       </View>
+      <Pressable style={styles.bleLink} onPress={() => navigation.navigate('BleScreen')}>
+        <Text style={styles.bleLinkText}>BLE 테스트 화면</Text>
+      </Pressable>
       <FlatList
         data={TRAINING_LIST}
         keyExtractor={(item) => item.id}
@@ -74,6 +77,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   loginChipText: { fontSize: 13, fontWeight: '800', color: colors.text },
+  bleLink: { alignSelf: 'flex-start', marginBottom: 12, paddingVertical: 6 },
+  bleLinkText: { fontSize: 12, color: colors.textMuted, fontWeight: '600', textDecorationLine: 'underline' },
   heading: {
     fontSize: 24,
     fontWeight: '700',

@@ -29,7 +29,11 @@ APK를 직접 빌드하려면 Android Studio에서 `android` 폴더를 연 뒤 *
 
 ## 코드 구조
 
-- `src/ble/noiPodBle.ts` — 권한, 스캔, 연결. 반응 notify는 `subscribeReactionSignal`에 UUID 확정 후 구현.
+- `src/ble/BleManager.ts` — 싱글톤 BLE(권한·스캔·연결·해제·notify·write). `subscribeToCharacteristic(service, char, onBase64)` / `writeCharacteristic(service, char, Uint8Array|string)`.
+- `src/ble/bleEncoding.ts` — base64 ↔ `Uint8Array`, UTF-8→base64.
+- `src/ble/ble.types.ts`, `src/ble/ble.hooks.ts` — 타입·`useBle()` 훅.
+- `src/ble/webviewBridge.ts` — WebView로 데이터 넘길 때용 플레이스홀더(`sendBleDataToWebView`).
+- `src/screens/BleScreen.tsx` — BLE 스모크 테스트 화면(트레이닝 목록에서 링크).
 - `src/training/trainingConfig.ts` — `@noilink/shared` 카탈로그와 동일, `apiMode`는 `POST /sessions`용.
 - `src/api/trainingSubmit.ts` — 세션 저장 후 `POST /metrics/calculate`(점수 모드). `EXPO_PUBLIC_*` 필요.
 - `src/config.ts` — API URL·개발용 사용자 ID.

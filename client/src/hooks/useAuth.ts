@@ -1,19 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { STORAGE_KEYS } from '../utils/constants';
 import type { User } from '@noilink/shared';
+import { isNoiLinkNativeShell } from '../native/initNativeBridge';
+import { notifyNativeClearSession, notifyNativePersistSession } from '../native/nativeBridgeClient';
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-  
-  useEffect(() => {
-    checkAuth();
-  }, []);
-  
-  const checkAuth = async () => {
+
+  const checkAuth = useCallback(async () => {
     try {
       const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
       
@@ -70,8 +68,23 @@ export function useAuth() {
     } finally {
       setLoading(false);
     }
-  };
-  
+  }, [navigate]);
+
+  const checkAuthRef = useRef(checkAuth);
+  checkAuthRef.current = checkAuth;
+
+  useEffect(() => {
+    void checkAuth();
+  }, [checkAuth]);
+
+  useEffect(() => {
+    const onNativeSession = () => {
+      void checkAuthRef.current();
+    };
+    window.addEventListener('noilink-native-session', onNativeSession);
+    return () => window.removeEventListener('noilink-native-session', onNativeSession);
+  }, []);
+
   const login = async (email: string, password: string) => {
     try {
       const response = await api.login(email, password);
@@ -90,6 +103,9 @@ export function useAuth() {
         localStorage.setItem(STORAGE_KEYS.USER_ID, user.id);
         localStorage.setItem(STORAGE_KEYS.USERNAME, user.username);
         localStorage.setItem(STORAGE_KEYS.TOKEN, token);
+        if (isNoiLinkNativeShell()) {
+          notifyNativePersistSession(token, user.id, user.username);
+        }
 
         return { success: true, user };
       }
@@ -122,6 +138,9 @@ export function useAuth() {
             };
           }
           localStorage.setItem(STORAGE_KEYS.TOKEN, token);
+          if (isNoiLinkNativeShell()) {
+            notifyNativePersistSession(token, user.id, user.username);
+          }
         }
 
         setUser(user);
@@ -140,6 +159,9 @@ export function useAuth() {
     localStorage.removeItem(STORAGE_KEYS.USER_ID);
     localStorage.removeItem(STORAGE_KEYS.USERNAME);
     localStorage.removeItem(STORAGE_KEYS.TOKEN);
+    if (isNoiLinkNativeShell()) {
+      notifyNativeClearSession();
+    }
     navigate('/login');
   };
 
