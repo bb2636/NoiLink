@@ -19,7 +19,7 @@ This is an **npm monorepo** with three workspaces:
 - **Frontend**: React 18, Vite, TypeScript, Tailwind CSS, Framer Motion, React Router v6
 - **Backend**: Node.js, Express.js, TypeScript (tsx)
 - **Database**: Auto-selects: PostgreSQL (if DATABASE_URL set), Replit Database (if REPL_ID set), or local JSON fallback
-- **Auth**: JWT tokens
+- **Auth**: JWT tokens with bcryptjs password hashing
 
 ## Development
 
@@ -39,6 +39,13 @@ cd shared && npm run build
 - Vite configured with `host: '0.0.0.0'`, `allowedHosts: true` for Replit proxy compatibility
 - Backend port: 3001 (set via `PORT` env var)
 
+## Environment Variables
+
+- `JWT_SECRET` — Required in production. Auto-generated for dev.
+- `ADMIN_EMAIL` / `ADMIN_USERNAME` / `ADMIN_PASSWORD` — Admin seed credentials. In production, `ADMIN_PASSWORD` must be set or seeding is skipped.
+- `DB_TYPE` — Explicit DB selection: `postgres`, `replit`, or `local`
+- `DATABASE_URL` — PostgreSQL connection string
+
 ## Database
 
 Auto-detection priority:
@@ -47,12 +54,20 @@ Auto-detection priority:
 3. `REPLIT_DB_URL` or `REPL_ID` → Replit Database
 4. Fallback → Local JSON file at `server/data/`
 
+## Security
+
+- Passwords hashed with bcryptjs (backward-compatible with legacy plaintext)
+- JWT secret enforced via environment variable in production
+- Auth middleware protects user update endpoints (self-or-admin only)
+- x-user-id header bypass removed
+
 ## Admin Account
 
-Default admin: `admin@admin.com` (created automatically on first run via seed)
+Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production without `ADMIN_PASSWORD`)
 
 ## Deployment
 
 - Target: autoscale
 - Build: `npm run build` (builds shared → client → server)
-- Run: `cd server && npm start` (serves built Express app on port 5000 in production)
+- Run: `cd server && npm start` (serves built Express app + static client files)
+- Server auto-detects built vs dev mode for correct `client/dist` path resolution

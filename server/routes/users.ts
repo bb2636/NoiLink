@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
 import type { User } from '@noilink/shared';
 import { generateToken, extractTokenFromHeader, verifyToken } from '../utils/jwt.js';
+import { hashPassword, comparePassword } from '../utils/password.js';
+import { requireAuth, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -59,13 +61,13 @@ router.post('/', async (req: Request, res: Response) => {
       updatedAt: undefined,
     };
     
-    // 비밀번호 저장 (실제 운영 시 해시화 필요)
     if (password && email) {
+      const hashed = await hashPassword(password);
       const passwords = await db.get('passwords') || [];
       passwords.push({
         userId: newUser.id,
         email: email,
-        password: password, // 실제 운영 시 bcrypt 등으로 해시화
+        password: hashed,
         createdAt: new Date().toISOString(),
       });
       await db.set('passwords', passwords);
@@ -170,9 +172,8 @@ router.post('/login', async (req: Request, res: Response) => {
       });
     }
     
-    // 비밀번호 확인
     const passwordRecord = passwords.find((p: any) => p.userId === user.id);
-    if (!passwordRecord || passwordRecord.password !== password) {
+    if (!passwordRecord || !(await comparePassword(password, passwordRecord.password))) {
       return res.status(401).json({
         success: false,
         error: 'Invalid email or password'
@@ -294,15 +295,14 @@ router.put('/me', async (req: Request, res: Response) => {
       const passwords = await db.get('passwords') || [];
       const passwordEntry = passwords.find((p: any) => p.userId === user.id || p.email === user.email);
       
-      if (!passwordEntry || passwordEntry.password !== currentPassword) {
+      if (!passwordEntry || !(await comparePassword(currentPassword, passwordEntry.password))) {
         return res.status(401).json({
           success: false,
           error: 'Current password is incorrect'
         });
       }
       
-      // 새 비밀번호로 업데이트
-      passwordEntry.password = newPassword;
+      passwordEntry.password = await hashPassword(newPassword);
       passwordEntry.updatedAt = new Date().toISOString();
       await db.set('passwords', passwords);
     }
@@ -483,17 +483,16 @@ router.post('/reset-password', async (req: Request, res: Response) => {
       });
     }
     
-    // 비밀번호 업데이트
+    const hashed = await hashPassword(password);
     const passwordIndex = passwords.findIndex((p: any) => p.userId === user.id);
     if (passwordIndex !== -1) {
-      passwords[passwordIndex].password = password; // 실제 운영 시 bcrypt로 해시화
+      passwords[passwordIndex].password = hashed;
       passwords[passwordIndex].updatedAt = new Date().toISOString();
     } else {
-      // 비밀번호 레코드가 없으면 새로 생성
       passwords.push({
         userId: user.id,
         email: user.email,
-        password: password, // 실제 운영 시 bcrypt로 해시화
+        password: hashed,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
@@ -662,12 +661,17 @@ router.get('/:userId', async (req: Request, res: Response) => {
 
 /**
  * PUT /api/users/:userId
- * 사용자 정보 업데이트
+ * 사용자 정보 업데이트 (본인 또는 관리자만 가능)
  */
-router.put('/:userId', async (req: Request, res: Response) => {
+router.put('/:userId', requireAuth, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
     const { userId } = req.params;
     const updateData = req.body;
+
+    if (authReq.user!.id !== userId && authReq.user!.userType !== 'ADMIN') {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
     
     const users = await db.get('users') || [];
     const userIndex = users.findIndex((u: any) => u.id === userId);
@@ -675,11 +679,14 @@ router.put('/:userId', async (req: Request, res: Response) => {
     if (userIndex === -1) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
+
+    const { id: _id, userType: _ut, password: _pw, ...safeData } = updateData;
     
     users[userIndex] = {
       ...users[userIndex],
-      ...updateData,
-      id: userId, // ID는 변경 불가
+      ...safeData,
+      id: userId,
+      userType: authReq.user!.userType === 'ADMIN' ? (updateData.userType || users[userIndex].userType) : users[userIndex].userType,
       updatedAt: new Date().toISOString()
     };
     

@@ -3,12 +3,12 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { existsSync } from 'fs';
 import { db } from './db.js';
 import { initializeNormConfig } from './init-norm.js';
 import { runMigrations } from './utils/migration.js';
 import { seedAdminAccount } from './utils/seed-admin.js';
 
-// 환경 변수 로드 (루트 .env 파일도 확인)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 dotenv.config({ path: join(__dirname, '.env') });
@@ -17,19 +17,9 @@ dotenv.config({ path: join(__dirname, '..', '.env') });
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
 
-// 미들웨어 설정
 app.use(cors());
-app.use(express.json({ limit: '30mb' })); // 배너 이미지 base64 업로드 지원
+app.use(express.json({ limit: '30mb' }));
 app.use(express.urlencoded({ extended: true, limit: '30mb' }));
-
-// 기본 라우트
-app.get('/', (req: Request, res: Response) => {
-  res.json({ 
-    message: 'NoiLink API Server',
-    version: '1.0.0',
-    status: 'running'
-  });
-});
 
 // Health check 엔드포인트
 app.get('/health', async (req: Request, res: Response) => {
@@ -73,7 +63,19 @@ app.use('/api/home', homeRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/terms', termsRoutes);
 
-// 에러 핸들링 미들웨어
+const isBuilt = __dirname.endsWith('dist');
+const serverRoot = isBuilt ? join(__dirname, '..') : __dirname;
+const clientDist = join(serverRoot, '..', 'client', 'dist');
+if (existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+  app.get('*', (req: Request, res: Response, next: Function) => {
+    if (req.path.startsWith('/api/') || req.path === '/health') {
+      return next();
+    }
+    res.sendFile(join(clientDist, 'index.html'));
+  });
+}
+
 app.use((err: Error, req: Request, res: Response, next: Function) => {
   console.error('Error:', err);
   res.status(500).json({
@@ -82,7 +84,6 @@ app.use((err: Error, req: Request, res: Response, next: Function) => {
   });
 });
 
-// 404 핸들러
 app.use((req: Request, res: Response) => {
   res.status(404).json({ error: 'Route not found' });
 });

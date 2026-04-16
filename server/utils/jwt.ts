@@ -4,7 +4,12 @@
 import jwt from 'jsonwebtoken';
 import type { User } from '@noilink/shared';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'noilink-secret-key-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || (() => {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET environment variable must be set in production');
+  }
+  return 'noilink-dev-only-secret-' + (process.env.REPL_ID || 'local');
+})();
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
 export interface JWTPayload {

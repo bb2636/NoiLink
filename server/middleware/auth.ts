@@ -29,14 +29,6 @@ export async function requireAdmin(req: AuthRequest, res: Response, next: NextFu
       }
     }
     
-    // JWT 토큰이 없거나 유효하지 않으면 x-user-id 헤더 확인 (하위 호환성)
-    if (!user) {
-      const userId = req.headers['x-user-id'] as string;
-      if (userId) {
-        const users = await db.get('users') || [];
-        user = users.find((u: any) => u.id === userId) as User;
-      }
-    }
     
     if (!user) {
       return res.status(401).json({
@@ -124,15 +116,6 @@ export async function optionalAuth(req: AuthRequest, res: Response, next: NextFu
       }
     }
     
-    // 기존 x-user-id 헤더도 지원 (하위 호환성)
-    const userId = req.headers['x-user-id'] as string;
-    if (userId && !req.user) {
-      const users = await db.get('users') || [];
-      const user = users.find((u: any) => u.id === userId);
-      if (user) {
-        req.user = user as User;
-      }
-    }
     
     next();
   } catch (error) {
