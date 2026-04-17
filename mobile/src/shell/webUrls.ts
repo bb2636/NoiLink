@@ -8,5 +8,5 @@ const env = (globalThis as unknown as { process?: { env?: Record<string, string 
 export function getWebClientOrigin(): string {
   const url = env?.EXPO_PUBLIC_WEB_CLIENT_URL?.trim();
   if (url) return url.replace(/\/$/, '');
-  return 'http://localhost:5173';
+  return 'https://noilink.replit.app';
 }

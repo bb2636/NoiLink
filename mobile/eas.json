@@ -1,0 +1,30 @@
+{
+  "cli": {
+    "version": ">= 16.20.4",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_WEB_CLIENT_URL": "https://noilink.replit.app"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_WEB_CLIENT_URL": "https://noilink.replit.app"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_WEB_CLIENT_URL": "https://noilink.replit.app"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
