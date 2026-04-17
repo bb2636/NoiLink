@@ -45,3 +45,5 @@ replit.nix
 # Local Database
 data/
 *.db.json
+
+attached_assets
