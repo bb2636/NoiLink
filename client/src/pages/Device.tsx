@@ -30,11 +30,8 @@ function getConnectedDeviceId(): string | null {
 export default function Device() {
   const navigate = useNavigate();
   const [connectedId, setConnectedId] = useState<string | null>(getConnectedDeviceId);
-  // TODO: 나중에 API/블루투스에서 가져오기
-  const [devices] = useState<DeviceInfo[]>([
-    { id: '1', name: 'NoiPod', deviceId: 'NP-49231', isConnected: false, battery: 78, signal: '안정적' },
-    { id: '2', name: 'NoiPod', deviceId: 'NP-40231', isConnected: false, battery: undefined, signal: null },
-  ]);
+  // 등록된 기기 목록 (블루투스 스캔/연결 성공 시 추가)
+  const [devices] = useState<DeviceInfo[]>([]);
 
   // 연결된 기기 ID와 동기화
   const devicesWithConnection = devices.map(d => ({
