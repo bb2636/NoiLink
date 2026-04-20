@@ -23,7 +23,7 @@ import {
   bleConnect,
 } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
-import type { BleDiscoverySnapshot, NativeToWebMessage } from '@noilink/shared';
+import { NOIPOD_NAME_PREFIX, type BleDiscoverySnapshot, type NativeToWebMessage } from '@noilink/shared';
 
 interface RegisteredDevice {
   id: string;
@@ -33,7 +33,6 @@ interface RegisteredDevice {
 }
 
 const SCAN_TIMEOUT_MS = 15_000;
-const NOIPOD_NAME_PREFIX = 'NoiPod';
 
 function loadRegisteredDevices(): RegisteredDevice[] {
   try {

@@ -8,17 +8,28 @@
  * 이렇게 하면 펌웨어 UUID가 바뀌어도 웹 배포 없이 모바일 앱만 업데이트하면 됩니다.
  */
 
+/**
+ * NoiPod는 u-blox NINA-B1 모듈의 Serial Port Service (SPS) 표준 UUID를 그대로 사용.
+ * (nRF Connect 확인: NINA-B1-FB55CE → 2456e1b9-...d701)
+ *
+ * SPS는 양방향 FIFO이므로 NOTIFY/WRITE가 같은 characteristic UUID를 공유.
+ * Credits characteristic (...d704/d705)은 flow-control 용으로 현재 미사용.
+ */
 export const NOIPOD_BLE = {
-  /** 메인 GATT 서비스 UUID */
-  SERVICE: '00000000-0000-0000-0000-000000000000',
-  /** 반응 신호 등 디바이스 → 앱 notify characteristic */
-  NOTIFY: '00000000-0000-0000-0000-000000000000',
-  /** 명령 전송 등 앱 → 디바이스 write characteristic */
-  WRITE: '00000000-0000-0000-0000-000000000000',
+  /** u-blox SPS Service */
+  SERVICE: '2456e1b9-26e2-8f83-e744-f34f01e9d701',
+  /** SPS FIFO — 디바이스 → 앱 (notify) */
+  NOTIFY: '2456e1b9-26e2-8f83-e744-f34f01e9d703',
+  /** SPS FIFO — 앱 → 디바이스 (write, NOTIFY와 동일 char) */
+  WRITE: '2456e1b9-26e2-8f83-e744-f34f01e9d703',
 } as const;
 
-/** 광고 이름 prefix — 스캔 필터 기본값 */
-export const NOIPOD_NAME_PREFIX = 'NoiPod';
+/**
+ * 광고 이름 prefix — 스캔 필터 기본값.
+ * NINA-B1 모듈은 기본적으로 "NINA-B1-XXXXXX" 형태로 광고하므로 임시로 'NINA' prefix 허용.
+ * (펌웨어가 광고 이름을 'NoiPod'로 바꿀 예정이라면 추후 'NoiPod' 단일로 좁히기)
+ */
+export const NOIPOD_NAME_PREFIX = 'NINA';
 
 /**
  * 웹 ↔ 네이티브 사이에 주고받는 characteristic 식별자.
