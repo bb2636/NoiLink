@@ -1,6 +1,13 @@
 import { db } from '../db.js';
 import { hashPassword } from './password.js';
+import { withKeyLock } from './key-mutex.js';
 import type { User } from '@noilink/shared';
+
+// 라우트와 동일한 lock 키 사용 (lock ordering 일관성)
+const KV_LOCK = {
+  USERS: 'lock:db:users',
+  PASSWORDS: 'lock:db:passwords',
+};
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -15,6 +22,15 @@ const TEST_EMAIL = 'test@test.com';
 const TEST_USERNAME = 'test';
 const TEST_PASSWORD = 'test1234';
 
+/**
+ * 시드된 비밀번호가 약한지 판정.
+ * - 환경변수가 아닌 코드 내 fallback 값 (admin1234 / test1234) 일 때 true.
+ * - true면 password 레코드에 mustChange=true 플래그를 박아 로그인 후 강제 변경 안내.
+ */
+function isWeakSeedPassword(password: string): boolean {
+  return password === 'admin1234' || password === 'test1234';
+}
+
 async function seedUser(opts: {
   email: string;
   username: string;
@@ -22,19 +38,52 @@ async function seedUser(opts: {
   name: string;
   userType: 'ADMIN' | 'PERSONAL' | 'ORGANIZATION';
 }): Promise<void> {
-  const users = await db.get('users') || [];
+  // 락 안에서 존재 확인 + push
+  const created = await withKeyLock(KV_LOCK.USERS, async (): Promise<User | null> => {
+    const users = await db.get('users') || [];
+    const exists = users.find((u: any) =>
+      u.email === opts.email ||
+      (u.username === opts.username && u.userType === opts.userType)
+    );
+    if (exists) return null;
 
-  const exists = users.find((u: any) =>
-    u.email === opts.email ||
-    (u.username === opts.username && u.userType === opts.userType)
-  );
+    const newUser: User = createUserShape(opts);
+    users.push(newUser);
+    await db.set('users', users);
+    return newUser;
+  });
 
-  if (exists) {
+  if (!created) {
     console.log(`✅ ${opts.userType} account already exists: ${opts.email}`);
     return;
   }
+  const newUser = created;
+  await withKeyLock(KV_LOCK.PASSWORDS, async () => {
+    const hashed = await hashPassword(opts.password);
+    const passwords = await db.get('passwords') || [];
+    const mustChange = isWeakSeedPassword(opts.password);
+    passwords.push({
+      userId: newUser.id,
+      email: opts.email,
+      password: hashed,
+      mustChange,
+      createdAt: new Date().toISOString(),
+    });
+    await db.set('passwords', passwords);
+    console.log(
+      `✅ ${opts.userType} account created: ${opts.email}` +
+        (mustChange ? ' ⚠️  (weak default password — mustChange=true)' : ''),
+    );
+  });
+}
 
-  const newUser: User = {
+function createUserShape(opts: {
+  email: string;
+  username: string;
+  name: string;
+  userType: 'ADMIN' | 'PERSONAL' | 'ORGANIZATION';
+}): User {
+  return {
     id: `${opts.userType.toLowerCase()}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     username: opts.username,
     email: opts.email,
@@ -52,25 +101,39 @@ async function seedUser(opts: {
     lastLoginAt: new Date().toISOString(),
     updatedAt: undefined,
   };
+}
 
-  users.push(newUser);
-  await db.set('users', users);
-
-  const hashed = await hashPassword(opts.password);
-  const passwords = await db.get('passwords') || [];
-  passwords.push({
-    userId: newUser.id,
-    email: opts.email,
-    password: hashed,
-    createdAt: new Date().toISOString(),
+/**
+ * 마이그레이션: 이미 시드된 admin/test 계정의 password 레코드에 mustChange 플래그가 없으면 추가.
+ * (이전 배포에서 생성된 약한 비밀번호 계정 보호)
+ */
+async function backfillMustChangeFlag(): Promise<void> {
+  // users는 read-only이므로 락 불필요. passwords는 RMW이므로 PASSWORDS 락으로 보호.
+  await withKeyLock(KV_LOCK.PASSWORDS, async () => {
+    const users = await db.get('users') || [];
+    const passwords = await db.get('passwords') || [];
+    const targets = [ADMIN_EMAIL, TEST_EMAIL];
+    let changed = false;
+    for (const email of targets) {
+      const u = users.find((x: any) => x.email === email);
+      if (!u) continue;
+      const p = passwords.find((x: any) => x.userId === u.id);
+      if (p && p.mustChange === undefined) {
+        p.mustChange = true; // 약한 시드라고 가정 (안전하게 강제 변경 안내)
+        changed = true;
+        console.log(`⚠️  [migration] mustChange=true 부여: ${email}`);
+      }
+    }
+    if (changed) {
+      await db.set('passwords', passwords);
+    }
   });
-  await db.set('passwords', passwords);
-
-  console.log(`✅ ${opts.userType} account created: ${opts.email}`);
 }
 
 export async function seedAdminAccount(): Promise<void> {
   try {
+    await backfillMustChangeFlag();
+
     if (isProduction && !ADMIN_PASSWORD_ENV) {
       console.warn(
         '⚠️  [seed-admin] PRODUCTION: ADMIN_PASSWORD 시크릿이 설정되지 않아 admin 시드를 건너뜁니다.\n' +

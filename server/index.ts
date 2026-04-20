@@ -88,23 +88,22 @@ app.use((req: Request, res: Response) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// 서버 시작
-app.listen(PORT, async () => {
-  console.log(`🚀 Server is running on port ${PORT}`);
+// 서버 시작 — DB 초기화/시드 완료 후 listen 으로 트래픽 수용
+// (이렇게 하지 않으면 시드와 동시에 들어온 회원가입 요청이 mustChange/RMW race 발생)
+async function bootstrap(): Promise<void> {
   console.log(`📊 Database: ${process.env.DB_TYPE || 'auto-detect'}`);
   console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-  
-  // 데이터베이스 초기화
   try {
-    // 마이그레이션 실행
     await runMigrations();
-    
-    // NormConfig 초기화
     await initializeNormConfig();
-    
-    // 관리자 시드 계정 생성
     await seedAdminAccount();
   } catch (error) {
     console.error('⚠️  Failed to initialize database:', error);
+    // init 실패 시 listen 하지 않음 (잘못된 상태로 트래픽 받지 않도록)
+    process.exit(1);
   }
-});
+  app.listen(PORT, () => {
+    console.log(`🚀 Server is running on port ${PORT}`);
+  });
+}
+bootstrap();

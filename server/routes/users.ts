@@ -8,6 +8,12 @@ import { issueOtp, verifyOtp, OTP_CONFIG } from '../utils/otp.js';
 import { issueResetToken, consumeResetToken } from '../utils/reset-token.js';
 import { checkRateLimit, getClientIp } from '../utils/rate-limit.js';
 import { sendError } from '../utils/error-response.js';
+import { withKeyLock } from '../utils/key-mutex.js';
+
+const KV_LOCK = {
+  USERS: 'lock:db:users',
+  PASSWORDS: 'lock:db:passwords',
+};
 
 const isProduction = process.env.NODE_ENV === 'production';
 const SMS_ENABLED = process.env.SMS_ENABLED === 'true';
@@ -72,20 +78,36 @@ router.post('/', async (req: Request, res: Response) => {
       updatedAt: undefined,
     };
     
+    // mutex: users + passwords RMW 동시성 보호
+    await withKeyLock(KV_LOCK.USERS, async () => {
+      const currentUsers = await db.get('users') || [];
+      // 락 안에서 중복 재확인 (race 방지)
+      if (currentUsers.find((u: any) => u.username === username || (email && u.email === email))) {
+        throw Object.assign(new Error('User already exists'), { _conflict: true });
+      }
+      currentUsers.push(newUser);
+      await db.set('users', currentUsers);
+    }).catch(async (err) => {
+      if (err && err._conflict) {
+        throw err;
+      }
+      throw err;
+    });
+
     if (password && email) {
       const hashed = await hashPassword(password);
-      const passwords = await db.get('passwords') || [];
-      passwords.push({
-        userId: newUser.id,
-        email: email,
-        password: hashed,
-        createdAt: new Date().toISOString(),
+      await withKeyLock(KV_LOCK.PASSWORDS, async () => {
+        const passwords = await db.get('passwords') || [];
+        passwords.push({
+          userId: newUser.id,
+          email: email,
+          password: hashed,
+          mustChange: false,
+          createdAt: new Date().toISOString(),
+        });
+        await db.set('passwords', passwords);
       });
-      await db.set('passwords', passwords);
     }
-    
-    users.push(newUser);
-    await db.set('users', users);
 
     // 이메일+비밀번호로 가입한 경우 로그인과 동일하게 JWT 발급(가입 직후 API·트레이닝 연동)
     const issuedToken =
@@ -96,7 +118,10 @@ router.post('/', async (req: Request, res: Response) => {
       data: newUser,
       ...(issuedToken ? { token: issuedToken } : {}),
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error && error._conflict) {
+      return res.status(409).json({ success: false, error: 'User already exists' });
+    }
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -190,22 +215,28 @@ router.post('/login', async (req: Request, res: Response) => {
         error: 'Invalid email or password'
       });
     }
-    
-    // 마지막 로그인 시간 업데이트
-    const userIndex = users.findIndex((u: any) => u.id === user.id);
-    if (userIndex !== -1) {
-      users[userIndex].lastLoginAt = new Date().toISOString();
-      await db.set('users', users);
-    }
-    
+
+    // mutex: users RMW (lastLoginAt) 보호
+    const nowIso = new Date().toISOString();
+    await withKeyLock(KV_LOCK.USERS, async () => {
+      const currentUsers = await db.get('users') || [];
+      const idx = currentUsers.findIndex((u: any) => u.id === user.id);
+      if (idx !== -1) {
+        currentUsers[idx].lastLoginAt = nowIso;
+        await db.set('users', currentUsers);
+      }
+    });
+
     // JWT 토큰 생성
     const token = generateToken(user as any);
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       data: {
         ...user,
-        lastLoginAt: new Date().toISOString()
+        lastLoginAt: nowIso,
+        // 약한 비밀번호로 시드된 계정은 강제 변경 안내
+        mustChangePassword: passwordRecord.mustChange === true,
       },
       token
     });
@@ -479,21 +510,30 @@ router.post('/reset-password/request', async (req: Request, res: Response) => {
     };
 
     if (user) {
-      const otp = await issueOtp(phone);
+      const result = await issueOtp(phone);
+      responsePayload.ttlSeconds = Math.ceil(result.ttlMs / 1000);
 
-      if (SMS_ENABLED) {
-        // TODO: 실제 SMS 게이트웨이 연동
-        console.log(`[OTP] (SMS) phone=${phone} otp=${otp.replace(/./g, '*')}`);
-      } else {
-        console.log(`[OTP] (DEV — SMS 미연동) phone=${phone} otp=${otp}`);
-        if (!isProduction) {
-          // 개발/스테이징: 응답에 평문 OTP 포함하여 테스트 편의 제공
-          responsePayload.devOtp = otp;
+      if (result.reused) {
+        // 활성 OTP 존재 — SMS 재전송 안 함, 사용자에게 알림
+        responsePayload.message =
+          '이미 전송된 인증번호를 사용해주세요. 만료 시 다시 요청할 수 있습니다.';
+        responsePayload.reused = true;
+        console.log(`[OTP] phone=${phone} — 활성 OTP 존재, 재발급 스킵`);
+      } else if (result.otp) {
+        if (SMS_ENABLED) {
+          // TODO: 실제 SMS 게이트웨이 연동
+          console.log(`[OTP] (SMS) phone=${phone} otp=${'*'.repeat(result.otp.length)}`);
         } else {
-          // 프로덕션 + SMS 미연동: 사용자에게 명확히 안내 (조용한 503 대신)
-          responsePayload.message =
-            'SMS 서비스 연동 전입니다. 관리자에게 문의해주세요.';
-          responsePayload.smsUnavailable = true;
+          console.log(`[OTP] (DEV — SMS 미연동) phone=${phone} otp=${result.otp}`);
+          if (!isProduction) {
+            // 개발/스테이징: 응답에 평문 OTP 포함하여 테스트 편의 제공
+            responsePayload.devOtp = result.otp;
+          } else {
+            // 프로덕션 + SMS 미연동: 사용자에게 명확히 안내 (조용한 503 대신)
+            responsePayload.message =
+              'SMS 서비스 연동 전입니다. 관리자에게 문의해주세요.';
+            responsePayload.smsUnavailable = true;
+          }
         }
       }
     } else {
@@ -529,12 +569,12 @@ router.post('/reset-password/verify', async (req: Request, res: Response) => {
     const result = await verifyOtp(phone, otp);
     if (!result.ok) {
       const messages: Record<typeof result.reason, { msg: string; code: string }> = {
-        not_found: { msg: '인증번호를 먼저 요청해주세요.', code: 'OTP_NOT_FOUND' },
+        not_found: { msg: '인증번호를 먼저 요청해주세요.', code: 'OTP_INVALID' },
         expired: { msg: '인증번호가 만료되었습니다. 다시 요청해주세요.', code: 'OTP_EXPIRED' },
-        mismatch: { msg: '인증번호가 일치하지 않습니다.', code: 'OTP_MISMATCH' },
+        mismatch: { msg: '인증번호가 일치하지 않습니다.', code: 'OTP_INVALID' },
         too_many_attempts: {
           msg: '인증 시도 횟수를 초과했습니다. 다시 요청해주세요.',
-          code: 'OTP_TOO_MANY_ATTEMPTS',
+          code: 'OTP_ATTEMPTS_EXCEEDED',
         },
       };
       const e = messages[result.reason];
@@ -598,7 +638,7 @@ router.post('/reset-password', async (req: Request, res: Response) => {
     const consumed = await consumeResetToken(resetToken);
     if (!consumed.ok) {
       return sendError(res, 401, '인증이 만료되었습니다. 다시 시도해주세요.', {
-        code: consumed.reason === 'expired' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID',
+        code: consumed.reason === 'expired' ? 'RESET_TOKEN_EXPIRED' : 'RESET_TOKEN_INVALID',
       });
     }
 
@@ -608,23 +648,28 @@ router.post('/reset-password', async (req: Request, res: Response) => {
       return sendError(res, 404, '사용자를 찾을 수 없습니다.', { code: 'USER_NOT_FOUND' });
     }
 
-    const passwords = await db.get('passwords') || [];
-    const hashed = await hashPassword(password);
-    const passwordIndex = passwords.findIndex((p: any) => p.userId === user.id);
-    if (passwordIndex !== -1) {
-      passwords[passwordIndex].password = hashed;
-      passwords[passwordIndex].updatedAt = new Date().toISOString();
-    } else {
-      passwords.push({
-        userId: user.id,
-        email: user.email,
-        password: hashed,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-    }
-
-    await db.set('passwords', passwords);
+    // mutex: passwords RMW 보호
+    await withKeyLock(KV_LOCK.PASSWORDS, async () => {
+      const passwords = await db.get('passwords') || [];
+      const hashed = await hashPassword(password);
+      const passwordIndex = passwords.findIndex((p: any) => p.userId === user.id);
+      if (passwordIndex !== -1) {
+        passwords[passwordIndex].password = hashed;
+        passwords[passwordIndex].updatedAt = new Date().toISOString();
+        // 약한 비밀번호 강제 변경 플래그 해제
+        passwords[passwordIndex].mustChange = false;
+      } else {
+        passwords.push({
+          userId: user.id,
+          email: user.email,
+          password: hashed,
+          mustChange: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      await db.set('passwords', passwords);
+    });
     console.log(`[reset-password] userId=${user.id} 비밀번호가 재설정됨`);
 
     return res.json({

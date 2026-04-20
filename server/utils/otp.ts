@@ -10,7 +10,9 @@ import { createHash, randomInt, timingSafeEqual } from 'crypto';
 import { db } from '../db.js';
 import { withKeyLock } from './key-mutex.js';
 
-const LOCK_PREFIX = 'lock:otp:';
+// 단일 KV 배열에 저장하므로 lock 단위도 storage 단위와 일치시킴.
+// per-phone 락은 다른 phone 동시 요청 시 lost-update를 일으킴.
+const STORAGE_LOCK = 'lock:otp:storage';
 
 const OTP_KEY = 'password_reset_otps';
 const OTP_TTL_MS = 5 * 60 * 1000; // 5분
@@ -46,27 +48,37 @@ async function saveAll(list: OtpRecord[]): Promise<void> {
 }
 
 /**
- * OTP 발급. 같은 phone의 기존 OTP는 무효화됨.
- * @returns 평문 OTP (호출자가 SMS로 발송 책임)
+ * OTP 발급.
+ * - 기존 활성 OTP가 있으면 재발급하지 않음 (SMS 스팸/rate-limit 우회 방지).
+ *   기존 OTP의 attempts 카운터/TTL을 유지하여 brute-force 보호 강화.
+ * - 기존 OTP가 만료되었거나 없으면 신규 발급.
+ *
+ * @returns IssueResult — reused=true면 otp는 null (서버는 평문을 모름).
  */
-export async function issueOtp(phone: string): Promise<string> {
-  return withKeyLock(`${LOCK_PREFIX}${phone}`, async () => {
+export async function issueOtp(phone: string): Promise<IssueResult> {
+  return withKeyLock(STORAGE_LOCK, async () => {
+    const all = await loadAll(); // 만료된 항목은 자동 제거됨
+    const existing = all.find((r) => r.phone === phone);
+
+    if (existing) {
+      const remainingMs = existing.expiresAt - Date.now();
+      return { otp: null, reused: true, ttlMs: remainingMs };
+    }
+
     const otp = generateOtp();
     const otpHash = hashOtp(phone, otp);
     const now = Date.now();
 
-    const all = await loadAll();
-    const filtered = all.filter((r) => r.phone !== phone);
-    filtered.push({
+    all.push({
       phone,
       otpHash,
       expiresAt: now + OTP_TTL_MS,
       attempts: 0,
       createdAt: now,
     });
-    await saveAll(filtered);
+    await saveAll(all);
 
-    return otp;
+    return { otp, reused: false, ttlMs: OTP_TTL_MS };
   });
 }
 
@@ -75,11 +87,22 @@ export type VerifyResult =
   | { ok: false; reason: 'not_found' | 'expired' | 'mismatch' | 'too_many_attempts' };
 
 /**
+ * 발급 결과.
+ * - reused=true: 기존 활성 OTP가 있어 재발급하지 않음 (SMS 스팸 방지).
+ *   호출자는 사용자에게 "이미 전송된 인증번호를 사용하라"고 안내하거나, OTP 재전송 안 함.
+ */
+export interface IssueResult {
+  otp: string | null; // reused일 때는 null (서버는 평문 OTP를 모름 — 해시만 보유)
+  reused: boolean;
+  ttlMs: number;
+}
+
+/**
  * OTP 검증. 성공 시 해당 OTP는 즉시 폐기 (one-time).
  * 실패 시 attempts++, MAX_ATTEMPTS 초과 시 폐기 + too_many_attempts.
  */
 export async function verifyOtp(phone: string, otp: string): Promise<VerifyResult> {
-  return withKeyLock(`${LOCK_PREFIX}${phone}`, async () => {
+  return withKeyLock(STORAGE_LOCK, async () => {
     const all = await loadAll();
     const idx = all.findIndex((r) => r.phone === phone);
     if (idx === -1) {
