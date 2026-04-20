@@ -237,24 +237,6 @@ class ApiClient {
     return await response.json();
   }
 
-  // Get user by username (for login)
-  async getUserByUsername(username: string): Promise<ApiResponse<User>> {
-    // 임시: 모든 사용자 조회 후 필터링 (실제로는 서버에 엔드포인트 추가 필요)
-    const response = await this.request<User[]>('/users');
-    if (response.success && response.data) {
-      const user = response.data.find(u => u.username === username);
-      return {
-        success: !!user,
-        data: user || undefined,
-        error: user ? undefined : 'User not found',
-      };
-    }
-    return {
-      success: false,
-      error: 'Failed to fetch users',
-    };
-  }
-
   // Terms API
   async getTerms(type?: TermsType): Promise<ApiResponse<Terms[]>> {
     const query = type ? `?type=${type}` : '';
@@ -327,15 +309,44 @@ class ApiClient {
     }) as Promise<ApiResponse<User> & { message?: string }>;
   }
 
-  // Password Reset API
-  async findUserByPhone(phone: string): Promise<ApiResponse<User>> {
-    return this.request<User>(`/users/find-by-phone/${phone}`);
+  // Password Reset API (3-step OTP flow)
+  /**
+   * 1단계: 휴대폰 번호로 OTP 발급 요청.
+   * 응답엔 사용자 존재 여부가 노출되지 않음.
+   * 개발 환경에서는 응답에 devOtp 포함 (테스트 편의).
+   */
+  async requestPasswordReset(phone: string): Promise<
+    ApiResponse<{ message: string; ttlSeconds: number; devOtp?: string; smsUnavailable?: boolean }>
+  > {
+    return this.request<{ message: string; ttlSeconds: number; devOtp?: string; smsUnavailable?: boolean }>(
+      '/users/reset-password/request',
+      { method: 'POST', body: JSON.stringify({ phone }) },
+    );
   }
 
-  async resetPassword(phone: string, password: string): Promise<ApiResponse<{ message: string }>> {
+  /**
+   * 2단계: OTP 검증 후 단기 reset 토큰 수령.
+   */
+  async verifyPasswordResetOtp(
+    phone: string,
+    otp: string,
+  ): Promise<ApiResponse<{ resetToken: string; expiresInSeconds: number }>> {
+    return this.request<{ resetToken: string; expiresInSeconds: number }>(
+      '/users/reset-password/verify',
+      { method: 'POST', body: JSON.stringify({ phone, otp }) },
+    );
+  }
+
+  /**
+   * 3단계: reset 토큰으로 새 비밀번호 설정 (one-time).
+   */
+  async resetPassword(
+    resetToken: string,
+    password: string,
+  ): Promise<ApiResponse<{ message: string }>> {
     return this.request<{ message: string }>('/users/reset-password', {
       method: 'POST',
-      body: JSON.stringify({ phone, password }),
+      body: JSON.stringify({ resetToken, password }),
     });
   }
 

@@ -2,9 +2,14 @@ import { db } from '../db.js';
 import { hashPassword } from './password.js';
 import type { User } from '@noilink/shared';
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@admin.com';
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin1234';
+const ADMIN_PASSWORD_ENV = process.env.ADMIN_PASSWORD;
+// 운영: ADMIN_PASSWORD 시크릿 미설정 시 fallback 금지
+// 개발: 'admin1234' fallback 허용 (편의)
+const ADMIN_PASSWORD = ADMIN_PASSWORD_ENV || (isProduction ? '' : 'admin1234');
 
 const TEST_EMAIL = 'test@test.com';
 const TEST_USERNAME = 'test';
@@ -66,21 +71,32 @@ async function seedUser(opts: {
 
 export async function seedAdminAccount(): Promise<void> {
   try {
-    await seedUser({
-      email: ADMIN_EMAIL,
-      username: ADMIN_USERNAME,
-      password: ADMIN_PASSWORD,
-      name: '관리자',
-      userType: 'ADMIN',
-    });
+    if (isProduction && !ADMIN_PASSWORD_ENV) {
+      console.warn(
+        '⚠️  [seed-admin] PRODUCTION: ADMIN_PASSWORD 시크릿이 설정되지 않아 admin 시드를 건너뜁니다.\n' +
+        '    운영에서 admin 계정이 필요하면 ADMIN_PASSWORD 시크릿을 설정한 뒤 재시작하세요.'
+      );
+    } else {
+      await seedUser({
+        email: ADMIN_EMAIL,
+        username: ADMIN_USERNAME,
+        password: ADMIN_PASSWORD,
+        name: '관리자',
+        userType: 'ADMIN',
+      });
+    }
 
-    await seedUser({
-      email: TEST_EMAIL,
-      username: TEST_USERNAME,
-      password: TEST_PASSWORD,
-      name: '테스트 사용자',
-      userType: 'PERSONAL',
-    });
+    if (!isProduction) {
+      await seedUser({
+        email: TEST_EMAIL,
+        username: TEST_USERNAME,
+        password: TEST_PASSWORD,
+        name: '테스트 사용자',
+        userType: 'PERSONAL',
+      });
+    } else {
+      console.log('ℹ️  [seed-admin] PRODUCTION: 테스트 계정 시드는 건너뜁니다.');
+    }
   } catch (error) {
     console.error('❌ Failed to seed accounts:', error);
     throw error;

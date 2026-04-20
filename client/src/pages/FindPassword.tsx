@@ -23,6 +23,8 @@ export default function FindPassword() {
   const [verificationCodeSent, setVerificationCodeSent] = useState(false);
   const [devVerificationCode, setDevVerificationCode] = useState('');
   const [isVerified, setIsVerified] = useState(false);
+  const [resetToken, setResetToken] = useState('');
+  const [, setSmsUnavailable] = useState(false);
 
   // 휴대폰 번호 포맷팅
   const formatPhoneNumber = (value: string) => {
@@ -43,18 +45,26 @@ export default function FindPassword() {
 
     try {
       setLoading(true);
-      // 서버에서 해당 휴대폰 번호로 가입된 사용자 확인
-      const response = await api.findUserByPhone(phoneNumbers);
-      
+      setSmsUnavailable(false);
+      // 서버에서 OTP 발급 (사용자 존재 여부는 응답에 노출되지 않음)
+      const response = await api.requestPasswordReset(phoneNumbers);
+
       if (response.success && response.data) {
-        // 개발용: 6자리 랜덤 인증번호 생성
-        const code = Math.floor(100000 + Math.random() * 900000).toString();
-        setDevVerificationCode(code);
         setVerificationCodeSent(true);
-        console.log('인증번호 전송:', code);
-        // TODO: 실제 인증번호 전송 로직
+        // 운영에서 SMS 미연동인 경우 안내
+        if (response.data.smsUnavailable) {
+          setSmsUnavailable(true);
+          setErrors({ phone: response.data.message || 'SMS 서비스 연동 전입니다.' });
+          return;
+        }
+        // 개발 환경에서는 응답에 평문 OTP가 포함됨 (테스트 편의)
+        if (response.data.devOtp) {
+          setDevVerificationCode(response.data.devOtp);
+        } else {
+          setDevVerificationCode('');
+        }
       } else {
-        setErrors({ phone: '등록되지 않은 휴대폰 번호입니다' });
+        setErrors({ phone: response.error || '인증번호 전송에 실패했습니다' });
       }
     } catch (error) {
       setErrors({ phone: '인증번호 전송에 실패했습니다' });
@@ -63,14 +73,31 @@ export default function FindPassword() {
     }
   };
 
-  // 인증번호 확인
-  const handleVerify = () => {
-    if (verificationCode === devVerificationCode) {
-      setIsVerified(true);
-      setErrors({});
-    } else {
+  // 인증번호 확인 — 서버에서 OTP 검증 후 reset 토큰 수령
+  const handleVerify = async () => {
+    if (!verificationCode || verificationCode.length !== 6) {
+      setErrors({ verificationCode: '6자리 인증번호를 입력해주세요' });
+      return;
+    }
+    try {
+      setLoading(true);
+      const phoneNumbers = phone.replace(/[^0-9]/g, '');
+      const response = await api.verifyPasswordResetOtp(phoneNumbers, verificationCode);
+      if (response.success && response.data) {
+        setResetToken(response.data.resetToken);
+        setIsVerified(true);
+        setErrors({});
+      } else {
+        setIsVerified(false);
+        setResetToken('');
+        setErrors({ verificationCode: response.error || '인증번호가 일치하지 않습니다' });
+      }
+    } catch (error) {
       setIsVerified(false);
-      setErrors({ verificationCode: '인증번호가 일치하지 않습니다' });
+      setResetToken('');
+      setErrors({ verificationCode: '인증에 실패했습니다' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -97,12 +124,17 @@ export default function FindPassword() {
       return;
     }
 
+    if (!resetToken) {
+      setErrors({ submit: '인증을 먼저 완료해주세요.' });
+      return;
+    }
+
     try {
       setLoading(true);
-      const phoneNumbers = phone.replace(/[^0-9]/g, '');
-      const response = await api.resetPassword(phoneNumbers, password);
+      const response = await api.resetPassword(resetToken, password);
 
       if (response.success) {
+        setResetToken('');
         setStep('complete');
       } else {
         setErrors({ submit: response.error || '비밀번호 재설정에 실패했습니다' });

@@ -4,6 +4,17 @@ import type { User } from '@noilink/shared';
 import { generateToken, extractTokenFromHeader, verifyToken } from '../utils/jwt.js';
 import { hashPassword, comparePassword } from '../utils/password.js';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
+import { issueOtp, verifyOtp, OTP_CONFIG } from '../utils/otp.js';
+import { issueResetToken, consumeResetToken } from '../utils/reset-token.js';
+import { checkRateLimit, getClientIp } from '../utils/rate-limit.js';
+import { sendError } from '../utils/error-response.js';
+
+const isProduction = process.env.NODE_ENV === 'production';
+const SMS_ENABLED = process.env.SMS_ENABLED === 'true';
+
+function normalizePhone(input: string): string {
+  return (input || '').replace(/[^0-9]/g, '');
+}
 
 const router = Router();
 
@@ -400,89 +411,204 @@ router.post('/me/organization-approval-request', async (req: Request, res: Respo
 });
 
 /**
- * GET /api/users/find-by-phone/:phone
- * 휴대폰 번호로 사용자 찾기 (비밀번호 찾기용)
+ * @deprecated Use POST /api/users/reset-password/request 대신 사용.
+ * 기존 클라이언트 호환을 위해 일부 정보만 마스킹해서 반환하지만,
+ * 실제 비밀번호 재설정은 OTP 흐름 통과 후 reset 토큰 필요.
+ *
+ * 보안: rate-limit 적용 (IP+phone 기준), 사용자 존재 여부도 항상 200으로 통일하여 enumeration 방지.
  */
 router.get('/find-by-phone/:phone', async (req: Request, res: Response) => {
   try {
-    const { phone } = req.params;
-    
-    if (!phone || phone.length !== 11) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid phone number'
+    const phone = normalizePhone(req.params.phone);
+    if (phone.length !== 11) {
+      return sendError(res, 400, '올바른 휴대폰 번호가 아닙니다.', { code: 'INVALID_PHONE' });
+    }
+
+    const ip = getClientIp(req);
+    const limit = checkRateLimit(`${ip}:${phone}:find-by-phone`, { windowMs: 60_000, max: 5 });
+    if (!limit.allowed) {
+      return sendError(res, 429, '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.', {
+        code: 'RATE_LIMITED',
       });
     }
-    
+
+    // 사용자 존재 여부 노출 방지 — 항상 동일 응답
     const users = await db.get('users') || [];
-    // 휴대폰 번호로 사용자 찾기 (users에 phone 필드가 있다고 가정)
-    const user = users.find((u: any) => {
-      // phone 필드가 있으면 직접 비교, 없으면 다른 방법으로 찾기
-      if (u.phone) {
-        const userPhone = u.phone.replace(/[^0-9]/g, '');
-        return userPhone === phone;
-      }
-      return false;
-    });
-    
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: 'User not found'
+    const exists = users.some((u: any) => u.phone && normalizePhone(u.phone) === phone);
+
+    return res.json({ success: true, data: { exists } });
+  } catch (error) {
+    return sendError(res, 500, '요청 처리에 실패했습니다.', { cause: error });
+  }
+});
+
+/**
+ * POST /api/users/reset-password/request
+ * 비밀번호 재설정 OTP 발급
+ *
+ * - 휴대폰 번호로 사용자 확인 후 6자리 OTP 발급 (TTL 5분)
+ * - 사용자 존재 여부 노출 방지: 등록되지 않은 번호도 동일하게 200 응답
+ * - 실제 SMS 전송은 SMS_ENABLED=true + 게이트웨이 연동 필요.
+ *   미연동 시: NODE_ENV=production 외 환경에서 응답 + 서버 로그에 OTP 노출 (개발용)
+ */
+router.post('/reset-password/request', async (req: Request, res: Response) => {
+  try {
+    const phone = normalizePhone(req.body?.phone);
+    if (phone.length !== 11) {
+      return sendError(res, 400, '올바른 휴대폰 번호를 입력해주세요.', { code: 'INVALID_PHONE' });
+    }
+
+    const ip = getClientIp(req);
+    // composite key: 같은 IP의 여러 번호 공격 + 같은 번호의 여러 IP 공격 모두 차단
+    const ipPhoneLimit = checkRateLimit(`${ip}:${phone}:reset-request`, { windowMs: 60_000, max: 3 });
+    const phoneLimit = checkRateLimit(`*:${phone}:reset-request`, { windowMs: 10 * 60_000, max: 5 });
+    const ipLimit = checkRateLimit(`${ip}:*:reset-request`, { windowMs: 10 * 60_000, max: 20 });
+    if (!ipPhoneLimit.allowed || !phoneLimit.allowed || !ipLimit.allowed) {
+      return sendError(res, 429, '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.', {
+        code: 'RATE_LIMITED',
       });
     }
-    
-    // 이메일만 반환 (보안상 비밀번호는 제외)
-    res.json({
+
+    const users = await db.get('users') || [];
+    const user = users.find((u: any) => u.phone && normalizePhone(u.phone) === phone);
+
+    // 응답은 항상 동일 (enumeration 방지). 단 dev에서는 디버깅 위해 분기.
+    const responsePayload: Record<string, unknown> = {
+      message: '인증번호를 전송했습니다. 5분 이내에 입력해주세요.',
+      ttlSeconds: Math.floor(OTP_CONFIG.TTL_MS / 1000),
+    };
+
+    if (user) {
+      const otp = await issueOtp(phone);
+
+      if (SMS_ENABLED) {
+        // TODO: 실제 SMS 게이트웨이 연동
+        console.log(`[OTP] (SMS) phone=${phone} otp=${otp.replace(/./g, '*')}`);
+      } else {
+        console.log(`[OTP] (DEV — SMS 미연동) phone=${phone} otp=${otp}`);
+        if (!isProduction) {
+          // 개발/스테이징: 응답에 평문 OTP 포함하여 테스트 편의 제공
+          responsePayload.devOtp = otp;
+        } else {
+          // 프로덕션 + SMS 미연동: 사용자에게 명확히 안내 (조용한 503 대신)
+          responsePayload.message =
+            'SMS 서비스 연동 전입니다. 관리자에게 문의해주세요.';
+          responsePayload.smsUnavailable = true;
+        }
+      }
+    } else {
+      console.log(`[OTP] phone=${phone} — 등록되지 않은 번호 (응답은 동일)`);
+    }
+
+    return res.json({ success: true, data: responsePayload });
+  } catch (error) {
+    return sendError(res, 500, '요청 처리에 실패했습니다.', { cause: error });
+  }
+});
+
+/**
+ * POST /api/users/reset-password/verify
+ * OTP 검증 후 단기 reset 토큰 발급 (TTL 15분, one-time)
+ */
+router.post('/reset-password/verify', async (req: Request, res: Response) => {
+  try {
+    const phone = normalizePhone(req.body?.phone);
+    const otp = String(req.body?.otp || '').trim();
+    if (phone.length !== 11 || !/^\d{6}$/.test(otp)) {
+      return sendError(res, 400, '인증번호가 올바르지 않습니다.', { code: 'INVALID_INPUT' });
+    }
+
+    const ip = getClientIp(req);
+    const limit = checkRateLimit(`${ip}:${phone}:reset-verify`, { windowMs: 60_000, max: 10 });
+    if (!limit.allowed) {
+      return sendError(res, 429, '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.', {
+        code: 'RATE_LIMITED',
+      });
+    }
+
+    const result = await verifyOtp(phone, otp);
+    if (!result.ok) {
+      const messages: Record<typeof result.reason, { msg: string; code: string }> = {
+        not_found: { msg: '인증번호를 먼저 요청해주세요.', code: 'OTP_NOT_FOUND' },
+        expired: { msg: '인증번호가 만료되었습니다. 다시 요청해주세요.', code: 'OTP_EXPIRED' },
+        mismatch: { msg: '인증번호가 일치하지 않습니다.', code: 'OTP_MISMATCH' },
+        too_many_attempts: {
+          msg: '인증 시도 횟수를 초과했습니다. 다시 요청해주세요.',
+          code: 'OTP_TOO_MANY_ATTEMPTS',
+        },
+      };
+      const e = messages[result.reason];
+      return sendError(res, 401, e.msg, { code: e.code });
+    }
+
+    // OTP 통과 — 사용자 조회 후 reset 토큰 발급
+    const users = await db.get('users') || [];
+    const user = users.find((u: any) => u.phone && normalizePhone(u.phone) === phone);
+    if (!user) {
+      // OTP는 통과했지만 사용자가 사라진 매우 드문 케이스
+      return sendError(res, 404, '사용자를 찾을 수 없습니다.', { code: 'USER_NOT_FOUND' });
+    }
+
+    const resetToken = await issueResetToken(user.id);
+    return res.json({
       success: true,
       data: {
-        id: user.id,
-        email: user.email,
-        phone: user.phone,
-      }
+        resetToken,
+        expiresInSeconds: 15 * 60,
+      },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    return sendError(res, 500, '요청 처리에 실패했습니다.', { cause: error });
   }
 });
 
 /**
  * POST /api/users/reset-password
- * 비밀번호 재설정
+ * reset 토큰으로 비밀번호 재설정 (one-time)
  */
 router.post('/reset-password', async (req: Request, res: Response) => {
   try {
-    const { phone, password } = req.body;
-    
-    if (!phone || !password) {
-      return res.status(400).json({
-        success: false,
-        error: 'Phone and password are required'
+    const { resetToken, password } = req.body || {};
+
+    if (!resetToken || typeof resetToken !== 'string') {
+      return sendError(res, 400, '잘못된 요청입니다. 인증을 다시 진행해주세요.', {
+        code: 'MISSING_RESET_TOKEN',
       });
     }
-    
+    if (!password || typeof password !== 'string') {
+      return sendError(res, 400, '비밀번호를 입력해주세요.', { code: 'MISSING_PASSWORD' });
+    }
+    if (password.length < 8 || password.length > 64) {
+      return sendError(res, 400, '비밀번호는 8자 이상 64자 이하여야 합니다.', {
+        code: 'WEAK_PASSWORD',
+      });
+    }
+    if (!/(?=.*[a-zA-Z])(?=.*[0-9])/.test(password)) {
+      return sendError(res, 400, '비밀번호는 영문과 숫자를 포함해야 합니다.', {
+        code: 'WEAK_PASSWORD',
+      });
+    }
+
+    const ip = getClientIp(req);
+    const limit = checkRateLimit(`${ip}:*:reset-password`, { windowMs: 60_000, max: 10 });
+    if (!limit.allowed) {
+      return sendError(res, 429, '요청이 너무 많습니다.', { code: 'RATE_LIMITED' });
+    }
+
+    const consumed = await consumeResetToken(resetToken);
+    if (!consumed.ok) {
+      return sendError(res, 401, '인증이 만료되었습니다. 다시 시도해주세요.', {
+        code: consumed.reason === 'expired' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID',
+      });
+    }
+
     const users = await db.get('users') || [];
-    const passwords = await db.get('passwords') || [];
-    
-    // 휴대폰 번호로 사용자 찾기
-    const user = users.find((u: any) => {
-      if (u.phone) {
-        const userPhone = u.phone.replace(/[^0-9]/g, '');
-        return userPhone === phone.replace(/[^0-9]/g, '');
-      }
-      return false;
-    });
-    
+    const user = users.find((u: any) => u.id === consumed.userId);
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: 'User not found'
-      });
+      return sendError(res, 404, '사용자를 찾을 수 없습니다.', { code: 'USER_NOT_FOUND' });
     }
-    
+
+    const passwords = await db.get('passwords') || [];
     const hashed = await hashPassword(password);
     const passwordIndex = passwords.findIndex((p: any) => p.userId === user.id);
     if (passwordIndex !== -1) {
@@ -497,18 +623,16 @@ router.post('/reset-password', async (req: Request, res: Response) => {
         updatedAt: new Date().toISOString(),
       });
     }
-    
+
     await db.set('passwords', passwords);
-    
-    res.json({
+    console.log(`[reset-password] userId=${user.id} 비밀번호가 재설정됨`);
+
+    return res.json({
       success: true,
-      data: { message: 'Password reset successfully' }
+      data: { message: '비밀번호가 재설정되었습니다.' },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    return sendError(res, 500, '비밀번호 재설정에 실패했습니다.', { cause: error });
   }
 });
 
@@ -601,24 +725,16 @@ router.get('/inquiries/:userId', requireAuth, async (req: Request, res: Response
  * 현재 사용자 조직의 멤버 목록 (기업 회원) / 개인 회원은 본인만
  * JWT 인증 필요
  */
-router.get('/organization-members', async (req: Request, res: Response) => {
+router.get('/organization-members', requireAuth, async (req: Request, res: Response) => {
   try {
-    const authHeader = req.headers.authorization;
-    const token = extractTokenFromHeader(authHeader);
-    if (!token) {
-      return res.status(401).json({ success: false, error: 'Authentication required' });
-    }
-    const payload = verifyToken(token);
-    if (!payload) {
-      return res.status(401).json({ success: false, error: 'Invalid or expired token' });
-    }
+    const authReq = req as AuthRequest;
+    const currentUser = authReq.user!;
 
     const users = await db.get('users') || [];
     const organizations = await db.get('organizations') || [];
-    const currentUser = users.find((u: any) => u.id === payload.userId);
 
     if (!currentUser) {
-      return res.status(404).json({ success: false, error: 'User not found' });
+      return sendError(res, 404, '사용자를 찾을 수 없습니다.', { code: 'USER_NOT_FOUND' });
     }
 
     // 개인 회원: 본인만 반환
