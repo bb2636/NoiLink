@@ -25,6 +25,7 @@ export const STORAGE_KEYS = {
   DEVICE_ID: 'noilink_device_id',
   TOKEN: 'noilink_token',
   CONNECTED_DEVICE: 'noilink_connected_device',
+  REGISTERED_DEVICES: 'noilink_registered_devices',
 } as const;
 
 // API 엔드포인트

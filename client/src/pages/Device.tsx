@@ -6,6 +6,9 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
 import { STORAGE_KEYS } from '../utils/constants';
+import { bleConnect, bleDisconnect } from '../native/bleBridge';
+import { isNoiLinkNativeShell } from '../native/initNativeBridge';
+import type { NativeToWebMessage } from '@noilink/shared';
 
 export interface DeviceInfo {
   id: string;
@@ -14,6 +17,13 @@ export interface DeviceInfo {
   isConnected: boolean;
   battery?: number;
   signal?: '안정적' | '불안정' | null;
+}
+
+interface RegisteredDevice {
+  id: string;
+  name: string;
+  deviceId: string;
+  registeredAt: string;
 }
 
 function getConnectedDeviceId(): string | null {
@@ -27,30 +37,91 @@ function getConnectedDeviceId(): string | null {
   }
 }
 
+function loadRegisteredDevices(): RegisteredDevice[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_DEVICES);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRegisteredDevices(list: RegisteredDevice[]): void {
+  localStorage.setItem(STORAGE_KEYS.REGISTERED_DEVICES, JSON.stringify(list));
+}
+
 export default function Device() {
   const navigate = useNavigate();
+  const isNative = isNoiLinkNativeShell();
   const [connectedId, setConnectedId] = useState<string | null>(getConnectedDeviceId);
-  // 등록된 기기 목록 (블루투스 스캔/연결 성공 시 추가)
-  const [devices] = useState<DeviceInfo[]>([]);
+  const [registered, setRegistered] = useState<RegisteredDevice[]>(loadRegisteredDevices);
 
-  // 연결된 기기 ID와 동기화
-  const devicesWithConnection = devices.map(d => ({
-    ...d,
+  const devicesWithConnection: DeviceInfo[] = registered.map((d) => ({
+    id: d.id,
+    name: d.name,
+    deviceId: d.deviceId,
     isConnected: connectedId === d.id,
   }));
 
+  // localStorage / 네이티브 BLE 이벤트로 연결 상태 동기화
   useEffect(() => {
-    const handler = () => setConnectedId(getConnectedDeviceId());
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
+    const storageHandler = () => {
+      setConnectedId(getConnectedDeviceId());
+      setRegistered(loadRegisteredDevices());
+    };
+    window.addEventListener('storage', storageHandler);
+
+    const bridgeHandler = (e: Event) => {
+      const msg = (e as CustomEvent<NativeToWebMessage>).detail;
+      if (msg.type !== 'ble.connection') return;
+      const c = msg.payload.connected;
+      if (c) {
+        try {
+          localStorage.setItem(
+            STORAGE_KEYS.CONNECTED_DEVICE,
+            JSON.stringify({ id: c.id, name: c.name || 'NoiPod', deviceId: c.id }),
+          );
+        } catch {}
+        setConnectedId(c.id);
+      } else {
+        // 연결 종료 (정상/오류 모두)
+        localStorage.removeItem(STORAGE_KEYS.CONNECTED_DEVICE);
+        setConnectedId(null);
+      }
+    };
+    window.addEventListener('noilink-native-bridge', bridgeHandler as EventListener);
+
+    return () => {
+      window.removeEventListener('storage', storageHandler);
+      window.removeEventListener('noilink-native-bridge', bridgeHandler as EventListener);
+    };
   }, []);
 
-  const handleConnectAction = (device: typeof devicesWithConnection[0]) => {
+  const handleConnectAction = (device: DeviceInfo) => {
     if (device.isConnected) {
+      // 연결 해제 → 네이티브 BLE disconnect
+      if (isNative) bleDisconnect(device.id);
       localStorage.removeItem(STORAGE_KEYS.CONNECTED_DEVICE);
       setConnectedId(null);
     } else {
-      navigate('/device/add');
+      // 등록된 기기 재연결 시도
+      if (isNative) {
+        bleConnect(device.id);
+      } else {
+        navigate('/device/add');
+      }
+    }
+  };
+
+  const handleRemove = (device: DeviceInfo) => {
+    if (!confirm(`"${device.name}" 기기를 등록 해제하시겠어요?`)) return;
+    if (device.isConnected && isNative) bleDisconnect(device.id);
+    const next = registered.filter((d) => d.id !== device.id);
+    saveRegisteredDevices(next);
+    setRegistered(next);
+    if (device.isConnected) {
+      localStorage.removeItem(STORAGE_KEYS.CONNECTED_DEVICE);
+      setConnectedId(null);
     }
   };
 
@@ -109,16 +180,26 @@ export default function Device() {
               <div className="text-sm mb-4" style={{ color: '#999999' }}>
                 배터리 | {device.battery != null ? `${device.battery}%` : '-'} &nbsp;&nbsp; 신호 | {device.signal || '-'}
               </div>
-              <button
-                onClick={() => handleConnectAction(device)}
-                className="w-full py-2 rounded-lg text-sm font-semibold"
-                style={{
-                  backgroundColor: device.isConnected ? '#2A2A2A' : '#AAED10',
-                  color: device.isConnected ? '#FFFFFF' : '#000000',
-                }}
-              >
-                {device.isConnected ? '연결 해제' : '연결 하기'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleConnectAction(device)}
+                  className="flex-1 py-2 rounded-lg text-sm font-semibold"
+                  style={{
+                    backgroundColor: device.isConnected ? '#2A2A2A' : '#AAED10',
+                    color: device.isConnected ? '#FFFFFF' : '#000000',
+                  }}
+                >
+                  {device.isConnected ? '연결 해제' : '연결 하기'}
+                </button>
+                <button
+                  onClick={() => handleRemove(device)}
+                  className="px-3 py-2 rounded-lg text-sm font-semibold"
+                  style={{ backgroundColor: '#2A2A2A', color: '#EF4444' }}
+                  title="등록 해제"
+                >
+                  삭제
+                </button>
+              </div>
             </div>
           ))}
         </div>
