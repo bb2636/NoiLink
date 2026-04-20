@@ -1,10 +1,18 @@
 /**
  * Web (Vite client) ↔ React Native shell message contract.
- * All messages carry `v: 1`. Request/response pairs use `id` (UUID) on web→native
+ * All messages carry `v`. Request/response pairs use `id` (UUID) on web→native
  * and the same `id` on `native.ack` or error-bearing replies.
+ *
+ * v2 변경점 (2026-04):
+ *  - subscribe/write가 raw UUID 대신 `key: NoiPodCharacteristicKey` 사용 (UUID 추상화)
+ *  - `ble.error.code`가 구조화된 `BleErrorCode` enum
+ *  - `ble.connection.reason`으로 종료 사유 구분
+ *  - `ble.reconnect` 신규 (재연결 시도 진행 알림)
  */
 
-export const NATIVE_BRIDGE_VERSION = 1 as const;
+import type { BleDisconnectReason, BleErrorAction, BleErrorCode, NoiPodCharacteristicKey } from './ble-constants.js';
+
+export const NATIVE_BRIDGE_VERSION = 2 as const;
 
 export type BridgeVersion = typeof NATIVE_BRIDGE_VERSION;
 
@@ -81,8 +89,8 @@ export type WebToNativeMessage =
       type: 'ble.subscribeCharacteristic';
       payload: {
         subscriptionId: string;
-        serviceUUID: string;
-        characteristicUUID: string;
+        /** Semantic key — 네이티브가 NoiPod UUID로 매핑 */
+        key: NoiPodCharacteristicKey;
       };
     }
   | {
@@ -96,8 +104,8 @@ export type WebToNativeMessage =
       id: string;
       type: 'ble.writeCharacteristic';
       payload: {
-        serviceUUID: string;
-        characteristicUUID: string;
+        /** Semantic key — 네이티브가 NoiPod UUID로 매핑 */
+        key: NoiPodCharacteristicKey;
         /** Base64 GATT payload (same convention as react-native-ble-plx). */
         base64Value: string;
       };
@@ -141,22 +149,42 @@ export type NativeToWebMessage =
   | {
       v: BridgeVersion;
       type: 'ble.connection';
-      payload: { connected: BleDiscoverySnapshot | null };
+      payload: {
+        connected: BleDiscoverySnapshot | null;
+        /** null로 전환된 경우의 종료 사유 */
+        reason?: BleDisconnectReason;
+      };
+    }
+  | {
+      v: BridgeVersion;
+      type: 'ble.reconnect';
+      payload: {
+        deviceId: string;
+        attempt: number;
+        maxAttempts: number;
+        /** 다음 시도까지 대기 시간 (ms). 마지막 시도면 생략 */
+        nextDelayMs?: number;
+      };
     }
   | {
       v: BridgeVersion;
       type: 'ble.notify';
       payload: {
         subscriptionId: string;
-        serviceUUID: string;
-        characteristicUUID: string;
+        key: NoiPodCharacteristicKey;
         base64Value: string;
       };
     }
   | {
       v: BridgeVersion;
       type: 'ble.error';
-      payload: { id?: string; code: string; message: string };
+      payload: {
+        id?: string;
+        code: BleErrorCode;
+        message: string;
+        deviceId?: string;
+        action?: BleErrorAction;
+      };
     }
   | {
       v: BridgeVersion;

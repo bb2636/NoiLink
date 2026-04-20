@@ -1,4 +1,9 @@
-import { NATIVE_BRIDGE_VERSION, type BleScanFilterPayload, type WebToNativeMessage } from '@noilink/shared';
+import {
+  NATIVE_BRIDGE_VERSION,
+  type BleScanFilterPayload,
+  type NoiPodCharacteristicKey,
+  type WebToNativeMessage,
+} from '@noilink/shared';
 import { isNoiLinkNativeShell } from './initNativeBridge';
 
 function newRequestId(): string {
@@ -37,16 +42,18 @@ export function bleDisconnect(deviceId?: string): void {
   post({ v: NATIVE_BRIDGE_VERSION, id: newRequestId(), type: 'ble.disconnect', payload: { deviceId } });
 }
 
+/**
+ * Notify 구독. UUID는 네이티브 셸이 NoiPod 상수에서 매핑합니다.
+ */
 export function bleSubscribeCharacteristic(
   subscriptionId: string,
-  serviceUUID: string,
-  characteristicUUID: string
+  key: NoiPodCharacteristicKey
 ): void {
   post({
     v: NATIVE_BRIDGE_VERSION,
     id: newRequestId(),
     type: 'ble.subscribeCharacteristic',
-    payload: { subscriptionId, serviceUUID, characteristicUUID },
+    payload: { subscriptionId, key },
   });
 }
 
@@ -59,15 +66,17 @@ export function bleUnsubscribeCharacteristic(subscriptionId: string): void {
   });
 }
 
+/**
+ * Characteristic write. UUID는 네이티브 셸이 NoiPod 상수에서 매핑합니다.
+ */
 export function bleWriteCharacteristic(
-  serviceUUID: string,
-  characteristicUUID: string,
+  key: NoiPodCharacteristicKey,
   base64Value: string
 ): void {
   post({
     v: NATIVE_BRIDGE_VERSION,
     id: newRequestId(),
     type: 'ble.writeCharacteristic',
-    payload: { serviceUUID, characteristicUUID, base64Value },
+    payload: { key, base64Value },
   });
 }

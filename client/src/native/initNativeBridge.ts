@@ -37,6 +37,7 @@ function dispatchNativeMessage(msg: NativeToWebMessage): void {
     case 'ble.discovery':
     case 'ble.scanState':
     case 'ble.connection':
+    case 'ble.reconnect':
     case 'ble.notify':
     case 'ble.error':
     case 'push.state':
