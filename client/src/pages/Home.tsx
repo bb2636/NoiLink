@@ -1,111 +1,172 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
 import { useHome } from '../hooks/useHome';
 import { useNavigate } from 'react-router-dom';
 import Logo from '../components/Logo';
 
+type HomeVariant = 'first-time' | 'streak-active' | 'streak-broken' | 'enterprise';
+
 /**
- * 홈 페이지
- * 이미지 기반 디자인 구현
+ * 사용자 상태 → 홈 분기 결정
+ *  1. 첫 회원가입 (트레이닝 첫 시도 전): lastTrainingDate 없음
+ *  2. 트레이닝 연속 (어제·오늘 훈련): streak > 0 && days since last <= 1
+ *  3. 트레이닝 연속 끊김: 이외
+ *  4. 기업 회원: userType === ORGANIZATION → 연속 여부와 무관하게 전용 화면
  */
+function resolveVariant(user: { userType?: string; streak?: number; lastTrainingDate?: string } | null): HomeVariant {
+  if (!user) return 'first-time';
+  if (user.userType === 'ORGANIZATION') return 'enterprise';
+  if (!user.lastTrainingDate) return 'first-time';
+  const last = new Date(user.lastTrainingDate).getTime();
+  const days = Math.floor((Date.now() - last) / 86_400_000);
+  if ((user.streak ?? 0) > 0 && days <= 1) return 'streak-active';
+  return 'streak-broken';
+}
+
 export default function Home() {
   const { user } = useAuth();
-  const { condition, quickStart, banners, loading } = useHome(user?.id || null);
-  const navigate = useNavigate();
-  const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
-  const autoSlideIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // 뇌 지수 계산 (임시로 condition 점수 사용)
-  const brainIndex = condition?.score || 82;
-  const weeklyChange = 2; // 임시 값
-  
-  // 배너가 없으면 기본 뇌 이미지 표시
-  const displayBanners = banners.length > 0 ? banners : [null];
-  const currentBanner = displayBanners[currentBannerIndex];
-  
-  // 자동 슬라이드 기능 (배너가 2개 이상일 때만)
-  useEffect(() => {
-    if (displayBanners.length <= 1) {
-      // 배너가 1개 이하면 자동 슬라이드 중지
-      if (autoSlideIntervalRef.current) {
-        clearInterval(autoSlideIntervalRef.current);
-        autoSlideIntervalRef.current = null;
-      }
-      return;
-    }
-    
-    // 기존 인터벌 정리
-    if (autoSlideIntervalRef.current) {
-      clearInterval(autoSlideIntervalRef.current);
-    }
-    
-    // 5초마다 자동으로 다음 배너로 이동
-    autoSlideIntervalRef.current = setInterval(() => {
-      setCurrentBannerIndex((prev) => 
-        prev === displayBanners.length - 1 ? 0 : prev + 1
-      );
-    }, 5000);
-    
-    // 컴포넌트 언마운트 시 정리
-    return () => {
-      if (autoSlideIntervalRef.current) {
-        clearInterval(autoSlideIntervalRef.current);
-        autoSlideIntervalRef.current = null;
-      }
-    };
-  }, [displayBanners.length, currentBannerIndex]);
-  
-  if (loading) {
+  const home = useHome(user?.id || null);
+  const variant = resolveVariant(user as any);
+
+  if (home.loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#0A0A0A' }}>
         <div className="text-white">로딩 중...</div>
       </div>
     );
   }
-  
+
+  if (variant === 'first-time') {
+    return <FirstTimeHome />;
+  }
+
+  return <StandardHome variant={variant} home={home} user={user as any} />;
+}
+
+// =============================================================================
+// 1) 첫 회원가입 — 트레이닝 첫 시도 전
+// =============================================================================
+function FirstTimeHome() {
+  const navigate = useNavigate();
   return (
-    <div style={{ backgroundColor: '#0A0A0A', minHeight: '100vh' }}>
-      {/* 상단 헤더 (고정) */}
-      <div 
-        className="fixed top-0 left-0 right-0 z-40"
-        style={{ 
-          backgroundColor: '#0A0A0A',
-          paddingTop: 'env(safe-area-inset-top)',
-        }}
+    <div style={{ backgroundColor: '#0A0A0A', minHeight: '100vh' }} className="flex flex-col">
+      {/* 상단 로고 */}
+      <div
+        className="px-4 pt-6"
+        style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))' }}
       >
-        <div className="max-w-md mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <Logo size="md" />
-            <button 
-              onClick={() => navigate('/device')}
-              className="text-white text-sm"
-            >
-              기기 관리 &gt;
-            </button>
-          </div>
+        <div className="max-w-md mx-auto">
+          <Logo size="md" white />
         </div>
       </div>
-      
-      <div 
+
+      {/* 중앙 안내 + CTA */}
+      <div
+        className="flex-1 flex flex-col items-center justify-center px-6 max-w-md mx-auto w-full"
+        style={{ paddingBottom: 'calc(120px + env(safe-area-inset-bottom))' }}
+      >
+        <motion.p
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="text-white text-lg font-medium text-center mb-16"
+        >
+          지금 당신의 두뇌 에너지를 측정해볼까요?
+        </motion.p>
+
+        <motion.button
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
+          whileTap={{ scale: 0.96 }}
+          onClick={() => navigate('/training')}
+          className="px-10 py-3 rounded-full font-semibold text-black"
+          style={{ backgroundColor: '#AAED10' }}
+        >
+          테스트하기
+        </motion.button>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// 2/3/4) 표준 홈 (active / broken / enterprise)
+// =============================================================================
+interface StandardProps {
+  variant: 'streak-active' | 'streak-broken' | 'enterprise';
+  home: ReturnType<typeof useHome>;
+  user: { id: string; nickname?: string; name?: string; streak?: number } | null;
+}
+
+function StandardHome({ variant, home, user }: StandardProps) {
+  const navigate = useNavigate();
+  const { condition, banners } = home;
+
+  // 배너 캐러셀
+  const [bannerIdx, setBannerIdx] = useState(0);
+  const slideRef = useRef<NodeJS.Timeout | null>(null);
+  const displayBanners = banners.length > 0 ? banners : [null];
+  const currentBanner = displayBanners[bannerIdx];
+
+  useEffect(() => {
+    if (displayBanners.length <= 1) return;
+    slideRef.current = setInterval(() => {
+      setBannerIdx((p) => (p === displayBanners.length - 1 ? 0 : p + 1));
+    }, 5000);
+    return () => {
+      if (slideRef.current) clearInterval(slideRef.current);
+    };
+  }, [displayBanners.length]);
+
+  const brainIndex = condition?.score ?? 82;
+  const bpmAvg = 100;
+  const weeklyChange = 2;
+  const streakDays = user?.streak ?? 0;
+  const nickname = user?.nickname || user?.name || '회원';
+
+  // 요일 트렌드 (월~일)
+  const weekdayLabels = ['월', '화', '수', '목', '금', '토', '일'];
+  // 임시: streak-active면 토요일까지 체크, broken이면 화요일까지만
+  const checkedDays = useMemo(() => {
+    if (variant === 'streak-active') return [true, true, true, true, true, true, false];
+    if (variant === 'streak-broken') return [true, true, false, false, false, false, false];
+    return [true, true, true, false, false, false, false]; // enterprise 임시
+  }, [variant]);
+
+  return (
+    <div style={{ backgroundColor: '#0A0A0A', minHeight: '100vh' }}>
+      {/* 헤더 */}
+      <div
+        className="fixed top-0 left-0 right-0 z-40"
+        style={{ backgroundColor: '#0A0A0A', paddingTop: 'env(safe-area-inset-top)' }}
+      >
+        <div className="max-w-md mx-auto px-4 py-4 flex items-center justify-between">
+          <Logo size="md" white />
+          <button onClick={() => navigate('/device')} className="text-white text-sm">
+            기기 관리 &gt;
+          </button>
+        </div>
+      </div>
+
+      <div
         className="max-w-md mx-auto px-4"
-        style={{ 
-          paddingTop: `calc(80px + env(safe-area-inset-top))`,
+        style={{
+          paddingTop: 'calc(80px + env(safe-area-inset-top))',
           paddingBottom: 'calc(120px + env(safe-area-inset-bottom))',
         }}
       >
-        
-        {/* 메인 비주얼 카드 - 배너 캐러셀 */}
+        {/* 배너 카드 */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="relative mb-6 rounded-2xl overflow-hidden"
+          transition={{ duration: 0.4 }}
+          className="relative mb-5 rounded-2xl overflow-hidden"
           style={{ backgroundColor: '#1A1A1A', aspectRatio: '16/9' }}
         >
           <AnimatePresence mode="wait">
             {currentBanner ? (
-              // 배너 이미지가 있는 경우
               <motion.div
                 key={currentBanner.id}
                 initial={{ opacity: 0 }}
@@ -114,205 +175,215 @@ export default function Home() {
                 transition={{ duration: 0.3 }}
                 className="relative w-full h-full"
               >
-                <img
-                  src={currentBanner.imageUrl}
-                  alt={currentBanner.title}
-                  className="w-full h-full object-cover"
-                />
-                {/* 캐러셀 인디케이터 */}
-                {displayBanners.length > 1 && (
-                  <div className="absolute bottom-4 right-4 text-white text-sm bg-black bg-opacity-50 px-3 py-1 rounded-full z-10">
-                    {currentBannerIndex + 1}/{displayBanners.length}
-                  </div>
-                )}
+                <img src={currentBanner.imageUrl} alt={currentBanner.title} className="w-full h-full object-cover" />
               </motion.div>
             ) : (
-              // 기본 뇌 3D 렌더링 영역 (배너가 없는 경우)
-              <motion.div
-                key="default-brain"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.3 }}
-                className="relative w-full h-full flex items-center justify-center"
-              >
-                {/* 뇌 아이콘/이미지 영역 */}
-                <div className="relative">
-                  {/* 뇌 아이콘 (임시로 큰 이모지 사용) */}
-                  <div className="text-8xl opacity-30" style={{ color: '#00D4FF' }}>
-                    🧠
-                  </div>
-                  
-                  {/* 네온 링 1 (시안/파란색) */}
-                  <motion.div
-                    animate={{ 
-                      scale: [1, 1.1, 1],
-                      opacity: [0.5, 0.8, 0.5]
-                    }}
-                    transition={{ 
-                      duration: 2,
-                      repeat: Infinity,
-                      ease: 'easeInOut'
-                    }}
-                    className="absolute top-0 left-0 w-32 h-32 rounded-full border-2"
-                    style={{ 
-                      borderColor: '#00D4FF',
-                      boxShadow: '0 0 20px rgba(0, 212, 255, 0.5)'
-                    }}
-                  />
-                  
-                  {/* 네온 링 2 (라임 그린) */}
-                  <motion.div
-                    animate={{ 
-                      scale: [1, 1.15, 1],
-                      opacity: [0.5, 0.9, 0.5]
-                    }}
-                    transition={{ 
-                      duration: 2.5,
-                      repeat: Infinity,
-                      ease: 'easeInOut',
-                      delay: 0.5
-                    }}
-                    className="absolute bottom-0 right-0 w-28 h-28 rounded-full border-2"
-                    style={{ 
-                      borderColor: '#AAED10',
-                      boxShadow: '0 0 20px rgba(170, 237, 16, 0.5)'
-                    }}
-                  />
-                </div>
-              </motion.div>
+              <div className="w-full h-full flex items-center justify-center text-7xl opacity-30" style={{ color: '#AAED10' }}>
+                🧠
+              </div>
             )}
           </AnimatePresence>
-          
-          {/* 배너 네비게이션 버튼 (배너가 2개 이상일 때만 표시) */}
           {displayBanners.length > 1 && (
-            <>
-              <button
-                onClick={() => {
-                  // 수동 클릭 시 자동 슬라이드 재시작
-                  setCurrentBannerIndex((prev) => {
-                    const newIndex = prev === 0 ? displayBanners.length - 1 : prev - 1;
-                    return newIndex;
-                  });
-                }}
-                className="absolute left-4 top-1/2 transform -translate-y-1/2 text-white bg-black bg-opacity-50 rounded-full p-2 hover:bg-opacity-70 transition-opacity z-10"
-              >
-                &lt;
-              </button>
-              <button
-                onClick={() => {
-                  // 수동 클릭 시 자동 슬라이드 재시작
-                  setCurrentBannerIndex((prev) => {
-                    const newIndex = prev === displayBanners.length - 1 ? 0 : prev + 1;
-                    return newIndex;
-                  });
-                }}
-                className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white bg-black bg-opacity-50 rounded-full p-2 hover:bg-opacity-70 transition-opacity z-10"
-              >
-                &gt;
-              </button>
-            </>
+            <div className="absolute bottom-3 right-3 text-white text-xs bg-black bg-opacity-50 px-2 py-0.5 rounded-full">
+              {bannerIdx + 1}/{displayBanners.length}
+            </div>
           )}
         </motion.div>
-        
-        {/* 프로필 요약 섹션 */}
+
+        {/* 프로필 카드 */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          className="mb-6"
+          transition={{ duration: 0.4, delay: 0.05 }}
+          className="rounded-2xl p-4 mb-6"
+          style={{ backgroundColor: '#1A1A1A' }}
         >
-          <h2 className="text-white text-lg font-semibold mb-3">프로필 요약</h2>
-          
-          <div className="rounded-2xl p-4" style={{ backgroundColor: '#1A1A1A' }}>
-            <div className="text-white text-sm mb-2">뇌 지수 리포트</div>
-            <p className="text-gray-400 text-xs mb-4">
-              반응 · 집중 · 정확도를 기반으로 산출된 종합 뇌 지수입니다.
-            </p>
-            
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {/* 뇌 아이콘 */}
-                <div className="text-4xl">🧠</div>
-                <div className="text-white text-3xl font-bold">{brainIndex}점</div>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-green-700 flex items-center justify-center text-sm">🦊</div>
+              <span className="text-white text-sm font-medium">{nickname}님</span>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-xs font-medium text-orange-400" style={{ backgroundColor: '#3A2A1A' }}>
+              🦊 균형 잡힌 여우
+            </span>
+          </div>
+          <button
+            onClick={() => navigate('/training')}
+            className="w-full py-3 rounded-full font-semibold border"
+            style={{ borderColor: '#AAED10', color: '#AAED10', backgroundColor: 'transparent' }}
+          >
+            ✦ AI 맞춤 트레이닝
+          </button>
+        </motion.div>
+
+        {/* 트레이닝 요약 */}
+        <h2 className="text-white text-base font-semibold mb-3">트레이닝 요약</h2>
+        <div className="rounded-2xl p-4 mb-6" style={{ backgroundColor: '#1A1A1A' }}>
+          <div className="flex items-center justify-between mb-4">
+            <span className="px-2.5 py-1 rounded-full text-xs font-semibold text-black" style={{ backgroundColor: '#AAED10' }}>
+              주간 성장률 +{weeklyChange}
+            </span>
+            <button onClick={() => navigate('/profile')} className="text-gray-400 text-lg">→</button>
+          </div>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <div className="text-gray-400 text-xs mb-1">뇌 지수 리포트</div>
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">🧠</span>
+                <span className="text-white text-2xl font-bold">{brainIndex}점</span>
               </div>
-              
-              {/* 주간 변화 버튼 */}
-              <button
-                className="px-3 py-1 rounded-full text-sm font-semibold"
-                style={{ 
-                  backgroundColor: '#AAED10',
-                  color: '#000000'
-                }}
-              >
-                주간 +{weeklyChange}
-              </button>
+            </div>
+            <div>
+              <div className="text-gray-400 text-xs mb-1">BPM 평균</div>
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">💚</span>
+                <span className="text-white text-2xl font-bold">{bpmAvg}bpm</span>
+              </div>
             </div>
           </div>
-        </motion.div>
-        
-        {/* 빠른 시작 섹션 */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-        >
-          <h2 className="text-white text-lg font-semibold mb-3">빠른 시작</h2>
-          
-          <div className="space-y-3">
-            {/* 포커스 카드 */}
-            <button
-              onClick={() => navigate('/training?mode=FOCUS')}
-              className="w-full rounded-2xl p-4 flex items-center justify-between"
-              style={{ backgroundColor: '#1A1A1A' }}
-            >
-              <div className="text-left">
-                <div className="text-white font-semibold mb-1">포커스</div>
-                <div className="text-gray-400 text-sm">
-                  집중 타겟 유지 및 방해요소 차단 능력을 강화합니다.
-                </div>
-              </div>
-              <div className="text-white text-xl">&gt;</div>
-            </button>
-            
-            {/* 시퀀스 카드 */}
-            <button
-              onClick={() => navigate('/training?mode=MEMORY')}
-              className="w-full rounded-2xl p-4 flex items-center justify-between"
-              style={{ backgroundColor: '#1A1A1A' }}
-            >
-              <div className="text-left">
-                <div className="text-white font-semibold mb-1">시퀀스</div>
-                <div className="text-gray-400 text-sm">
-                  제시된 순서를 기억하고 재현하는 훈련입니다.
-                </div>
-              </div>
-              <div className="text-white text-xl">&gt;</div>
-            </button>
-            
-            {/* 오늘의 추천 트레이닝 카드 */}
-            <button
-              onClick={() => {
-                if (quickStart) {
-                  navigate(`/training?mode=${quickStart.recommendedMode}&bpm=${quickStart.recommendedBPM}&level=${quickStart.recommendedLevel}`);
-                } else {
-                  navigate('/training');
-                }
-              }}
-              className="w-full rounded-2xl p-4 flex items-center justify-between"
-              style={{ backgroundColor: '#1A1A1A' }}
-            >
-              <div className="text-left">
-                <div className="text-white font-semibold mb-1">오늘의 추천 트레이닝</div>
-                <div className="text-gray-400 text-sm">
-                  당신에게 필요한 맞춤 트레이닝을 제공합니다.
-                </div>
-              </div>
-              <div className="text-white text-xl">&gt;</div>
-            </button>
+          <div className="text-gray-400 text-xs mb-2">자주하는 트레이닝</div>
+          <div className="flex gap-2 flex-wrap">
+            <span className="px-3 py-1 rounded-full text-xs border border-gray-600 text-gray-300">기억력 트레이닝</span>
+            <span className="px-3 py-1 rounded-full text-xs border border-gray-600 text-gray-300">프리트레이닝</span>
           </div>
-        </motion.div>
+        </div>
+
+        {/* 나의 트렌드 */}
+        <h2 className="text-white text-base font-semibold mb-3">나의 트렌드</h2>
+        <div className="rounded-2xl p-4 mb-5" style={{ backgroundColor: '#1A1A1A' }}>
+          <div className="grid grid-cols-7 gap-1">
+            {weekdayLabels.map((d, i) => (
+              <div key={d} className="flex flex-col items-center gap-2">
+                <span className="text-gray-400 text-xs">{d}</span>
+                <div
+                  className="w-8 h-8 rounded-full flex items-center justify-center"
+                  style={{ backgroundColor: checkedDays[i] ? '#AAED10' : '#2A2A2A' }}
+                >
+                  {checkedDays[i] && <span className="text-black text-sm">✓</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 연속 트레이닝 트렌드 — variant별 분기 */}
+        <StreakSection variant={variant} streakDays={streakDays} onStart={() => navigate('/training')} />
+
+        {/* 최근 트레이닝 점수 변화 */}
+        <h2 className="text-white text-base font-semibold mt-6 mb-3">최근 트레이닝 점수 변화 트렌드</h2>
+        <div className="rounded-2xl p-4" style={{ backgroundColor: '#1A1A1A' }}>
+          <div className="text-sm mb-3" style={{ color: '#AAED10' }}>트레이닝 점수가 20점 상승했네요!</div>
+          <MiniLineChart />
+        </div>
       </div>
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// 연속 트레이닝 트렌드 — variant 별 다른 표시
+// -----------------------------------------------------------------------------
+function StreakSection({
+  variant,
+  streakDays,
+  onStart,
+}: {
+  variant: 'streak-active' | 'streak-broken' | 'enterprise';
+  streakDays: number;
+  onStart: () => void;
+}) {
+  const isActive = variant === 'streak-active';
+
+  return (
+    <div
+      className="rounded-2xl p-4 relative overflow-hidden"
+      style={{
+        background: isActive
+          ? 'linear-gradient(135deg, #1a2a1a 0%, #1A1A1A 100%)'
+          : 'linear-gradient(135deg, #1a2a1a 0%, #1A1A1A 100%)',
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex-1">
+          <div className="text-white font-semibold mb-1">연속 트레이닝 트렌드</div>
+          <div className="text-gray-400 text-xs leading-relaxed">
+            {isActive ? '꾸준함이 확실히 쌓이고 있어요!' : '오늘 훈련을 완료하면\n연속 트레이닝 불씨가 켜져요!'}
+          </div>
+        </div>
+
+        {isActive ? (
+          // 원형 진행도 + 일수 + 불꽃
+          <div className="relative w-16 h-16 flex items-center justify-center">
+            <svg className="absolute inset-0 -rotate-90" viewBox="0 0 64 64">
+              <circle cx="32" cy="32" r="28" stroke="#2A2A2A" strokeWidth="4" fill="none" />
+              <circle
+                cx="32"
+                cy="32"
+                r="28"
+                stroke="#AAED10"
+                strokeWidth="4"
+                fill="none"
+                strokeDasharray={`${(Math.min(streakDays, 7) / 7) * 175.9} 175.9`}
+                strokeLinecap="round"
+              />
+            </svg>
+            <div className="text-center">
+              <div className="text-white font-bold text-lg leading-none">{streakDays}일</div>
+              <div className="text-orange-400 text-sm">🔥</div>
+            </div>
+          </div>
+        ) : (
+          // 시작하기 버튼
+          <button
+            onClick={onStart}
+            className="px-4 py-2 rounded-full text-sm font-semibold flex items-center gap-1"
+            style={{ backgroundColor: 'transparent', color: '#AAED10', border: '1px solid #AAED10' }}
+          >
+            <span>🔥</span>
+            <span>시작하기</span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// 미니 라인 차트 (자리잡이용 SVG)
+// -----------------------------------------------------------------------------
+function MiniLineChart() {
+  const points = [60, 65, 62, 70, 68, 75, 80, 78, 82, 90];
+  const max = 100;
+  const w = 280;
+  const h = 100;
+  const stepX = w / (points.length - 1);
+  const path = points.map((y, i) => `${i === 0 ? 'M' : 'L'} ${i * stepX} ${h - (y / max) * h}`).join(' ');
+  const last = points[points.length - 1];
+
+  return (
+    <div className="relative w-full">
+      <svg viewBox={`0 0 ${w} ${h + 20}`} className="w-full h-auto">
+        {/* 가로 그리드 */}
+        {[0, 50, 100].map((g) => (
+          <line key={g} x1={0} y1={h - (g / max) * h} x2={w} y2={h - (g / max) * h} stroke="#2A2A2A" strokeWidth="1" />
+        ))}
+        {/* 라벨 */}
+        {[100, 50, 0].map((g) => (
+          <text key={g} x={-2} y={h - (g / max) * h + 4} fill="#666" fontSize="9" textAnchor="end">
+            {g}
+          </text>
+        ))}
+        {/* 라인 */}
+        <path d={path} stroke="#AAED10" strokeWidth="2" fill="none" />
+        {/* 마지막 점 */}
+        <circle cx={(points.length - 1) * stepX} cy={h - (last / max) * h} r="4" fill="#AAED10" />
+        {/* x축 라벨 */}
+        {points.map((_, i) => (
+          <text key={i} x={i * stepX} y={h + 14} fill="#666" fontSize="9" textAnchor="middle">
+            {i + 1}
+          </text>
+        ))}
+      </svg>
     </div>
   );
 }
