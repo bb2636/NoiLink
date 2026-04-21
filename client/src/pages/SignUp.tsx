@@ -415,8 +415,8 @@ export default function SignUp() {
   };
   
   return (
-    <div className="min-h-screen text-white flex flex-col" style={{ backgroundColor: '#0A0A0A' }}>
-      <div className="px-4 sm:px-6 py-4 sm:py-6 max-w-md mx-auto w-full flex-1 pb-24 flex flex-col">
+    <div className="min-h-screen text-white" style={{ backgroundColor: '#0A0A0A' }}>
+      <div className="px-4 sm:px-6 py-4 sm:py-6 max-w-md mx-auto w-full pb-24">
         {/* 네비게이션 바 */}
         <div className="flex items-center mb-6">
           <button
@@ -445,7 +445,7 @@ export default function SignUp() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.3 }}
-              className="flex-1 flex flex-col justify-center items-center space-y-4"
+              className="flex flex-col justify-center items-center space-y-4 min-h-[calc(100vh-220px)]"
             >
               {/* 통합 카드 컨테이너 */}
               <div className="w-full max-w-md rounded-2xl overflow-hidden" style={{ backgroundColor: '#1A1A1A' }}>
