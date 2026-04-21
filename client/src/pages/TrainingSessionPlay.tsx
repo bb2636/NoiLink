@@ -1,5 +1,13 @@
 /**
- * 웹 트레이닝 진행(타이머) → 종료 시 세션·메트릭 제출 → 결과 화면
+ * 트레이닝 진행 화면 (이미지 1~3 디자인)
+ *
+ * 상태:
+ *  - 시작 (elapsed = 0): 빈 회색 원 + "00:00"
+ *  - 진행 중: 초록 호가 시계방향 채워짐 + 흰 텍스트
+ *  - 일시정지: 같은 호 + 회색 텍스트 + "재개" 버튼(초록)
+ *  - 완료: 자동으로 결과 페이지로 이동
+ *
+ * 시간 표시 = 경과 시간 (count up). 진행도 = elapsed / total.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -25,28 +33,27 @@ export default function TrainingSessionPlay() {
   const location = useLocation();
   const state = location.state as TrainingRunState | null;
 
-  const capSec = state ? Math.min(state.totalDurationSec, SESSION_MAX_MS / 1000) : 0;
-  const [remaining, setRemaining] = useState(capSec);
+  const totalSec = state ? Math.min(state.totalDurationSec, SESSION_MAX_MS / 1000) : 0;
+  const [elapsed, setElapsed] = useState(0);
   const [paused, setPaused] = useState(false);
-  const [taps, setTaps] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const submitLock = useRef(false);
-  const prevRemaining = useRef(remaining);
 
   useEffect(() => {
-    if (!state || !state.userId || capSec <= 0) {
+    if (!state || !state.userId || totalSec <= 0) {
       navigate('/training', { replace: true });
     }
-  }, [state, capSec, navigate]);
+  }, [state, totalSec, navigate]);
 
+  // 1초 카운터 — 일시정지 시 멈춤
   useEffect(() => {
-    if (!state || paused || remaining <= 0) return;
+    if (!state || paused || elapsed >= totalSec) return;
     const id = window.setInterval(() => {
-      setRemaining((r) => (r <= 1 ? 0 : r - 1));
+      setElapsed((e) => Math.min(totalSec, e + 1));
     }, 1000);
     return () => window.clearInterval(id);
-  }, [state, paused, remaining]);
+  }, [state, paused, elapsed, totalSec]);
 
   const runSubmit = useCallback(async () => {
     if (!state || submitLock.current) return;
@@ -58,10 +65,10 @@ export default function TrainingSessionPlay() {
       mode: state.apiMode,
       bpm: state.bpm,
       level: state.level,
-      totalDurationSec: capSec,
+      totalDurationSec: totalSec,
       yieldsScore: state.yieldsScore,
       isComposite: state.isComposite,
-      tapCount: taps,
+      tapCount: 0,
     });
     setSubmitting(false);
     if (res.error) {
@@ -78,120 +85,164 @@ export default function TrainingSessionPlay() {
         sessionId: res.sessionId,
       },
     });
-  }, [state, capSec, taps, navigate]);
+  }, [state, totalSec, navigate]);
 
+  // 완료 시 자동 제출
   useEffect(() => {
-    const crossed = prevRemaining.current > 0 && remaining === 0;
-    prevRemaining.current = remaining;
-    if (!state || !crossed) return;
-    void runSubmit();
-  }, [remaining, state, runSubmit]);
+    if (state && elapsed >= totalSec && totalSec > 0 && !submitLock.current) {
+      void runSubmit();
+    }
+  }, [elapsed, totalSec, state, runSubmit]);
 
-  if (!state) {
-    return null;
-  }
+  if (!state) return null;
 
-  const mm = String(Math.floor(remaining / 60)).padStart(2, '0');
-  const ss = String(remaining % 60).padStart(2, '0');
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const ss = String(elapsed % 60).padStart(2, '0');
+  const progress = totalSec > 0 ? elapsed / totalSec : 0;
 
   return (
     <MobileLayout>
       <div
-        className="max-w-md mx-auto px-4 py-6 flex flex-col min-h-[70vh]"
+        className="max-w-md mx-auto px-4 py-6 flex flex-col min-h-screen"
         style={{ paddingBottom: '120px', color: '#fff' }}
       >
-        <div className="flex items-center justify-between mb-4">
-          <button type="button" onClick={() => navigate(-1)} className="text-white text-lg">
-            ‹
+        {/* 헤더 */}
+        <div className="flex items-center gap-3 mb-10">
+          <button onClick={() => navigate('/training')} className="text-white">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
           </button>
-          <h1 className="text-lg font-bold">트레이닝</h1>
-          <span className="w-6" />
+          <h1 className="text-lg font-semibold">트레이닝 진행</h1>
         </div>
 
-        <p className="text-sm mb-2" style={{ color: '#999' }}>
-          {state.title} · BPM {state.bpm} · Lv{state.level}
-        </p>
-
-        <button
-          type="button"
-          className="flex-1 min-h-[200px] rounded-2xl border-2 border-dashed mb-4 flex flex-col items-center justify-center gap-2"
-          style={{ borderColor: '#444', backgroundColor: '#141414' }}
-          onClick={() => setTaps((t) => t + 1)}
-          disabled={submitting || remaining === 0}
-        >
-          <span className="text-3xl font-bold" style={{ color: '#AAED10' }}>
-            {taps}
-          </span>
-          <span className="text-xs" style={{ color: '#888' }}>
-            화면을 눌러 반응(데모). 종료 시 서버에 반영됩니다.
-          </span>
-        </button>
-
-        <div className="text-center py-6">
-          <div className="text-5xl font-extrabold tabular-nums">
-            {mm}:{ss}
-          </div>
-          <p className="text-xs mt-2" style={{ color: '#666' }}>
-            상한 {SESSION_MAX_MS / 1000}s
-          </p>
-        </div>
-
-        {remaining > 0 && (
-          <button
-            type="button"
-            className="mb-3 py-2 rounded-xl text-sm font-semibold w-full"
-            style={{ backgroundColor: '#2a2a2a', color: '#ccc' }}
-            onClick={() => setRemaining(0)}
-            disabled={submitting}
+        {/* BPM 칩 */}
+        <div className="flex justify-center mb-10">
+          <div
+            className="px-8 py-3 rounded-2xl border-2 text-lg font-semibold"
+            style={{ borderColor: '#AAED10', color: '#AAED10' }}
           >
-            지금 종료하고 저장
-          </button>
-        )}
+            BPM&nbsp;&nbsp;{state.bpm}
+          </div>
+        </div>
+
+        {/* 원형 타이머 */}
+        <div className="flex justify-center mb-10">
+          <CircularTimer
+            totalSec={totalSec}
+            elapsed={elapsed}
+            mm={mm}
+            ss={ss}
+            progress={progress}
+            paused={paused}
+          />
+        </div>
 
         {err && (
-          <div className="mb-3 space-y-2">
-            <p className="text-sm text-center" style={{ color: '#f87171' }}>
-              {err}
-            </p>
+          <div className="mb-4 text-center">
+            <p className="text-sm text-red-400 mb-2">{err}</p>
             <button
-              type="button"
-              className="w-full py-2 rounded-xl text-sm font-semibold"
-              style={{ backgroundColor: '#AAED10', color: '#000' }}
               onClick={() => void runSubmit()}
               disabled={submitting}
+              className="px-4 py-2 rounded-xl text-sm font-semibold"
+              style={{ backgroundColor: '#AAED10', color: '#000' }}
             >
               저장 재시도
             </button>
           </div>
         )}
 
-        <div className="flex gap-3 mt-auto">
+        {/* 하단 버튼: 취소 / 일시정지·재개 */}
+        <div className="mt-auto flex items-center justify-between px-4">
           <button
-            type="button"
-            className="flex-1 py-3 rounded-2xl font-semibold"
-            style={{ backgroundColor: '#2a2a2a', color: '#ccc' }}
             onClick={() => navigate('/training')}
             disabled={submitting}
+            className="w-20 h-20 rounded-full font-semibold text-white"
+            style={{ backgroundColor: '#2A2A2A' }}
           >
             취소
           </button>
+
           <button
-            type="button"
-            className="flex-1 py-3 rounded-2xl font-semibold"
-            style={{ backgroundColor: '#333', color: '#fff' }}
             onClick={() => setPaused((p) => !p)}
-            disabled={submitting}
+            disabled={submitting || elapsed >= totalSec}
+            className="w-20 h-20 rounded-full font-semibold text-white"
+            style={{ backgroundColor: paused ? '#7A9637' : '#B0772A' }}
           >
             {paused ? '재개' : '일시정지'}
           </button>
         </div>
 
         {submitting && (
-          <p className="text-center text-sm mt-4" style={{ color: '#888' }}>
-            결과 저장 중…
-          </p>
+          <p className="text-center text-sm mt-4 text-gray-400">결과 저장 중…</p>
         )}
       </div>
     </MobileLayout>
+  );
+}
+
+// =============================================================================
+// 원형 타이머
+// =============================================================================
+function CircularTimer({
+  totalSec,
+  elapsed,
+  mm,
+  ss,
+  progress,
+  paused,
+}: {
+  totalSec: number;
+  elapsed: number;
+  mm: string;
+  ss: string;
+  progress: number;
+  paused: boolean;
+}) {
+  const SIZE = 280;
+  const STROKE = 12;
+  const R = (SIZE - STROKE) / 2;
+  const CX = SIZE / 2;
+  const CY = SIZE / 2;
+  const CIRC = 2 * Math.PI * R;
+  const offset = CIRC * (1 - progress);
+
+  const isRunning = elapsed > 0 && !paused && elapsed < totalSec;
+  const textColor = paused ? '#666' : isRunning || elapsed > 0 ? '#fff' : '#fff';
+
+  return (
+    <div className="relative">
+      <svg width={SIZE} height={SIZE} className="-rotate-90">
+        {/* 배경 원 */}
+        <circle cx={CX} cy={CY} r={R} stroke="#3A3A3A" strokeWidth={STROKE} fill="none" />
+        {/* 진행 호 */}
+        {progress > 0 && (
+          <circle
+            cx={CX}
+            cy={CY}
+            r={R}
+            stroke="#AAED10"
+            strokeWidth={STROKE}
+            fill="none"
+            strokeLinecap="round"
+            strokeDasharray={CIRC}
+            strokeDashoffset={offset}
+            style={{ transition: 'stroke-dashoffset 1s linear' }}
+          />
+        )}
+      </svg>
+      {/* 중앙 텍스트 */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-sm mb-1" style={{ color: paused ? '#555' : '#888' }}>
+          {totalSec}초
+        </span>
+        <span
+          className="text-6xl font-bold tabular-nums"
+          style={{ color: textColor }}
+        >
+          {mm}:{ss}
+        </span>
+      </div>
+    </div>
   );
 }
