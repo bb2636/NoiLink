@@ -9,15 +9,97 @@
  *  - 뇌지컬 종합 평가: 본인의 브레이니멀 + Fact/Life/Hint/강점/보완점
  *  - 소속 인원 현황: 이름 / 뇌지컬 점수 / 브레이니멀 / 생년월일(추정) / 최근 검사일
  */
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import api from '../utils/api';
-import Button from '../components/Button';
 import RadarChart from '../components/RadarChart';
 import MultiTrendChart, { type TrendPoint } from '../components/MultiTrendChart/MultiTrendChart';
 import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
-import type { OrganizationInsightReport, User } from '@noilink/shared';
+import type { BrainimalType, OrganizationInsightReport, User } from '@noilink/shared';
+
+// =============================================================================
+// 데모용 하드코딩 데이터 (이미지 시안 그대로)
+// TODO: 실제 API 데이터로 교체
+// =============================================================================
+const MOCK_REPORT: OrganizationInsightReport = {
+  id: 'mock-org-report',
+  organizationId: 'mock-org',
+  organizationName: '송산치매안심센터',
+  managedMemberCount: 32,
+  avgBrainAge: 79.9,
+  cohortActualAvgAge: 79.7,
+  brainAgeVsChronologicalDelta: 0.2,
+  representativeBrainimal: 'FOX_BALANCED',
+  representativeBrainimalLabel: '균형 잡힌 여우',
+  avgMetricsScore: {
+    memory: 82,
+    comprehension: 76,
+    focus: 88,
+    judgment: 71,
+    agility: 68,
+    endurance: 74,
+  } as never,
+  factText: '쉽게 휘둘리지 않는 무뚝뚝한 안정감을 보여줍니다. 어떤 상황에서도 평정심을 잃지 않고 일관된 판단을 내립니다.',
+  lifeText: '화려한 일렉보다는 잔잔한 신뢰감을 주는 인상입니다. 주변 사람들이 의지할 수 있는 든든한 존재로 인식됩니다.',
+  hintText: '판단 시간이 다른 사람보다 약간 길지만, 한 번 결정하면 끝까지 책임지는 모범적인 회무 스타일을 보입니다.',
+  strengthText: '감정 안정성과 집중력이 매우 우수합니다.',
+  weaknessText: '순발력과 유연성을 보완하면 더 좋은 결과를 낼 수 있습니다.',
+  metricEvidenceCards: [],
+  brainimalDistribution: [
+    { type: 'FOX_BALANCED',      count: 8, percent: 25 },
+    { type: 'OWL_FOCUS',         count: 5, percent: 15 },
+    { type: 'BEAR_ENDURANCE',    count: 4, percent: 13 },
+    { type: 'KOALA_CALM',        count: 4, percent: 11 },
+    { type: 'CHEETAH_JUDGMENT',  count: 3, percent: 9 },
+    { type: 'DOLPHIN_BRILLIANT', count: 2, percent: 7 },
+    { type: 'TIGER_STRATEGIC',   count: 2, percent: 7 },
+    { type: 'CAT_DELICATE',      count: 2, percent: 5 },
+    { type: 'EAGLE_INSIGHT',     count: 1, percent: 4 },
+    { type: 'LION_BOLD',         count: 1, percent: 3 },
+    { type: 'DOG_SOCIAL',        count: 1, percent: 2 },
+    { type: 'WOLF_CREATIVE',     count: 0, percent: 1 },
+  ],
+  memberStatusSummary: '소속 인원 현황',
+  createdAt: new Date().toISOString(),
+};
+
+const MOCK_TREND: TrendPoint[] = (() => {
+  const today = new Date();
+  return Array.from({ length: 10 }).map((_, i) => {
+    const d = new Date(today);
+    d.setDate(today.getDate() - (9 - i));
+    return {
+      date: d.toISOString(),
+      memory:        70 + Math.round(Math.sin(i * 0.7) * 6 + i * 1.2),
+      comprehension: 65 + Math.round(Math.cos(i * 0.5) * 5 + i * 1.4),
+      focus:         78 + Math.round(Math.sin(i * 0.4) * 4 + i * 0.9),
+      judgment:      62 + Math.round(Math.cos(i * 0.6) * 6 + i * 1.5),
+      agility:       60 + Math.round(Math.sin(i * 0.8) * 5 + i * 1.0),
+      endurance:     68 + Math.round(Math.cos(i * 0.3) * 5 + i * 1.1),
+    };
+  });
+})();
+
+const MOCK_MEMBERS: User[] = [
+  { id: 'm1',  username: 'kim01',  name: '김순자', userType: 'ORGANIZATION', age: 78, brainAge: 76, brainimalType: 'FOX_BALANCED',     streak: 5, createdAt: '', lastTrainingDate: daysAgo(0)  },
+  { id: 'm2',  username: 'lee02',  name: '이영희', userType: 'ORGANIZATION', age: 82, brainAge: 84, brainimalType: 'BEAR_ENDURANCE',   streak: 3, createdAt: '', lastTrainingDate: daysAgo(1)  },
+  { id: 'm3',  username: 'park03', name: '박정수', userType: 'ORGANIZATION', age: 75, brainAge: 71, brainimalType: 'OWL_FOCUS',        streak: 8, createdAt: '', lastTrainingDate: daysAgo(0)  },
+  { id: 'm4',  username: 'choi04', name: '최말순', userType: 'ORGANIZATION', age: 80, brainAge: 81, brainimalType: 'KOALA_CALM',       streak: 2, createdAt: '', lastTrainingDate: daysAgo(2)  },
+  { id: 'm5',  username: 'jung05', name: '정복례', userType: 'ORGANIZATION', age: 77, brainAge: 75, brainimalType: 'FOX_BALANCED',     streak: 6, createdAt: '', lastTrainingDate: daysAgo(1)  },
+  { id: 'm6',  username: 'kang06', name: '강만수', userType: 'ORGANIZATION', age: 84, brainAge: 87, brainimalType: 'CHEETAH_JUDGMENT', streak: 1, createdAt: '', lastTrainingDate: daysAgo(4)  },
+  { id: 'm7',  username: 'shin07', name: '신옥자', userType: 'ORGANIZATION', age: 79, brainAge: 78, brainimalType: 'DOLPHIN_BRILLIANT',streak: 4, createdAt: '', lastTrainingDate: daysAgo(0)  },
+  { id: 'm8',  username: 'song08', name: '송상철', userType: 'ORGANIZATION', age: 76, brainAge: 73, brainimalType: 'TIGER_STRATEGIC',  streak: 7, createdAt: '', lastTrainingDate: daysAgo(1)  },
+  { id: 'm9',  username: 'oh09',   name: '오금자', userType: 'ORGANIZATION', age: 81, brainAge: 82, brainimalType: 'CAT_DELICATE',     streak: 2, createdAt: '', lastTrainingDate: daysAgo(3)  },
+  { id: 'm10', username: 'yoon10', name: '윤덕수', userType: 'ORGANIZATION', age: 78, brainAge: 76, brainimalType: 'EAGLE_INSIGHT',    streak: 5, createdAt: '', lastTrainingDate: daysAgo(0)  },
+  { id: 'm11', username: 'lim11',  name: '임순녀', userType: 'ORGANIZATION', age: 83, brainAge: 86, brainimalType: 'LION_BOLD',        streak: 1, createdAt: '', lastTrainingDate: daysAgo(5)  },
+  { id: 'm12', username: 'han12',  name: '한봉수', userType: 'ORGANIZATION', age: 75, brainAge: 72, brainimalType: 'DOG_SOCIAL',       streak: 9, createdAt: '', lastTrainingDate: daysAgo(0)  },
+];
+function daysAgo(d: number): string {
+  const x = new Date();
+  x.setDate(x.getDate() - d);
+  return x.toISOString();
+}
+void ({} as BrainimalType); // keep import alive
 
 // 도넛 색상 팔레트 (브레이니멀 분포용)
 const DONUT_COLORS = [
@@ -38,81 +120,14 @@ const TABS: { key: TabKey; label: string }[] = [
 export default function OrganizationReport() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [report, setReport] = useState<OrganizationInsightReport | null>(null);
-  const [trendPoints, setTrendPoints] = useState<TrendPoint[]>([]);
-  const [members, setMembers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 데모: 항상 하드코딩 데이터 표시 (실 API 연동은 추후 교체)
+  const report: OrganizationInsightReport = MOCK_REPORT;
+  const trendPoints: TrendPoint[] = MOCK_TREND;
+  const members: User[] = MOCK_MEMBERS;
   const [tab, setTab] = useState<TabKey>('all');
   const [orgInfoOpen, setOrgInfoOpen] = useState(true);
 
-  useEffect(() => {
-    if (!user?.organizationId) return;
-    void loadOrgReport();
-  }, [user?.organizationId]);
-
-  const loadOrgReport = async () => {
-    if (!user?.organizationId) return;
-    try {
-      setLoading(true);
-      const res = await api.getOrganizationInsightReport(user.organizationId);
-      if (res.success && res.data) {
-        setReport(res.data);
-      } else {
-        const gen = await api.generateOrganizationInsightReport(user.organizationId);
-        if (gen.success && gen.data) setReport(gen.data);
-      }
-
-      const [trendRes, memberRes] = await Promise.all([
-        api.getOrganizationSessionsForTrend(user.organizationId),
-        api.getOrganizationMembers(),
-      ]);
-      if (trendRes.success && trendRes.data) setTrendPoints(trendRes.data);
-      if (memberRes.success && memberRes.data) setMembers(memberRes.data);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   if (!user) return null;
-
-  if (!user.organizationId) {
-    return (
-      <div className="px-4 py-10 text-center" style={{ color: '#999' }}>
-        기관 소속 계정에서만 이용할 수 있습니다.
-        <div className="mt-4">
-          <Button onClick={() => navigate('/profile')}>프로필로</Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[50vh]" style={{ color: '#999' }}>
-        로딩 중...
-      </div>
-    );
-  }
-
-  if (!report) {
-    return (
-      <div className="px-4 py-10 text-center space-y-4">
-        <p style={{ color: '#999' }}>
-          기관 리포트를 만들 데이터가 부족합니다. 소속 인원의 종합 트레이닝·지표가 쌓이면 자동으로 생성됩니다.
-        </p>
-        <Button
-          onClick={async () => {
-            const gen = await api.generateOrganizationInsightReport(user.organizationId!);
-            if (gen.success && gen.data) setReport(gen.data);
-          }}
-        >
-          다시 생성 시도
-        </Button>
-      </div>
-    );
-  }
 
   const repInfo = getBrainimalIcon(report.representativeBrainimal);
   const delta = report.brainAgeVsChronologicalDelta;
