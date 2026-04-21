@@ -61,7 +61,7 @@ export default function Login() {
           animate={{ opacity: 1, y: 0 }}
           className="mb-12"
         >
-          <Logo size="lg" />
+          <Logo size="md" white />
         </motion.div>
         
         {/* 타이틀 */}

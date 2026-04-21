@@ -10,9 +10,11 @@ interface LogoProps {
   size?: 'sm' | 'md' | 'lg';
   /** 커스텀 클래스명 */
   className?: string;
+  /** true 면 로고를 흰색으로 틴트 (어두운 배경용) */
+  white?: boolean;
 }
 
-export default function Logo({ size = 'md', className = '' }: LogoProps) {
+export default function Logo({ size = 'md', className = '', white = false }: LogoProps) {
   const sizeClasses = {
     sm: 'h-6',
     md: 'h-8',
@@ -25,6 +27,7 @@ export default function Logo({ size = 'md', className = '' }: LogoProps) {
         src={logoImage} 
         alt="NoiLink" 
         className="h-full w-auto object-contain"
+        style={white ? { filter: 'brightness(0) invert(1)' } : undefined}
       />
     </div>
   );
