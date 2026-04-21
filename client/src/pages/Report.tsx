@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
@@ -20,7 +19,6 @@ export default function Report() {
   const [report, setReport] = useState<Report | null>(null);
   const [trendPoints, setTrendPoints] = useState<TrendPoint[]>([]);
   const [loading, setLoading] = useState(true);
-  const [radarTip, setRadarTip] = useState<string | null>(null);
 
   useEffect(() => {
     loadReport();
@@ -225,29 +223,13 @@ export default function Report() {
         className="rounded-2xl p-4 border"
         style={{ backgroundColor: '#1A1A1A', borderColor: '#333' }}
       >
-        <h3 className="text-lg font-bold mb-3 text-white">6대 지표</h3>
+        <h3 className="text-lg font-bold mb-2 text-white">핵심 두뇌 능력</h3>
         <p className="text-xs mb-3" style={{ color: '#888' }}>
-          그래프 끝(꼭짓점)을 누르면 해당 지표 점수가 표시됩니다.
+          그래프 끝(꼭짓점)을 누르면 해당 항목의 점수가 표시됩니다.
         </p>
         <div className="flex justify-center">
-          <RadarChart
-            data={report.metricsScore}
-            size={280}
-            onPointClick={(label, value) => {
-              setRadarTip(`${label} ${Math.round(value)}점`);
-            }}
-          />
+          <RadarChart data={report.metricsScore} size={280} />
         </div>
-        {radarTip && (
-          <motion.div
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mt-3 text-center text-sm font-semibold py-2 rounded-xl"
-            style={{ backgroundColor: '#2A2A2A', color: '#AAED10' }}
-          >
-            {radarTip}
-          </motion.div>
-        )}
       </section>
 
       {/* 변화추이 */}
@@ -257,7 +239,7 @@ export default function Report() {
       >
         <h3 className="text-lg font-bold mb-2 text-white">변화추이</h3>
         <p className="text-xs mb-3" style={{ color: '#888' }}>
-          최근 10회차 종합 세션 기준 · 범례를 눌러 지표별 표시를 끄고 켤 수 있습니다.
+          최근 10회차 종합 세션 기준 · 표시 기준에서 보고 싶은 항목을 선택하세요.
         </p>
         {trendPoints.length > 0 ? (
           <MultiTrendChart data={trendPoints} height={220} />
