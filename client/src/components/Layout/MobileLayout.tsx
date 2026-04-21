@@ -87,7 +87,7 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
       style={{ 
         backgroundColor: '#0A0A0A',
         paddingTop: 'env(safe-area-inset-top)',
-        paddingBottom: 'calc(64px + env(safe-area-inset-bottom))', // 하단바 높이 + safe area
+        paddingBottom: 'calc(64px + env(safe-area-inset-bottom) + 12px)', // 하단바 높이 + safe area + 인디케이터 여유
         height: '100vh',
         WebkitOverflowScrolling: 'touch',
         overscrollBehaviorY: 'none',
@@ -98,11 +98,11 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
         {children}
       </main>
       
-      {/* 하단 네비게이션 바 */}
-      <nav 
-        className="fixed bottom-0 left-0 right-0 z-50" 
-        style={{ 
-          paddingBottom: 'env(safe-area-inset-bottom)',
+      {/* 하단 네비게이션 바 (홈 인디케이터 영역 고려) */}
+      <nav
+        className="fixed bottom-0 left-0 right-0 z-50"
+        style={{
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 12px)',
           paddingLeft: '16px',
           paddingRight: '16px',
         }}

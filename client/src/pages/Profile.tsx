@@ -67,16 +67,16 @@ export default function Profile() {
   };
 
   return (
-    <div 
-      className="min-h-screen" 
-      style={{ 
+    <div
+      className="min-h-screen"
+      style={{
         backgroundColor: '#0A0A0A',
         touchAction: 'pan-y',
         overscrollBehavior: 'none',
         position: 'relative',
         overflow: 'hidden',
         paddingTop: 'env(safe-area-inset-top)',
-        paddingBottom: 'env(safe-area-inset-bottom)'
+        paddingBottom: 'env(safe-area-inset-bottom)',
       }}
     >
       {/* 성공 배너 */}
@@ -87,35 +87,43 @@ export default function Profile() {
         autoClose={true}
         duration={3000}
       />
-      
-      <div 
-        className="max-w-md mx-auto px-4 py-6"
+
+      {/* 고정 상단바 */}
+      <div
+        className="sticky top-0 z-30 max-w-md mx-auto px-4 flex items-center"
         style={{
-          paddingBottom: '100px',
-          overflowY: 'auto',
-          height: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom))',
-          maxHeight: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom))',
-          WebkitOverflowScrolling: 'touch'
+          backgroundColor: '#0A0A0A',
+          height: 44,
+          borderBottom: '1px solid #161616',
         }}
       >
-        {/* 헤더 */}
-        <div className="flex items-center mb-6">
-          <svg 
-            className="w-6 h-6 mr-2" 
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24"
-            style={{ color: '#FFFFFF' }}
-          >
-            <path 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              strokeWidth={2} 
-              d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" 
-            />
-          </svg>
-          <h1 className="text-lg font-semibold text-white">마이페이지</h1>
-        </div>
+        <svg
+          className="w-4 h-4 mr-1.5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          style={{ color: '#FFFFFF' }}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+          />
+        </svg>
+        <h1 className="text-[15px] font-semibold text-white">마이페이지</h1>
+      </div>
+
+      <div
+        className="max-w-md mx-auto px-4 pt-4"
+        style={{
+          paddingBottom: 'calc(96px + env(safe-area-inset-bottom))',
+          overflowY: 'auto',
+          height: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 44px)',
+          maxHeight: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 44px)',
+          WebkitOverflowScrolling: 'touch',
+        }}
+      >
 
         {/* 프로필 섹션 */}
         <div className="flex flex-col items-center mb-6">
@@ -208,7 +216,7 @@ export default function Profile() {
         {/* 설정 섹션 (이미지 시안: 한 카드 + 디바이더) */}
         <div className="mb-6">
           <h3 className="text-sm font-semibold text-white mb-2 px-1">설정</h3>
-          <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: '#1A1A1A', border: '1px solid #2a2a2a' }}>
+          <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: '#262626', border: '1px solid #2f2f2f' }}>
             <SettingRow label="프로필 수정" onClick={() => navigate('/profile/edit')} />
             <Divider />
             <SettingRow label="로그아웃" onClick={() => setShowLogoutModal(true)} />
@@ -220,7 +228,7 @@ export default function Profile() {
         {/* 고객지원 섹션 */}
         <div>
           <h3 className="text-sm font-semibold text-white mb-2 px-1">고객지원</h3>
-          <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: '#1A1A1A', border: '1px solid #2a2a2a' }}>
+          <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: '#262626', border: '1px solid #2f2f2f' }}>
             <SettingRow label="고객센터" onClick={() => navigate('/support')} />
             <Divider />
             <SettingRow
@@ -317,5 +325,5 @@ function SettingRow({ label, onClick }: { label: string; onClick: () => void }) 
 }
 
 function Divider() {
-  return <div style={{ height: 1, backgroundColor: '#232323', margin: '0 16px' }} />;
+  return <div style={{ height: 1, backgroundColor: '#333333', margin: '0 16px' }} />;
 }
