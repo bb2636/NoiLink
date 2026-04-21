@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useAuth } from '../../hooks/useAuth';
 
 interface MobileLayoutProps {
   children: ReactNode;
@@ -8,7 +9,12 @@ interface MobileLayoutProps {
 
 export default function MobileLayout({ children }: MobileLayoutProps) {
   const location = useLocation();
-  
+  const { user } = useAuth();
+
+  // 가운데 버튼: 기업 회원이면 기관 리포트, 그 외에는 개인 리포트
+  const reportPath =
+    user?.userType === 'ORGANIZATION' ? '/report/organization' : '/report';
+
   const navItems = [
     { 
       path: '/', 
@@ -28,13 +34,12 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
         </svg>
       )
     },
-    { 
-      path: '/record', 
-      label: '기록', 
+    {
+      path: reportPath,
+      label: '리포트',
       icon: (
         <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
-          <path d="M9 11h2v6H9v-6zm4 0h2v6h-2v-6z" />
+          <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-2 16H8v-2h4v2zm4-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
         </svg>
       )
     },
@@ -97,13 +102,14 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
         >
           <div className="flex justify-around items-center">
             {navItems.map((item) => {
-              const isActive = location.pathname === item.path || 
+              const isReportItem = item.label === '리포트';
+              const isActive = location.pathname === item.path ||
                 (item.path === '/training' && location.pathname.startsWith('/training')) ||
-                (item.path === '/record' && location.pathname.startsWith('/record')) ||
+                (isReportItem && location.pathname.startsWith('/report')) ||
                 (item.path === '/ranking' && location.pathname.startsWith('/ranking')) ||
                 (item.path === '/profile' && location.pathname.startsWith('/profile'));
-              
-              const isRecordItem = item.path === '/record';
+
+              const isRecordItem = isReportItem;
               
               return (
                 <Link
