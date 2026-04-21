@@ -4,6 +4,20 @@ import { useAuth } from '../hooks/useAuth';
 import { useHome } from '../hooks/useHome';
 import { useNavigate } from 'react-router-dom';
 import Logo from '../components/Logo';
+import { getBrainimalIcon } from '../utils/brainimalIcons';
+
+// TODO: 실제 API 데이터로 교체 — 리포트 화면과 일치하는 데모 값
+const MOCK_HOME = {
+  brainimalType: 'FOX_BALANCED' as const,
+  brainIndex: 80,            // 리포트 평균 점수 (78+82+88+74+91+69)/6 ≈ 80
+  bpmAvg: 92,                // 리포트 recommendedBPM
+  weeklyChange: 12,          // 주간 성장률
+  scoreUpDelta: 20,          // 최근 트렌드 상승폭
+  trendPoints: [62, 66, 70, 68, 72, 75, 78, 76, 80, 82],
+  checkedDays: [true, true, true, true, true, false, false] as boolean[], // 5일 연속
+  streakDays: 5,
+  topTrainings: ['기억력 트레이닝', '집중력 트레이닝', '프리트레이닝'],
+};
 
 type HomeVariant = 'first-time' | 'streak-active' | 'streak-broken' | 'enterprise';
 
@@ -17,11 +31,9 @@ type HomeVariant = 'first-time' | 'streak-active' | 'streak-broken' | 'enterpris
 function resolveVariant(user: { userType?: string; streak?: number; lastTrainingDate?: string } | null): HomeVariant {
   if (!user) return 'first-time';
   if (user.userType === 'ORGANIZATION') return 'enterprise';
-  if (!user.lastTrainingDate) return 'first-time';
-  const last = new Date(user.lastTrainingDate).getTime();
-  const days = Math.floor((Date.now() - last) / 86_400_000);
-  if ((user.streak ?? 0) > 0 && days <= 1) return 'streak-active';
-  return 'streak-broken';
+  // TODO: 실 데이터 도입 시 first-time/broken 분기 복구
+  // 데모: 항상 streak-active 화면(목업)을 노출하여 빈 화면 방지
+  return 'streak-active';
 }
 
 export default function Home() {
@@ -120,19 +132,19 @@ function StandardHome({ variant, home, user }: StandardProps) {
     };
   }, [displayBanners.length]);
 
-  const brainIndex = condition?.score ?? 82;
-  const bpmAvg = 100;
-  const weeklyChange = 2;
-  const streakDays = user?.streak ?? 0;
+  // 리포트와 동일한 목업 데이터 사용
+  const brainIndex = condition?.score ?? MOCK_HOME.brainIndex;
+  const bpmAvg = MOCK_HOME.bpmAvg;
+  const weeklyChange = MOCK_HOME.weeklyChange;
+  const streakDays = user?.streak ?? MOCK_HOME.streakDays;
   const nickname = user?.nickname || user?.name || '회원';
+  const brainimalInfo = getBrainimalIcon(MOCK_HOME.brainimalType);
 
   // 요일 트렌드 (월~일)
   const weekdayLabels = ['월', '화', '수', '목', '금', '토', '일'];
-  // 임시: streak-active면 토요일까지 체크, broken이면 화요일까지만
   const checkedDays = useMemo(() => {
-    if (variant === 'streak-active') return [true, true, true, true, true, true, false];
     if (variant === 'streak-broken') return [true, true, false, false, false, false, false];
-    return [true, true, true, false, false, false, false]; // enterprise 임시
+    return MOCK_HOME.checkedDays;
   }, [variant]);
 
   return (
@@ -200,11 +212,24 @@ function StandardHome({ variant, home, user }: StandardProps) {
         >
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-green-700 flex items-center justify-center text-sm">🦊</div>
+              <div
+                className="w-9 h-9 rounded-full flex items-center justify-center overflow-hidden"
+                style={{ backgroundColor: '#2A2A2A' }}
+              >
+                <img
+                  src={brainimalInfo.icon}
+                  alt={brainimalInfo.name}
+                  className="w-full h-full object-cover"
+                />
+              </div>
               <span className="text-white text-sm font-medium">{nickname}님</span>
             </div>
-            <span className="px-2.5 py-1 rounded-full text-xs font-medium text-orange-400" style={{ backgroundColor: '#3A2A1A' }}>
-              🦊 균형 잡힌 여우
+            <span
+              className="px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1.5"
+              style={{ backgroundColor: '#2A2A2A', color: brainimalInfo.color }}
+            >
+              <img src={brainimalInfo.icon} alt="" className="w-4 h-4 rounded-full object-cover" />
+              {brainimalInfo.name}
             </span>
           </div>
           <button
@@ -243,8 +268,14 @@ function StandardHome({ variant, home, user }: StandardProps) {
           </div>
           <div className="text-gray-400 text-xs mb-2">자주하는 트레이닝</div>
           <div className="flex gap-2 flex-wrap">
-            <span className="px-3 py-1 rounded-full text-xs border border-gray-600 text-gray-300">기억력 트레이닝</span>
-            <span className="px-3 py-1 rounded-full text-xs border border-gray-600 text-gray-300">프리트레이닝</span>
+            {MOCK_HOME.topTrainings.map((t) => (
+              <span
+                key={t}
+                className="px-3 py-1 rounded-full text-xs border border-gray-600 text-gray-300"
+              >
+                {t}
+              </span>
+            ))}
           </div>
         </div>
 
@@ -272,8 +303,10 @@ function StandardHome({ variant, home, user }: StandardProps) {
         {/* 최근 트레이닝 점수 변화 */}
         <h2 className="text-white text-base font-semibold mt-6 mb-3">최근 트레이닝 점수 변화 트렌드</h2>
         <div className="rounded-2xl p-4" style={{ backgroundColor: '#1A1A1A' }}>
-          <div className="text-sm mb-3" style={{ color: '#AAED10' }}>트레이닝 점수가 20점 상승했네요!</div>
-          <MiniLineChart />
+          <div className="text-sm mb-3" style={{ color: '#AAED10' }}>
+            트레이닝 점수가 {MOCK_HOME.scoreUpDelta}점 상승했네요!
+          </div>
+          <MiniLineChart points={MOCK_HOME.trendPoints} />
         </div>
       </div>
     </div>
@@ -351,8 +384,7 @@ function StreakSection({
 // -----------------------------------------------------------------------------
 // 미니 라인 차트 (자리잡이용 SVG)
 // -----------------------------------------------------------------------------
-function MiniLineChart() {
-  const points = [60, 65, 62, 70, 68, 75, 80, 78, 82, 90];
+function MiniLineChart({ points = [60, 65, 62, 70, 68, 75, 80, 78, 82, 90] }: { points?: number[] }) {
   const max = 100;
   const w = 280;
   const h = 100;
