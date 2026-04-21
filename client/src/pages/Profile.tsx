@@ -148,44 +148,30 @@ export default function Profile() {
             {user.email || '이메일 없음'}
           </p>
 
-          <div className="w-full space-y-2 mb-6">
-            <button
-              type="button"
-              onClick={() => navigate('/report')}
-              className="w-full py-3 px-4 rounded-lg font-medium border border-gray-600 text-white"
-              style={{ backgroundColor: '#1A1A1A' }}
-            >
-              나의 리포트
-            </button>
-          </div>
-
-          {/* 기업 회원: 승인 상태 · 기관 리포트 */}
+          {/* 기업 회원: 승인 상태 · 기관 리포트 (이미지 시안: 가운데 알약 버튼) */}
           {user.userType === 'ORGANIZATION' && (
-            <div className="space-y-2 mb-6 w-full">
+            <div className="flex flex-col items-center gap-2 mb-2 w-full">
               {user.approvalStatus === 'APPROVED' && (
-                <p className="text-center text-xs py-2 rounded-lg" style={{ backgroundColor: '#1A2A1A', color: '#AAED10' }}>
+                <p className="text-center text-xs px-4 py-2 rounded-full" style={{ backgroundColor: '#1A2A1A', color: '#AAED10' }}>
                   기관 승인 완료
                 </p>
               )}
               {user.approvalStatus === 'PENDING' && (
-                <p className="text-center text-xs py-2 rounded-lg" style={{ backgroundColor: '#2A2A1A', color: '#ccc' }}>
+                <p className="text-center text-xs px-4 py-2 rounded-full" style={{ backgroundColor: '#2A2A1A', color: '#ccc' }}>
                   기관 승인 검토 중입니다
                 </p>
               )}
               {user.approvalStatus === 'REJECTED' && (
-                <p className="text-center text-xs py-2 rounded-lg" style={{ backgroundColor: '#2A1818', color: '#f99' }}>
-                  승인이 반려되었습니다. 필요 시 다시 신청해 주세요.
+                <p className="text-center text-xs px-4 py-2 rounded-full" style={{ backgroundColor: '#2A1818', color: '#f99' }}>
+                  승인이 반려되었습니다. 다시 신청해 주세요.
                 </p>
               )}
               {user.approvalStatus !== 'APPROVED' && user.approvalStatus !== 'PENDING' && (
                 <button
                   type="button"
                   disabled={orgApprovalLoading}
-                  className="w-full py-3 px-4 rounded-lg font-medium disabled:opacity-60"
-                  style={{
-                    backgroundColor: '#AAED10',
-                    color: '#000000',
-                  }}
+                  className="px-6 py-2.5 rounded-full text-sm font-bold disabled:opacity-60"
+                  style={{ backgroundColor: '#AAED10', color: '#000000' }}
                   onClick={async () => {
                     setOrgApprovalLoading(true);
                     try {
@@ -205,12 +191,12 @@ export default function Profile() {
                   {orgApprovalLoading ? '처리 중…' : '기관 승인 요청'}
                 </button>
               )}
-              {user.organizationId && (
+              {user.organizationId && user.approvalStatus === 'APPROVED' && (
                 <button
                   type="button"
                   onClick={() => navigate('/report/organization')}
-                  className="w-full py-3 px-4 rounded-lg font-medium border border-gray-600 text-white"
-                  style={{ backgroundColor: '#1A1A1A' }}
+                  className="px-6 py-2 rounded-full text-xs font-medium border text-white"
+                  style={{ backgroundColor: 'transparent', borderColor: '#3a3a3a' }}
                 >
                   기관 리포트 보기
                 </button>
@@ -219,61 +205,26 @@ export default function Profile() {
           )}
         </div>
 
-        {/* 설정 섹션 */}
+        {/* 설정 섹션 (이미지 시안: 한 카드 + 디바이더) */}
         <div className="mb-6">
-          <h3 className="text-sm font-medium text-gray-400 mb-3 px-2">설정</h3>
-          <div className="space-y-1">
-            <button
-              onClick={() => navigate('/profile/edit')}
-              className="w-full flex items-center justify-between py-4 px-4 rounded-lg text-white transition-colors"
-              style={{ backgroundColor: '#1A1A1A' }}
-            >
-              <span>프로필 수정</span>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-            
-            <button
-              onClick={() => setShowLogoutModal(true)}
-              className="w-full flex items-center justify-between py-4 px-4 rounded-lg text-white transition-colors"
-              style={{ backgroundColor: '#1A1A1A' }}
-            >
-              <span>로그아웃</span>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-            
-            <button
-              onClick={() => setShowWithdrawModal(true)}
-              className="w-full flex items-center justify-between py-4 px-4 rounded-lg text-white transition-colors"
-              style={{ backgroundColor: '#1A1A1A' }}
-            >
-              <span>회원탈퇴</span>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
+          <h3 className="text-sm font-semibold text-white mb-2 px-1">설정</h3>
+          <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: '#1A1A1A', border: '1px solid #2a2a2a' }}>
+            <SettingRow label="프로필 수정" onClick={() => navigate('/profile/edit')} />
+            <Divider />
+            <SettingRow label="로그아웃" onClick={() => setShowLogoutModal(true)} />
+            <Divider />
+            <SettingRow label="회원탈퇴" onClick={() => setShowWithdrawModal(true)} />
           </div>
         </div>
 
         {/* 고객지원 섹션 */}
         <div>
-          <h3 className="text-sm font-medium text-gray-400 mb-3 px-2">고객지원</h3>
-          <div className="space-y-1">
-            <button
-              onClick={() => navigate('/support')}
-              className="w-full flex items-center justify-between py-4 px-4 rounded-lg text-white transition-colors"
-              style={{ backgroundColor: '#1A1A1A' }}
-            >
-              <span>고객센터</span>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-            
-            <button
+          <h3 className="text-sm font-semibold text-white mb-2 px-1">고객지원</h3>
+          <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: '#1A1A1A', border: '1px solid #2a2a2a' }}>
+            <SettingRow label="고객센터" onClick={() => navigate('/support')} />
+            <Divider />
+            <SettingRow
+              label="개인정보처리방침"
               onClick={async () => {
                 try {
                   const response = await api.getTermByType('PRIVACY');
@@ -289,16 +240,10 @@ export default function Profile() {
                   alert('약관을 불러올 수 없습니다.');
                 }
               }}
-              className="w-full flex items-center justify-between py-4 px-4 rounded-lg text-white transition-colors"
-              style={{ backgroundColor: '#1A1A1A' }}
-            >
-              <span>개인정보처리방침</span>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-            
-            <button
+            />
+            <Divider />
+            <SettingRow
+              label="서비스 이용약관"
               onClick={async () => {
                 try {
                   const response = await api.getTermByType('SERVICE');
@@ -314,14 +259,7 @@ export default function Profile() {
                   alert('약관을 불러올 수 없습니다.');
                 }
               }}
-              className="w-full flex items-center justify-between py-4 px-4 rounded-lg text-white transition-colors"
-              style={{ backgroundColor: '#1A1A1A' }}
-            >
-              <span>서비스 이용약관</span>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
+            />
           </div>
         </div>
       </div>
@@ -361,4 +299,23 @@ export default function Profile() {
       />
     </div>
   );
+}
+
+function SettingRow({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full flex items-center justify-between py-4 px-4 text-white"
+    >
+      <span className="text-[15px]">{label}</span>
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ color: '#888' }}>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+      </svg>
+    </button>
+  );
+}
+
+function Divider() {
+  return <div style={{ height: 1, backgroundColor: '#232323', margin: '0 16px' }} />;
 }

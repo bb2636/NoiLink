@@ -73,10 +73,10 @@ export default function EditProfile() {
       if (response.success) {
         setStep('edit');
       } else {
-        setError('① 이메일 또는 비밀번호가 일치하지 않습니다.');
+        setError('이메일 또는 비밀번호가 일치하지 않습니다.');
       }
     } catch (err) {
-      setError('① 이메일 또는 비밀번호가 일치하지 않습니다.');
+      setError('이메일 또는 비밀번호가 일치하지 않습니다.');
     } finally {
       setLoading(false);
     }
