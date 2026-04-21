@@ -16,50 +16,68 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
     user?.userType === 'ORGANIZATION' ? '/report/organization' : '/report';
 
   const navItems = [
-    { 
-      path: '/', 
-      label: '홈', 
+    {
+      path: '/',
+      label: '홈',
+      // 집 아이콘 (필드 라인)
       icon: (
         <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
+          <path d="M12 3 2 12h3v8h5v-6h4v6h5v-8h3L12 3z" />
         </svg>
-      )
+      ),
     },
-    { 
-      path: '/training', 
-      label: '트레이닝', 
+    {
+      path: '/training',
+      label: '트레이닝',
+      // 덤벨 아이콘 (대각선)
       icon: (
-        <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M20.57 14.86L22 13.43 20.57 12 17 15.57 8.43 7 12 3.43 10.57 2 9.14 3.43 7.71 2 5.57 4.14 4.14 3 2.71 4.43l1.43 1.43L2 7.71l1.43 1.43L2 10.57 3.43 12 7 8.43 15.57 17 12 20.57 13.43 22l1.43-1.43L16.29 22l2.14-2.14 1.43 1.43L21.43 20.57l-1.43-1.43L22 16.29l-1.43-1.43z" />
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+          <path d="M6.5 6.5l11 11" />
+          <path d="M21 21l-1-1" />
+          <path d="M3 3l1 1" />
+          <path d="M18 22l4-4" />
+          <path d="M2 6l4-4" />
+          <path d="M3 10l7-7" />
+          <path d="M14 21l7-7" />
         </svg>
-      )
+      ),
     },
     {
       path: reportPath,
       label: '리포트',
+      // 문서 + 막대그래프
       icon: (
-        <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-2 16H8v-2h4v2zm4-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+          <path d="M9 18v-3" />
+          <path d="M12 18v-6" />
+          <path d="M15 18v-2" />
         </svg>
-      )
+      ),
     },
-    { 
-      path: '/ranking', 
-      label: '랭킹', 
+    {
+      path: '/ranking',
+      label: '랭킹',
+      // 세로 막대 차트 (높이 다름)
       icon: (
         <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M3 18h6v-2H3v2zM3 6v2h18V6H3zm0 7h12v-2H3v2z" />
+          <rect x="4"  y="12" width="3.5" height="8"  rx="1" />
+          <rect x="10.25" y="7"  width="3.5" height="13" rx="1" />
+          <rect x="16.5" y="3"  width="3.5" height="17" rx="1" />
         </svg>
-      )
+      ),
     },
-    { 
-      path: '/profile', 
-      label: '마이페이지', 
+    {
+      path: '/profile',
+      label: '마이페이지',
+      // 사람 (머리+어깨)
       icon: (
         <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 21c0-4.418 3.582-7 8-7s8 2.582 8 7v1H4v-1z" />
         </svg>
-      )
+      ),
     },
   ];
   
