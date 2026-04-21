@@ -8,6 +8,67 @@ import { calculateBrainAge, calculateBrainAgeChange } from '../utils/brainAge';
 import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
 import type { Report, MetricsScore, Session } from '@noilink/shared';
 
+// TODO: 실제 API 데이터로 교체 — 데모용 개인 리포트 목업
+const MOCK_PERSONAL_REPORT: Report = {
+  id: 'mock-report-001',
+  userId: 'mock-user',
+  reportVersion: 12,
+  brainimalType: 'FOX_BALANCED',
+  confidence: 86,
+  metricsScore: {
+    sessionId: 'mock-session',
+    userId: 'mock-user',
+    memory: 78,
+    comprehension: 82,
+    focus: 88,
+    judgment: 74,
+    agility: 91,
+    endurance: 69,
+    rhythm: 80,
+    createdAt: new Date().toISOString(),
+  },
+  factText:
+    '최근 12회의 종합 트레이닝 결과, 평균 종합 점수는 80.3점으로 동연령대 상위 22% 수준입니다. 특히 순발력과 집중력에서 안정적으로 높은 수치를 유지하고 있습니다.',
+  lifeText:
+    '반응 속도와 주의 유지력이 우수한 편입니다. 다만 장시간 과제에서는 후반부 정확도가 약 8% 감소하는 경향이 관찰되어, 지구력 보강 트레이닝이 도움이 될 수 있습니다.',
+  hintText:
+    '아침 5분의 가벼운 인지 워밍업과 충분한 수분 섭취가 오후 집중력 유지에 효과적입니다. 주 3회 이상 종합 트레이닝을 권장드립니다.',
+  strengthText:
+    '순발력(91점)과 집중력(88점)이 또래 평균보다 12점 이상 높습니다. 빠른 의사결정이 필요한 상황에서 강점을 발휘합니다.',
+  weaknessText:
+    '지구력(69점)이 상대적으로 낮습니다. 짧고 강한 트레이닝보다 중간 강도의 긴 세션을 통해 점진적으로 끌어올리는 것을 추천드립니다.',
+  metricEvidenceCards: [
+    { key: 'memory', label: '기억력', body: '최근 5세션 평균 78점 — 숫자 회상 과제에서 안정적 수행을 보였습니다.' },
+    { key: 'focus', label: '집중력', body: '주의 유지 과제 정답률 92% — 상위 15% 수준입니다.' },
+    { key: 'agility', label: '순발력', body: '평균 반응속도 412ms로 동연령대 대비 18% 빠릅니다.' },
+    { key: 'endurance', label: '지구력', body: '5분 이상 세션에서 후반부 정확도 하락 폭이 평균보다 큽니다.' },
+  ],
+  recommendedRoleModel: {
+    name: '균형잡힌 여우형',
+    oneLiner: '순발력과 집중력이 균형 잡힌 분석가형',
+    description:
+      '빠른 판단과 안정된 집중력을 동시에 요구하는 분야에서 두각을 나타냅니다. 데이터 분석가, 응급의료, 트레이더 등이 대표적인 롤모델입니다.',
+  },
+  recommendedBPM: 92,
+  createdAt: new Date().toISOString(),
+};
+
+// TODO: 실제 API 데이터로 교체 — 데모용 변화 추이 (최근 8회)
+const MOCK_TREND_POINTS: TrendPoint[] = Array.from({ length: 8 }).map((_, i) => {
+  const d = new Date();
+  d.setDate(d.getDate() - (7 - i) * 3);
+  const base = 65 + i * 2;
+  return {
+    date: d.toISOString(),
+    memory: base + Math.round(Math.sin(i) * 4) + 6,
+    comprehension: base + Math.round(Math.cos(i) * 3) + 8,
+    focus: base + 10 + Math.round(Math.sin(i + 1) * 3),
+    judgment: base + 2 + Math.round(Math.cos(i + 1) * 4),
+    agility: base + 14 + Math.round(Math.sin(i + 2) * 2),
+    endurance: base - 4 + Math.round(Math.cos(i + 2) * 3),
+  };
+});
+
 /**
  * 개인 리포트 — 명세: 프로필 요약, 6대 지표(꼭짓점 툴팁), 변화추이, 종합 평가, 롤모델, 면책
  */
@@ -92,7 +153,7 @@ export default function Report() {
     );
   }
 
-  if (!report || !user) {
+  if (!user) {
     return (
       <div
         className="max-w-md mx-auto px-4"
@@ -151,31 +212,36 @@ export default function Report() {
     );
   }
 
-  const brainimalInfo = report.brainimalType
-    ? getBrainimalIcon(report.brainimalType)
+  // TODO: 실제 리포트 생성 시 목업 제거 — 데모 환경에서 빈 화면 방지
+  const effectiveReport: Report = report ?? { ...MOCK_PERSONAL_REPORT, userId: user.id };
+  const effectiveTrendPoints: TrendPoint[] =
+    trendPoints.length > 0 ? trendPoints : MOCK_TREND_POINTS;
+
+  const brainimalInfo = effectiveReport.brainimalType
+    ? getBrainimalIcon(effectiveReport.brainimalType)
     : DEFAULT_BRAINIMAL;
 
   const displayBrainAge =
-    user.brainAge ?? calculateBrainAge(report.metricsScore, user.age);
+    user.brainAge ?? calculateBrainAge(effectiveReport.metricsScore, user.age);
   const brainAgeChange = calculateBrainAgeChange(
     displayBrainAge,
     user.previousBrainAge
   );
 
   const strengthText =
-    report.strengthText ??
+    effectiveReport.strengthText ??
     '최근 세션 기준으로 상대적으로 높은 지표가 강점으로 나타납니다.';
   const weaknessText =
-    report.weaknessText ??
+    effectiveReport.weaknessText ??
     '낮은 지표는 집중 트레이닝으로 단계적으로 끌어올릴 수 있습니다.';
   const evidenceCards =
-    report.metricEvidenceCards && report.metricEvidenceCards.length > 0
-      ? report.metricEvidenceCards
+    effectiveReport.metricEvidenceCards && effectiveReport.metricEvidenceCards.length > 0
+      ? effectiveReport.metricEvidenceCards
       : [
           { key: 'summary', label: '종합', body: '세션 데이터가 쌓이면 지표별 근거 카드가 생성됩니다.' },
         ];
   const roleModel =
-    report.recommendedRoleModel ?? {
+    effectiveReport.recommendedRoleModel ?? {
       name: brainimalInfo.name,
       oneLiner: brainimalInfo.description.slice(0, 48) + (brainimalInfo.description.length > 48 ? '…' : ''),
       description: brainimalInfo.description,
@@ -271,7 +337,7 @@ export default function Report() {
           그래프 끝(꼭짓점)을 누르면 해당 항목의 점수가 표시됩니다.
         </p>
         <div className="flex justify-center">
-          <RadarChart data={report.metricsScore} size={280} />
+          <RadarChart data={effectiveReport.metricsScore} size={280} />
         </div>
       </section>
 
@@ -284,13 +350,7 @@ export default function Report() {
         <p className="text-xs mb-3" style={{ color: '#888' }}>
           최근 10회차 종합 세션 기준 · 표시 기준에서 보고 싶은 항목을 선택하세요.
         </p>
-        {trendPoints.length > 0 ? (
-          <MultiTrendChart data={trendPoints} height={220} />
-        ) : (
-          <p className="text-sm" style={{ color: '#888' }}>
-            아직 표시할 추이 데이터가 없습니다.
-          </p>
-        )}
+        <MultiTrendChart data={effectiveTrendPoints} height={220} />
       </section>
 
       {/* 뇌지컬 종합 평가 */}
@@ -323,14 +383,14 @@ export default function Report() {
         <div>
           <h4 className="text-sm font-semibold text-white mb-1">종합 평가</h4>
           <p className="text-sm leading-relaxed" style={{ color: '#B6B6B9' }}>
-            {report.factText}
+            {effectiveReport.factText}
           </p>
         </div>
 
         <div>
           <h4 className="text-sm font-semibold text-white mb-1">상세 분석</h4>
           <p className="text-sm leading-relaxed" style={{ color: '#B6B6B9' }}>
-            {report.lifeText}
+            {effectiveReport.lifeText}
           </p>
         </div>
 
@@ -351,7 +411,7 @@ export default function Report() {
         <div>
           <h4 className="text-sm font-semibold text-white mb-1">생활 밀착 피드백</h4>
           <p className="text-sm leading-relaxed" style={{ color: '#B6B6B9' }}>
-            {report.hintText}
+            {effectiveReport.hintText}
           </p>
         </div>
       </section>
