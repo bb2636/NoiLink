@@ -838,7 +838,7 @@ export default function SignUp() {
                           type="button"
                           onClick={() => setShowTooltip(!showTooltip)}
                           onMouseEnter={() => setShowTooltip(true)}
-                          className="w-5 h-5 rounded-full border border-white flex items-center justify-center text-white text-xs hover:bg-gray-700 transition-colors"
+                          className="w-4 h-4 rounded-full bg-white flex items-center justify-center text-black text-[10px] font-bold leading-none hover:bg-gray-200 transition-colors"
                         >
                           ?
                         </button>
