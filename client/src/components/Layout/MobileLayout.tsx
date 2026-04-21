@@ -161,15 +161,17 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
                       </div>
                     )}
                   </motion.div>
-                  <span
-                    className="text-xs mt-1"
-                    style={{ 
-                      color: isActive ? '#AAED10' : '#999999',
-                      fontWeight: isActive ? '600' : '400'
-                    }}
-                  >
-                    {item.label}
-                  </span>
+                  {!isReportItem && (
+                    <span
+                      className="text-xs mt-1"
+                      style={{
+                        color: isActive ? '#AAED10' : '#999999',
+                        fontWeight: isActive ? '600' : '400'
+                      }}
+                    >
+                      {item.label}
+                    </span>
+                  )}
                 </Link>
               );
             })}

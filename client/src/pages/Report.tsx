@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
-import Button from '../components/Button';
 import RadarChart from '../components/RadarChart';
 import MultiTrendChart, { type TrendPoint } from '../components/MultiTrendChart/MultiTrendChart';
 import { calculateBrainAge, calculateBrainAgeChange } from '../utils/brainAge';
@@ -95,14 +94,58 @@ export default function Report() {
 
   if (!report || !user) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] px-4 max-w-md mx-auto">
-        <p className="text-gray-400 mb-3 text-center text-sm leading-relaxed">
-          리포트가 없거나 조건이 부족합니다. 종합 트레이닝 유효 세션 3회와 각 세션의 지표(메트릭) 계산이 쌓이면
-          자동 생성됩니다.
-        </p>
-        <Button onClick={() => navigate('/training')}>트레이닝 하러 가기</Button>
-        <div className="mt-3">
-          <Button onClick={() => navigate('/')}>홈</Button>
+      <div
+        className="max-w-md mx-auto px-4"
+        style={{ backgroundColor: '#0A0A0A', minHeight: '70vh' }}
+      >
+        {/* 헤더 */}
+        <div className="flex items-center pt-4 pb-2">
+          <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ color: '#FFFFFF' }}>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2a4 4 0 014-4h6m-6-4h6M5 7h2m-2 4h2m-2 4h2" />
+          </svg>
+          <h1 className="text-[15px] font-semibold text-white">리포트</h1>
+        </div>
+
+        {/* 빈 상태 카드 */}
+        <div
+          className="rounded-2xl p-5 mt-4"
+          style={{ backgroundColor: '#1A1A1A', border: '1px solid #262626' }}
+        >
+          <div className="flex flex-col items-center text-center">
+            <div
+              className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
+              style={{ backgroundColor: '#262626' }}
+            >
+              <svg className="w-7 h-7" fill="none" stroke="#AAED10" strokeWidth={1.8} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-6h13M9 11V5h13M3 6h.01M3 12h.01M3 18h.01" />
+              </svg>
+            </div>
+            <h3 className="text-white font-semibold text-base mb-2">
+              아직 리포트가 없어요
+            </h3>
+            <p className="text-[13px] leading-relaxed mb-5" style={{ color: '#9CA3AF' }}>
+              종합 트레이닝 유효 세션 <span style={{ color: '#AAED10' }}>3회</span>와<br />
+              각 세션의 지표(메트릭) 계산이 쌓이면<br />
+              리포트가 자동으로 생성됩니다.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => navigate('/training')}
+              className="w-full py-3 rounded-xl font-semibold text-[15px] mb-2"
+              style={{ backgroundColor: '#AAED10', color: '#0A0A0A' }}
+            >
+              트레이닝 하러 가기
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="w-full py-3 rounded-xl font-medium text-[14px]"
+              style={{ backgroundColor: 'transparent', color: '#E5E7EB', border: '1px solid #2f2f2f' }}
+            >
+              홈으로
+            </button>
+          </div>
         </div>
       </div>
     );
