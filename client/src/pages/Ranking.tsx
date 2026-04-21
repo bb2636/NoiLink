@@ -21,7 +21,9 @@ const TABS: { id: TabKey; label: string; suffix: string }[] = [
 // 데모용 하드코딩 랭킹 데이터 (이미지 시안 기반)
 // TODO: 실제 API(/rankings)로 교체
 // =============================================================================
-const MOCK_ROWS: Record<TabKey, Row[]> = {
+
+// 개인(전체) 랭킹
+const PERSONAL_ROWS: Record<TabKey, Row[]> = {
   composite: [
     { rank: 1,  nickname: '마루',     value: 96 },
     { rank: 2,  nickname: '이선생',   value: 94 },
@@ -60,13 +62,62 @@ const MOCK_ROWS: Record<TabKey, Row[]> = {
   ],
 };
 
-// 내 랭킹 (이미지 시안)
-const MY_RANK = {
+// 기업 내 랭킹 (이미지 시안: 김우진, 이준호, 박민재 …)
+const ORG_ROWS: Record<TabKey, Row[]> = {
+  composite: [
+    { rank: 1,  nickname: '김우진', value: 96 },
+    { rank: 2,  nickname: '이준호', value: 94 },
+    { rank: 3,  nickname: '박민재', value: 93 },
+    { rank: 4,  nickname: '최하늘', value: 92 },
+    { rank: 5,  nickname: '정수빈', value: 90 },
+    { rank: 5,  nickname: '이서연', value: 90 },
+    { rank: 7,  nickname: '김태현', value: 89 },
+    { rank: 8,  nickname: '오지민', value: 86 },
+    { rank: 9,  nickname: '한지우', value: 85 },
+    { rank: 10, nickname: '김미연', value: 85 },
+  ],
+  time: [
+    { rank: 1,  nickname: '김우진', value: 34 },
+    { rank: 2,  nickname: '이준호', value: 31 },
+    { rank: 3,  nickname: '박민재', value: 28 },
+    { rank: 4,  nickname: '최하늘', value: 27 },
+    { rank: 5,  nickname: '정수빈', value: 24 },
+    { rank: 6,  nickname: '이서연', value: 22 },
+    { rank: 7,  nickname: '김태현', value: 18 },
+    { rank: 8,  nickname: '오지민', value: 14 },
+    { rank: 9,  nickname: '한지우', value: 12 },
+    { rank: 10, nickname: '김미연', value: 10 },
+  ],
+  streak: [
+    { rank: 1,  nickname: '김우진', value: 14 },
+    { rank: 2,  nickname: '이준호', value: 13 },
+    { rank: 3,  nickname: '박민재', value: 13 },
+    { rank: 4,  nickname: '최하늘', value: 12 },
+    { rank: 5,  nickname: '정수빈', value: 11 },
+    { rank: 5,  nickname: '이서연', value: 8  },
+    { rank: 7,  nickname: '김태현', value: 7  },
+    { rank: 8,  nickname: '오지민', value: 4  },
+    { rank: 9,  nickname: '한지우', value: 3  },
+    { rank: 10, nickname: '김미연', value: 2  },
+  ],
+};
+
+// 내 랭킹 통계 (이미지 시안)
+const PERSONAL_MY_RANK = {
   rankByTab: { composite: 13, time: 27, streak: 19 } as Record<TabKey, number>,
   composite: 82,
-  totalHours: 4,
+  totalTime: 4,        // 시간
   streakDays: 5,
   attendanceRate: 90,
+  totalTimeUnit: '시간',
+};
+const ORG_MY_RANK = {
+  rankByTab: { composite: 13, time: 13, streak: 13 } as Record<TabKey, number>,
+  composite: 82,
+  totalTime: 14,       // 회 (이미지 시안: "합계 시간 14회")
+  streakDays: 5,
+  attendanceRate: 90,
+  totalTimeUnit: '회',
 };
 
 const VISIBLE_DEFAULT = 10;
@@ -76,10 +127,17 @@ export default function Ranking() {
   const [tab, setTab] = useState<TabKey>('composite');
   const [visible, setVisible] = useState(VISIBLE_DEFAULT);
 
-  const rows = useMemo(() => MOCK_ROWS[tab], [tab]);
+  // 기업 관리자 계정만 기업 내 랭킹 열람 가능.
+  // 기업 소속 개인은 일반 개인 랭킹(전체)만 볼 수 있음.
+  const isOrgAdmin = user?.userType === 'ORGANIZATION';
+  const dataset = isOrgAdmin ? ORG_ROWS : PERSONAL_ROWS;
+  const myStats = isOrgAdmin ? ORG_MY_RANK : PERSONAL_MY_RANK;
+
+  const rows = useMemo(() => dataset[tab], [dataset, tab]);
   const suffix = TABS.find((t) => t.id === tab)!.suffix;
-  const myRank = MY_RANK.rankByTab[tab];
+  const myRank = myStats.rankByTab[tab];
   const nickname = user?.name || user?.username || '홍길동';
+  const myCardTitle = isOrgAdmin ? '기업 내 나의 랭킹' : '나의 랭킹';
 
   return (
     <MobileLayout>
@@ -91,7 +149,7 @@ export default function Ranking() {
           </h1>
 
           {/* 나의 랭킹 카드 */}
-          <h2 className="text-sm font-semibold mb-2" style={{ color: '#ddd' }}>나의 랭킹</h2>
+          <h2 className="text-sm font-semibold mb-2" style={{ color: '#ddd' }}>{myCardTitle}</h2>
           <div
             className="rounded-2xl p-4 mb-5"
             style={{ backgroundColor: '#1A1A1A', border: '1px solid #2a2a2a' }}
@@ -117,10 +175,10 @@ export default function Ranking() {
             <div className="h-px mb-3" style={{ backgroundColor: '#2a2a2a' }} />
 
             <div className="grid grid-cols-2 gap-y-2 text-sm">
-              <Stat label="종합트레이닝" value={`${MY_RANK.composite}점`} />
-              <Stat label="합계 시간"    value={`${MY_RANK.totalHours}시간`} />
-              <Stat label="연속 트레이닝" value={`${MY_RANK.streakDays}일`} />
-              <Stat label="출석률"       value={`${MY_RANK.attendanceRate}%`} />
+              <Stat label="종합트레이닝" value={`${myStats.composite}점`} />
+              <Stat label="합계 시간"    value={`${myStats.totalTime}${myStats.totalTimeUnit}`} />
+              <Stat label="연속 트레이닝" value={`${myStats.streakDays}일`} />
+              <Stat label="출석률"       value={`${myStats.attendanceRate}%`} />
             </div>
           </div>
 
