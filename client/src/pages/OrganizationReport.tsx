@@ -121,7 +121,14 @@ export default function OrganizationReport() {
   const { user } = useAuth();
   const navigate = useNavigate();
   // 데모: 항상 하드코딩 데이터 표시 (실 API 연동은 추후 교체)
-  const report: OrganizationInsightReport = MOCK_REPORT;
+  // 단, 회사명은 로그인한 기업 회원의 실제 소속명으로 덮어씀.
+  const report: OrganizationInsightReport = useMemo(
+    () => ({
+      ...MOCK_REPORT,
+      organizationName: user?.organizationName ?? MOCK_REPORT.organizationName,
+    }),
+    [user?.organizationName],
+  );
   const trendPoints: TrendPoint[] = MOCK_TREND;
   const members: User[] = MOCK_MEMBERS;
   const [tab, setTab] = useState<TabKey>('all');
