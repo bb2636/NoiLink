@@ -1,6 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { MobileLayout } from './components/Layout';
-import { useAuth } from './hooks/useAuth';
+import { useAuth, AuthProvider } from './hooks/useAuth';
 
 // Pages
 import Home from './pages/Home';
@@ -97,7 +97,16 @@ function AdminRoute({ children }: { children: React.ReactElement }) {
 function App() {
   return (
     <Router>
-      <Routes>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </Router>
+  );
+}
+
+function AppRoutes() {
+  return (
+    <Routes>
         <Route path="/splash" element={<Splash />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
@@ -300,7 +309,6 @@ function App() {
           }
         />
       </Routes>
-    </Router>
   );
 }
 

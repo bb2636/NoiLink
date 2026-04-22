@@ -12,7 +12,7 @@ import type { Terms } from '@noilink/shared';
  * 프로필 페이지 (마이페이지)
  */
 export default function Profile() {
-  const { user, logout, refreshUser } = useAuth();
+  const { user, loading: authLoading, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -35,6 +35,10 @@ export default function Profile() {
   }, [location.state]);
 
   if (!user) {
+    // 인증 정보 로딩 중에는 안내 문구 대신 빈 화면 유지 (깜빡임 방지)
+    if (authLoading) {
+      return <div className="min-h-screen" style={{ backgroundColor: '#0A0A0A' }} />;
+    }
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#0A0A0A' }}>
         <div className="text-center">

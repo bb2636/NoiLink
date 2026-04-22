@@ -10,7 +10,7 @@ import api from '../utils/api';
  * 2단계: 프로필 수정 폼
  */
 export default function EditProfile() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState<'verify' | 'edit'>('verify');
   const [loading, setLoading] = useState(false);
@@ -46,6 +46,9 @@ export default function EditProfile() {
   }, [user, step]);
 
   if (!user) {
+    if (authLoading) {
+      return <div className="min-h-screen" style={{ backgroundColor: '#0A0A0A' }} />;
+    }
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#0A0A0A' }}>
         <div className="text-center">
