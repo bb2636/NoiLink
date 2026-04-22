@@ -199,24 +199,26 @@ export default function Ranking() {
 
   return (
     <MobileLayout>
-      {/* 상단 고정 헤더 — 노치/상단바 안전영역 + 고정 위치 */}
+      {/* 상단 고정 헤더 — 노치/상단바 안전영역 자체 보정 + 완전 불투명 */}
       <header
-        className="sticky top-0 z-30 backdrop-blur"
+        className="sticky z-40"
         style={{
-          backgroundColor: 'rgba(10,10,10,0.92)',
+          top: 'calc(-1 * env(safe-area-inset-top))',
+          paddingTop: 'env(safe-area-inset-top)',
+          backgroundColor: '#0A0A0A',
           borderBottom: '1px solid #1A1A1A',
+          marginTop: 'calc(-1 * env(safe-area-inset-top))',
         }}
       >
         <div className="max-w-md mx-auto px-4 py-3 flex items-center gap-2">
           <span style={{ color: '#AAED10' }}>📊</span>
-          <h1 className="text-base font-bold" style={{ color: '#fff' }}>랭킹</h1>
+          <h1 className="text-base font-bold" style={{ color: '#fff' }}>{myCardTitle}</h1>
         </div>
       </header>
 
       <div className="max-w-md mx-auto px-4 pt-4 pb-6" style={{ paddingBottom: '120px' }}>
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
           {/* 나의 랭킹 카드 */}
-          <h2 className="text-sm font-semibold mb-2" style={{ color: '#ddd' }}>{myCardTitle}</h2>
           <div
             className="rounded-2xl p-4 mb-5"
             style={{ backgroundColor: '#1A1A1A', border: '1px solid #2a2a2a' }}

@@ -80,11 +80,14 @@ export default function OrganizationJoin() {
         duration={2500}
       />
 
-      {/* 상단 고정 헤더 */}
+      {/* 상단 고정 헤더 — 노치/상단바 안전영역 자체 보정 */}
       <header
-        className="sticky top-0 z-30 backdrop-blur"
+        className="sticky z-40"
         style={{
-          backgroundColor: 'rgba(10,10,10,0.92)',
+          top: 'calc(-1 * env(safe-area-inset-top))',
+          paddingTop: 'env(safe-area-inset-top)',
+          marginTop: 'calc(-1 * env(safe-area-inset-top))',
+          backgroundColor: '#0A0A0A',
           borderBottom: '1px solid #1A1A1A',
         }}
       >
