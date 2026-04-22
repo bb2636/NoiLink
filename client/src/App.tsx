@@ -28,6 +28,8 @@ import FindPassword from './pages/FindPassword';
 import Ranking from './pages/Ranking';
 import Report from './pages/Report';
 import OrganizationReport from './pages/OrganizationReport';
+import OrganizationJoin from './pages/OrganizationJoin';
+import OrganizationMembers from './pages/OrganizationMembers';
 import Record from './pages/Record';
 import TrainingSetup from './pages/TrainingSetup';
 import TrainingSessionPlay from './pages/TrainingSessionPlay';
@@ -273,6 +275,22 @@ function AppRoutes() {
                   element={
                     <ProtectedRoute>
                       <Ranking />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/organization/join"
+                  element={
+                    <ProtectedRoute>
+                      <OrganizationJoin />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/organization/members"
+                  element={
+                    <ProtectedRoute>
+                      <OrganizationMembers />
                     </ProtectedRoute>
                   }
                 />
