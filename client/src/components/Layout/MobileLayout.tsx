@@ -5,9 +5,11 @@ import { useAuth } from '../../hooks/useAuth';
 
 interface MobileLayoutProps {
   children: ReactNode;
+  /** 트레이닝 진행 화면 등 몰입형 화면에서 하단 탭바를 숨기고 싶을 때 사용 */
+  hideBottomNav?: boolean;
 }
 
-export default function MobileLayout({ children }: MobileLayoutProps) {
+export default function MobileLayout({ children, hideBottomNav = false }: MobileLayoutProps) {
   const location = useLocation();
   const { user } = useAuth();
 
@@ -87,7 +89,9 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
       style={{ 
         backgroundColor: '#0A0A0A',
         paddingTop: 'env(safe-area-inset-top)',
-        paddingBottom: 'calc(64px + env(safe-area-inset-bottom) + 12px)', // 하단바 높이 + safe area + 인디케이터 여유
+        paddingBottom: hideBottomNav
+          ? 'env(safe-area-inset-bottom)'
+          : 'calc(64px + env(safe-area-inset-bottom) + 12px)', // 하단바 높이 + safe area + 인디케이터 여유
         height: '100vh',
         WebkitOverflowScrolling: 'touch',
         overscrollBehaviorY: 'none',
@@ -99,6 +103,7 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
       </main>
       
       {/* 하단 네비게이션 바 (홈 인디케이터 영역 고려) */}
+      {!hideBottomNav && (
       <nav
         className="fixed bottom-0 left-0 right-0 z-50"
         style={{
@@ -178,6 +183,7 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
           </div>
         </div>
       </nav>
+      )}
     </div>
   );
 }

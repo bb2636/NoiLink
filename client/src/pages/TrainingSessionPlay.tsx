@@ -101,7 +101,7 @@ export default function TrainingSessionPlay() {
   const progress = totalSec > 0 ? elapsed / totalSec : 0;
 
   return (
-    <MobileLayout>
+    <MobileLayout hideBottomNav>
       <div
         className="max-w-md mx-auto px-4 py-6 flex flex-col min-h-screen"
         style={{ paddingBottom: '120px', color: '#fff' }}
