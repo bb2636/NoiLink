@@ -22,13 +22,14 @@ interface RadarChartProps {
   onPointHover?: (metric: string, value: number) => void;
 }
 
+// 시안 기준 시계방향: 기억력(상)→이해력(우상)→집중력(우하)→판단력(하)→지구력(좌하)→순발력(좌상)
 const METRICS = [
-  { key: 'memory', label: '기억력', angle: 0 },
+  { key: 'memory',        label: '기억력', angle: 0 },
   { key: 'comprehension', label: '이해력', angle: 60 },
-  { key: 'focus', label: '집중력', angle: 120 },
-  { key: 'judgment', label: '판단력', angle: 180 },
-  { key: 'agility', label: '순발력', angle: 240 },
-  { key: 'endurance', label: '지구력', angle: 300 },
+  { key: 'focus',         label: '집중력', angle: 120 },
+  { key: 'judgment',      label: '판단력', angle: 180 },
+  { key: 'endurance',     label: '지구력', angle: 240 },
+  { key: 'agility',       label: '순발력', angle: 300 },
 ];
 
 const ACCENT = '#AAED10';
@@ -86,9 +87,9 @@ export default function RadarChart({
       ctx.stroke();
     });
 
-    // 데이터 폴리곤 (영역은 라임 반투명, 외곽선은 흰색으로 또렷하게)
-    ctx.fillStyle = 'rgba(170, 237, 16, 0.22)';
-    ctx.strokeStyle = '#FFFFFF';
+    // 데이터 폴리곤 (영역 라임 반투명 + 외곽선도 라임으로 강조 — 시안 동일)
+    ctx.fillStyle = 'rgba(170, 237, 16, 0.18)';
+    ctx.strokeStyle = ACCENT;
     ctx.lineWidth = 2;
     ctx.beginPath();
     METRICS.forEach((metric, idx) => {
@@ -104,20 +105,17 @@ export default function RadarChart({
     ctx.fill();
     ctx.stroke();
 
-    // 꼭짓점 — 모두 동일한 라임 + 흰색 외곽 (원형 디자인 유지)
+    // 꼭짓점 — 흰색 작은 도트 (시안)
     METRICS.forEach((metric) => {
       const value = data[metric.key as keyof typeof data] || 0;
       const n = value / 100;
       const angle = ((metric.angle - 90) * Math.PI) / 180;
       const x = center + radius * n * Math.cos(angle);
       const y = center + radius * n * Math.sin(angle);
-      ctx.fillStyle = ACCENT;
+      ctx.fillStyle = '#FFFFFF';
       ctx.beginPath();
-      ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
     });
 
     // 라벨
@@ -168,19 +166,20 @@ export default function RadarChart({
         style={{ width: size, height: size }}
         onClick={handleClick}
       />
-      {/* 우상단 고정 핀 — 선택 지표 + 평균 점수 (컴팩트, 라임 액센트) */}
+      {/* 우상단 핀 — 선택 지표 + 평균 점수 (시안 동일: 살짝 안쪽, 라운드 카드) */}
       <div
-        className="absolute rounded-md px-2 py-1 text-[9px] leading-tight shadow"
+        className="absolute rounded-lg px-3 py-1.5 text-[11px] leading-tight shadow-lg"
         style={{
-          top: 0,
+          top: size * 0.18,
           right: 0,
-          backgroundColor: '#1A1A1A',
+          backgroundColor: '#262626',
           color: '#E5E5E5',
-          border: '1px solid rgba(170,237,16,0.55)',
+          border: '1px solid rgba(170,237,16,0.35)',
+          minWidth: 92,
         }}
       >
-        <div className="font-semibold text-white">{selectedMetric.label}</div>
-        <div>
+        <div className="font-semibold text-white mb-0.5">{selectedMetric.label}</div>
+        <div className="text-[10px]" style={{ color: '#cfcfcf' }}>
           {pinLabel} : <span className="font-bold" style={{ color: ACCENT }}>{selectedValue}점</span>
         </div>
       </div>
