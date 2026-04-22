@@ -50,8 +50,10 @@ export default function MemberSelectModal({ isOpen, onClose, onSelect, currentUs
     (m.username || '').toLowerCase().includes(search.toLowerCase())
   );
 
-  const isPersonal = currentUser?.userType === 'PERSONAL';
-  const canSelectOthers = currentUser?.userType === 'ORGANIZATION';
+  // 기업 미소속 개인 회원: 본인만 선택 가능
+  const isPersonal = !currentUser?.organizationId;
+  // 기업 소속(관리자 또는 가입 승인된 개인 회원): 동일 조직 회원 선택 가능
+  const canSelectOthers = !!currentUser?.organizationId;
 
   if (!isOpen) return null;
 

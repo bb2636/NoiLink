@@ -93,6 +93,9 @@ export interface User {
   organizationName?: string;            // 기업명 (기업 회원인 경우)
   approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED'; // 승인 상태 (기업 회원)
   documents?: { name: string; url: string; size: number }[]; // 증빙 자료 (기업 회원)
+  pendingOrganizationId?: string;       // 가입 신청 중인 기업 ID (개인 회원)
+  pendingOrganizationName?: string;     // 가입 신청 중인 기업명 (개인 회원)
+  pendingRequestedAt?: string;          // 가입 신청 일시
 }
 
 /** 조직 정보 (기업 회원용) */

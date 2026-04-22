@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
@@ -6,7 +6,9 @@ import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import TermsModal from '../components/TermsModal/TermsModal';
 import api from '../utils/api';
-import type { Terms } from '@noilink/shared';
+import type { Terms, User } from '@noilink/shared';
+
+interface OrgListItem { id: string; name: string; memberCount: number; }
 
 /**
  * 프로필 페이지 (마이페이지)
@@ -23,6 +25,90 @@ export default function Profile() {
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [selectedTerms, setSelectedTerms] = useState<Terms | null>(null);
   const [selectedTermsTitle, setSelectedTermsTitle] = useState<string>('');
+
+  // ─── 개인 회원 → 기업 가입 신청 ─────────────────────────
+  const [showOrgPicker, setShowOrgPicker] = useState(false);
+  const [orgList, setOrgList] = useState<OrgListItem[]>([]);
+  const [orgListLoading, setOrgListLoading] = useState(false);
+
+  // ─── 기업 관리자 → 가입 신청 대기 회원 ────────────────────
+  const [pendingMembers, setPendingMembers] = useState<User[]>([]);
+
+  const loadPendingMembers = useCallback(async () => {
+    if (!user || user.userType !== 'ORGANIZATION') return;
+    const res = await api.getPendingOrganizationMembers();
+    if (res.success && res.data) setPendingMembers(res.data);
+  }, [user]);
+
+  useEffect(() => {
+    loadPendingMembers();
+  }, [loadPendingMembers]);
+
+  const openOrgPicker = async () => {
+    setShowOrgPicker(true);
+    setOrgListLoading(true);
+    try {
+      const res = await api.listOrganizations();
+      if (res.success && res.data) setOrgList(res.data);
+    } finally {
+      setOrgListLoading(false);
+    }
+  };
+
+  const submitJoinRequest = async (organizationId: string) => {
+    setOrgApprovalLoading(true);
+    try {
+      const res = await api.requestOrganizationJoin(organizationId);
+      if (res.success) {
+        setBannerMessage(res.message || '가입 신청이 접수되었습니다.');
+        setShowSuccessBanner(true);
+        setShowOrgPicker(false);
+        await refreshUser();
+      } else {
+        alert(res.error || '가입 신청에 실패했습니다.');
+      }
+    } finally {
+      setOrgApprovalLoading(false);
+    }
+  };
+
+  const cancelJoinRequest = async () => {
+    setOrgApprovalLoading(true);
+    try {
+      const res = await api.cancelOrganizationJoin();
+      if (res.success) {
+        setBannerMessage(res.message || '신청이 취소되었습니다.');
+        setShowSuccessBanner(true);
+        await refreshUser();
+      } else {
+        alert(res.error || '취소에 실패했습니다.');
+      }
+    } finally {
+      setOrgApprovalLoading(false);
+    }
+  };
+
+  const approveMember = async (userId: string) => {
+    const res = await api.approveOrganizationMember(userId);
+    if (res.success) {
+      setBannerMessage(res.message || '승인되었습니다.');
+      setShowSuccessBanner(true);
+      await loadPendingMembers();
+    } else {
+      alert(res.error || '승인 실패');
+    }
+  };
+
+  const rejectMember = async (userId: string) => {
+    const res = await api.rejectOrganizationMember(userId);
+    if (res.success) {
+      setBannerMessage(res.message || '반려되었습니다.');
+      setShowSuccessBanner(true);
+      await loadPendingMembers();
+    } else {
+      alert(res.error || '반려 실패');
+    }
+  };
 
   // 프로필 수정 성공 시 배너 표시
   useEffect(() => {
@@ -160,62 +246,101 @@ export default function Profile() {
             {user.email || '이메일 없음'}
           </p>
 
-          {/* 기업 회원: 승인 상태 · 기관 리포트 (이미지 시안: 가운데 알약 버튼) */}
-          {user.userType === 'ORGANIZATION' && (
+          {/* 기업 관리자(ORGANIZATION) — 기관 리포트 진입 */}
+          {user.userType === 'ORGANIZATION' && user.organizationId && (
             <div className="flex flex-col items-center gap-2 mb-2 w-full">
-              {user.approvalStatus === 'APPROVED' && (
+              <p className="text-center text-xs px-4 py-2 rounded-full" style={{ backgroundColor: '#1A2A1A', color: '#AAED10' }}>
+                {user.organizationName || '기업 관리자'} · 관리자
+              </p>
+              <button
+                type="button"
+                onClick={() => navigate('/report/organization')}
+                className="px-6 py-2 rounded-full text-xs font-medium border text-white"
+                style={{ backgroundColor: 'transparent', borderColor: '#3a3a3a' }}
+              >
+                기관 리포트 보기
+              </button>
+            </div>
+          )}
+
+          {/* 개인 회원 — 기관 가입 신청 / 상태 */}
+          {user.userType === 'PERSONAL' && (
+            <div className="flex flex-col items-center gap-2 mb-2 w-full">
+              {user.organizationId ? (
                 <p className="text-center text-xs px-4 py-2 rounded-full" style={{ backgroundColor: '#1A2A1A', color: '#AAED10' }}>
-                  기관 승인 완료
+                  {user.organizationName || '기업'} 소속
                 </p>
-              )}
-              {user.approvalStatus === 'PENDING' && (
-                <p className="text-center text-xs px-4 py-2 rounded-full" style={{ backgroundColor: '#2A2A1A', color: '#ccc' }}>
-                  기관 승인 검토 중입니다
-                </p>
-              )}
-              {user.approvalStatus === 'REJECTED' && (
-                <p className="text-center text-xs px-4 py-2 rounded-full" style={{ backgroundColor: '#2A1818', color: '#f99' }}>
-                  승인이 반려되었습니다. 다시 신청해 주세요.
-                </p>
-              )}
-              {user.approvalStatus !== 'APPROVED' && user.approvalStatus !== 'PENDING' && (
+              ) : user.pendingOrganizationId ? (
+                <>
+                  <p className="text-center text-xs px-4 py-2 rounded-full" style={{ backgroundColor: '#2A2A1A', color: '#ccc' }}>
+                    {user.pendingOrganizationName || '기업'} 가입 승인 검토 중
+                  </p>
+                  <button
+                    type="button"
+                    disabled={orgApprovalLoading}
+                    onClick={cancelJoinRequest}
+                    className="px-5 py-2 rounded-full text-xs font-medium border text-white disabled:opacity-60"
+                    style={{ backgroundColor: 'transparent', borderColor: '#3a3a3a' }}
+                  >
+                    {orgApprovalLoading ? '처리 중…' : '신청 취소'}
+                  </button>
+                </>
+              ) : (
                 <button
                   type="button"
                   disabled={orgApprovalLoading}
+                  onClick={openOrgPicker}
                   className="px-6 py-2.5 rounded-full text-sm font-bold disabled:opacity-60"
                   style={{ backgroundColor: '#AAED10', color: '#000000' }}
-                  onClick={async () => {
-                    setOrgApprovalLoading(true);
-                    try {
-                      const res = await api.requestOrganizationApproval();
-                      if (res.success) {
-                        setBannerMessage(res.message || '요청이 접수되었습니다.');
-                        setShowSuccessBanner(true);
-                        await refreshUser();
-                      } else {
-                        alert(res.error || '요청에 실패했습니다.');
-                      }
-                    } finally {
-                      setOrgApprovalLoading(false);
-                    }
-                  }}
                 >
-                  {orgApprovalLoading ? '처리 중…' : '기관 승인 요청'}
-                </button>
-              )}
-              {user.organizationId && user.approvalStatus === 'APPROVED' && (
-                <button
-                  type="button"
-                  onClick={() => navigate('/report/organization')}
-                  className="px-6 py-2 rounded-full text-xs font-medium border text-white"
-                  style={{ backgroundColor: 'transparent', borderColor: '#3a3a3a' }}
-                >
-                  기관 리포트 보기
+                  기관 승인 요청
                 </button>
               )}
             </div>
           )}
         </div>
+
+        {/* 기업 관리자: 가입 승인 대기 회원 */}
+        {user.userType === 'ORGANIZATION' && pendingMembers.length > 0 && (
+          <div className="mb-6">
+            <h3 className="text-sm font-semibold text-white mb-2 px-1">
+              가입 승인 대기 ({pendingMembers.length})
+            </h3>
+            <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: '#262626', border: '1px solid #2f2f2f' }}>
+              {pendingMembers.map((m, idx) => (
+                <div key={m.id}>
+                  {idx > 0 && <Divider />}
+                  <div className="flex items-center justify-between py-3 px-4">
+                    <div className="min-w-0 flex-1 mr-3">
+                      <p className="text-[14px] text-white truncate">{m.name}</p>
+                      <p className="text-[11px] text-gray-400 truncate">
+                        {m.email || m.username}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => approveMember(m.id)}
+                        className="px-3 py-1.5 rounded-full text-[12px] font-semibold"
+                        style={{ backgroundColor: '#AAED10', color: '#000' }}
+                      >
+                        승인
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => rejectMember(m.id)}
+                        className="px-3 py-1.5 rounded-full text-[12px] font-medium border text-white"
+                        style={{ backgroundColor: 'transparent', borderColor: '#3a3a3a' }}
+                      >
+                        반려
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 설정 섹션 (이미지 시안: 한 카드 + 디바이더) */}
         <div className="mb-6">
@@ -299,6 +424,62 @@ export default function Profile() {
         onConfirm={handleWithdraw}
         onCancel={() => setShowWithdrawModal(false)}
       />
+
+      {/* 기업 선택 모달 (개인 회원 가입 신청) */}
+      {showOrgPicker && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+          style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
+          onClick={() => setShowOrgPicker(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-4"
+            style={{ backgroundColor: '#1A1A1A', maxHeight: '70vh', display: 'flex', flexDirection: 'column' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-bold text-white mb-3">가입할 기업 선택</h2>
+            <p className="text-xs text-gray-400 mb-3">
+              가입을 신청한 후 해당 기업 관리자의 승인을 받으면 소속 회원이 됩니다.
+            </p>
+            <div className="overflow-y-auto flex-1 -mx-1 px-1">
+              {orgListLoading ? (
+                <p className="py-8 text-center text-sm text-gray-400">로딩 중…</p>
+              ) : orgList.length === 0 ? (
+                <p className="py-8 text-center text-sm text-gray-400">
+                  가입 가능한 기업이 없습니다.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {orgList.map((o) => (
+                    <button
+                      key={o.id}
+                      type="button"
+                      disabled={orgApprovalLoading}
+                      onClick={() => submitJoinRequest(o.id)}
+                      className="w-full text-left px-4 py-3 rounded-lg flex items-center justify-between disabled:opacity-60"
+                      style={{ backgroundColor: '#262626', color: '#fff' }}
+                    >
+                      <div>
+                        <p className="text-[14px] font-medium">{o.name}</p>
+                        <p className="text-[11px] text-gray-400">소속 인원 {o.memberCount}명</p>
+                      </div>
+                      <span className="text-[12px]" style={{ color: '#AAED10' }}>가입 신청 →</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowOrgPicker(false)}
+              className="mt-3 w-full py-3 rounded-xl text-sm font-medium border text-white"
+              style={{ backgroundColor: 'transparent', borderColor: '#3a3a3a' }}
+            >
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 약관 모달 */}
       <TermsModal

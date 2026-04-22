@@ -49,6 +49,8 @@ export default function TrainingSetup() {
   const { user } = useAuth();
 
   const isEnterprise = user?.userType === 'ORGANIZATION';
+  // 기업 소속(관리자 또는 승인된 개인 회원) — 진행 회원/색상 섹션 노출
+  const hasOrganization = !!user?.organizationId;
   const info = mode ? TRAINING_BY_ID[mode] : null;
   const title = info?.title ?? '트레이닝';
   const isFree = mode === 'FREE';
@@ -206,8 +208,8 @@ export default function TrainingSetup() {
           </p>
         </section>
 
-        {/* 진행 회원 — 기업 회원 전용 */}
-        {isEnterprise && (
+        {/* 진행 회원 — 기업 소속 회원 전용 (관리자/승인된 개인 회원) */}
+        {hasOrganization && (
           <section className="mb-6">
             <h2 className="text-sm font-semibold text-white mb-3">진행 회원</h2>
             <div className="flex items-center gap-2 flex-wrap">

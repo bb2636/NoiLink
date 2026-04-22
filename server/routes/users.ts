@@ -475,6 +475,236 @@ router.post('/me/organization-approval-request', async (req: Request, res: Respo
   }
 });
 
+// ============================================================================
+// 기업 가입 (개인 회원 → 기업 소속) 플로우
+// ============================================================================
+
+/**
+ * GET /api/users/organizations
+ * 가입 가능한 기업 목록 (id, name, memberCount). 인증 필요.
+ */
+router.get('/organizations', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const organizations = (await db.get('organizations')) || [];
+    const list = organizations
+      .filter((o: any) => !o.isDeleted)
+      .map((o: any) => ({
+        id: o.id,
+        name: o.name,
+        memberCount: Array.isArray(o.memberUserIds) ? o.memberUserIds.length : 0,
+      }));
+    return res.json({ success: true, data: list });
+  } catch (error) {
+    return sendError(res, 500, '기업 목록 조회 실패', { cause: error });
+  }
+});
+
+/**
+ * POST /api/users/me/organization-join-request
+ * 개인 회원이 특정 기업에 가입 신청. body: { organizationId }
+ */
+router.post('/me/organization-join-request', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { organizationId } = req.body || {};
+    if (!organizationId || typeof organizationId !== 'string') {
+      return sendError(res, 400, '기업 ID가 필요합니다.', { code: 'INVALID_ORG_ID' });
+    }
+
+    const me = authReq.user!;
+    if (me.userType !== 'PERSONAL') {
+      return sendError(res, 403, '개인 회원만 신청할 수 있습니다.', { code: 'NOT_PERSONAL' });
+    }
+    if (me.organizationId) {
+      return sendError(res, 400, '이미 기업에 소속되어 있습니다.', { code: 'ALREADY_MEMBER' });
+    }
+
+    const organizations = (await db.get('organizations')) || [];
+    const org = organizations.find((o: any) => o.id === organizationId);
+    if (!org) {
+      return sendError(res, 404, '해당 기업을 찾을 수 없습니다.', { code: 'ORG_NOT_FOUND' });
+    }
+
+    let updated: any = null;
+    await withKeyLock(KV_LOCK.USERS, async () => {
+      const users = (await db.get('users')) || [];
+      const idx = users.findIndex((u: any) => u.id === me.id);
+      if (idx === -1) throw new Error('User not found');
+      users[idx] = {
+        ...users[idx],
+        pendingOrganizationId: organizationId,
+        pendingOrganizationName: org.name,
+        pendingRequestedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await db.set('users', users);
+      updated = users[idx];
+    });
+
+    const { password: _p, ...safe } = updated;
+    return res.json({
+      success: true,
+      data: safe,
+      message: `${org.name} 가입 신청이 접수되었습니다. 관리자 승인을 기다려주세요.`,
+    });
+  } catch (error) {
+    return sendError(res, 500, '가입 신청 실패', { cause: error });
+  }
+});
+
+/**
+ * POST /api/users/me/organization-join-request/cancel
+ * 신청 취소.
+ */
+router.post('/me/organization-join-request/cancel', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const me = authReq.user!;
+    let updated: any = null;
+    await withKeyLock(KV_LOCK.USERS, async () => {
+      const users = (await db.get('users')) || [];
+      const idx = users.findIndex((u: any) => u.id === me.id);
+      if (idx === -1) throw new Error('User not found');
+      users[idx] = {
+        ...users[idx],
+        pendingOrganizationId: undefined,
+        pendingOrganizationName: undefined,
+        pendingRequestedAt: undefined,
+        updatedAt: new Date().toISOString(),
+      };
+      await db.set('users', users);
+      updated = users[idx];
+    });
+    const { password: _p, ...safe } = updated;
+    return res.json({ success: true, data: safe, message: '가입 신청이 취소되었습니다.' });
+  } catch (error) {
+    return sendError(res, 500, '취소 실패', { cause: error });
+  }
+});
+
+/**
+ * GET /api/users/me/pending-organization-members
+ * 기업 관리자(ORGANIZATION) 가 자신의 기업에 가입 신청한 개인 회원 목록 조회.
+ */
+router.get('/me/pending-organization-members', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const me = authReq.user!;
+    if (me.userType !== 'ORGANIZATION' || !me.organizationId) {
+      return sendError(res, 403, '기업 관리자만 접근 가능합니다.', { code: 'NOT_ORG_ADMIN' });
+    }
+    const users = (await db.get('users')) || [];
+    const pending = users
+      .filter((u: any) => !u.isDeleted && u.pendingOrganizationId === me.organizationId)
+      .map((u: any) => {
+        const { password: _p, ...safe } = u;
+        return safe;
+      });
+    return res.json({ success: true, data: pending });
+  } catch (error) {
+    return sendError(res, 500, '대기 회원 조회 실패', { cause: error });
+  }
+});
+
+/**
+ * POST /api/users/me/pending-organization-members/:userId/approve
+ * 기업 관리자가 가입 신청을 승인.
+ */
+router.post('/me/pending-organization-members/:userId/approve', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const me = authReq.user!;
+    if (me.userType !== 'ORGANIZATION' || !me.organizationId) {
+      return sendError(res, 403, '기업 관리자만 접근 가능합니다.', { code: 'NOT_ORG_ADMIN' });
+    }
+    const { userId } = req.params;
+    let approved: any = null;
+
+    await withKeyLock(KV_LOCK.USERS, async () => {
+      const users = (await db.get('users')) || [];
+      const idx = users.findIndex((u: any) => u.id === userId);
+      if (idx === -1) throw Object.assign(new Error('User not found'), { _code: 404 });
+      const target = users[idx];
+      if (target.pendingOrganizationId !== me.organizationId) {
+        throw Object.assign(new Error('해당 신청을 찾을 수 없습니다.'), { _code: 400 });
+      }
+      const organizations = (await db.get('organizations')) || [];
+      const orgIdx = organizations.findIndex((o: any) => o.id === me.organizationId);
+      const orgName =
+        orgIdx >= 0 ? organizations[orgIdx].name : (me as any).organizationName || target.pendingOrganizationName;
+
+      users[idx] = {
+        ...target,
+        organizationId: me.organizationId,
+        organizationName: orgName,
+        pendingOrganizationId: undefined,
+        pendingOrganizationName: undefined,
+        pendingRequestedAt: undefined,
+        updatedAt: new Date().toISOString(),
+      };
+      await db.set('users', users);
+      approved = users[idx];
+
+      if (orgIdx >= 0) {
+        const memberIds: string[] = Array.isArray(organizations[orgIdx].memberUserIds)
+          ? organizations[orgIdx].memberUserIds
+          : [];
+        if (!memberIds.includes(userId)) {
+          organizations[orgIdx] = {
+            ...organizations[orgIdx],
+            memberUserIds: [...memberIds, userId],
+            updatedAt: new Date().toISOString(),
+          };
+          await db.set('organizations', organizations);
+        }
+      }
+    });
+
+    const { password: _p, ...safe } = approved;
+    return res.json({ success: true, data: safe, message: '승인되었습니다.' });
+  } catch (error: any) {
+    return sendError(res, error?._code || 500, error?.message || '승인 실패', { cause: error });
+  }
+});
+
+/**
+ * POST /api/users/me/pending-organization-members/:userId/reject
+ * 기업 관리자가 가입 신청을 반려.
+ */
+router.post('/me/pending-organization-members/:userId/reject', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const me = authReq.user!;
+    if (me.userType !== 'ORGANIZATION' || !me.organizationId) {
+      return sendError(res, 403, '기업 관리자만 접근 가능합니다.', { code: 'NOT_ORG_ADMIN' });
+    }
+    const { userId } = req.params;
+    let rejected: any = null;
+    await withKeyLock(KV_LOCK.USERS, async () => {
+      const users = (await db.get('users')) || [];
+      const idx = users.findIndex((u: any) => u.id === userId);
+      if (idx === -1) throw Object.assign(new Error('User not found'), { _code: 404 });
+      const target = users[idx];
+      if (target.pendingOrganizationId !== me.organizationId) {
+        throw Object.assign(new Error('해당 신청을 찾을 수 없습니다.'), { _code: 400 });
+      }
+      users[idx] = {
+        ...target,
+        pendingOrganizationId: undefined,
+        pendingOrganizationName: undefined,
+        pendingRequestedAt: undefined,
+        updatedAt: new Date().toISOString(),
+      };
+      await db.set('users', users);
+      rejected = users[idx];
+    });
+    const { password: _p, ...safe } = rejected;
+    return res.json({ success: true, data: safe, message: '반려되었습니다.' });
+  } catch (error: any) {
+    return sendError(res, error?._code || 500, error?.message || '반려 실패', { cause: error });
+  }
+});
+
 /**
  * @deprecated Use POST /api/users/reset-password/request 대신 사용.
  * 기존 클라이언트 호환을 위해 일부 정보만 마스킹해서 반환하지만,
@@ -816,17 +1046,28 @@ router.get('/organization-members', requireAuth, async (req: Request, res: Respo
       return sendError(res, 404, '사용자를 찾을 수 없습니다.', { code: 'USER_NOT_FOUND' });
     }
 
-    // 개인 회원: 본인만 반환
-    if (currentUser.userType === 'PERSONAL') {
-      return res.json({ success: true, data: [currentUser] });
-    }
-
-    // 기업 회원: 동일 조직의 회원들 포함
+    // 기업에 소속된 회원: 조직 레코드의 memberUserIds 에 실제로 포함되어 있어야 함
+    // (사용자 프로필의 organizationId 만 신뢰하면 다른 조직 멤버 데이터가 노출될 수 있음)
     if (currentUser.organizationId) {
       const org = organizations.find((o: any) => o.id === currentUser.organizationId);
-      const memberIds = org?.memberUserIds || [currentUser.id];
-      const members = users.filter((u: any) => memberIds.includes(u.id) && !u.isDeleted);
+      const memberIds: string[] = Array.isArray(org?.memberUserIds) ? org.memberUserIds : [];
+      const isAdminOfOrg = currentUser.userType === 'ORGANIZATION';
+      const isAuthorizedMember = memberIds.includes(currentUser.id);
+      if (!org || (!isAdminOfOrg && !isAuthorizedMember)) {
+        return res.json({ success: true, data: [currentUser] });
+      }
+      const members = users
+        .filter((u: any) => memberIds.includes(u.id) && !u.isDeleted)
+        .map((u: any) => {
+          const { password: _p, ...safe } = u;
+          return safe;
+        });
       return res.json({ success: true, data: members });
+    }
+
+    // 기업 미소속 개인 회원: 본인만 반환
+    if (currentUser.userType === 'PERSONAL') {
+      return res.json({ success: true, data: [currentUser] });
     }
 
 
@@ -889,13 +1130,33 @@ router.put('/:userId', requireAuth, async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
 
-    const { id: _id, userType: _ut, password: _pw, ...safeData } = updateData;
-    
+    const isAdmin = authReq.user!.userType === 'ADMIN';
+
+    // 셀프 업데이트는 안전한 프로필 필드만 허용 — 조직 가입/승인 관련 필드는
+    // 반드시 가입 신청/승인 엔드포인트를 거쳐야 하므로 PUT /users/:userId 에서는 차단.
+    const SELF_ALLOWED = new Set([
+      'name', 'nickname', 'email', 'phone', 'age',
+      'brainimalType', 'brainimalConfidence', 'brainAge',
+      'previousBrainAge', 'streak', 'bestStreak', 'lastTrainingDate',
+      'deviceId', 'documents',
+    ]);
+
+    const filtered: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(updateData || {})) {
+      if (k === 'id' || k === 'password') continue;
+      if (isAdmin) {
+        filtered[k] = v;
+      } else if (SELF_ALLOWED.has(k)) {
+        filtered[k] = v;
+      }
+      // 비관리자가 보낸 organizationId/organizationName/pendingOrganization*/approvalStatus/userType 등은 무시
+    }
+
     users[userIndex] = {
       ...users[userIndex],
-      ...safeData,
+      ...filtered,
       id: userId,
-      userType: authReq.user!.userType === 'ADMIN' ? (updateData.userType || users[userIndex].userType) : users[userIndex].userType,
+      userType: isAdmin ? (updateData.userType || users[userIndex].userType) : users[userIndex].userType,
       updatedAt: new Date().toISOString()
     };
     

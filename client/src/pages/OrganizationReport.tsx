@@ -129,6 +129,24 @@ export default function OrganizationReport() {
 
   if (!user) return null;
 
+  // 기업 리포트는 기업 관리자(ORGANIZATION) 전용 — 개인 회원(소속 여부 무관)은 접근 불가
+  if (user.userType !== 'ORGANIZATION' || !user.organizationId) {
+    return (
+      <div className="px-4 py-10 text-center" style={{ color: '#fff' }}>
+        <p className="text-base font-semibold mb-2">접근 권한이 없습니다</p>
+        <p className="text-sm text-gray-400 mb-6">기업 리포트는 기업 관리자만 볼 수 있습니다.</p>
+        <button
+          type="button"
+          onClick={() => navigate('/profile')}
+          className="px-6 py-2 rounded-full text-sm font-semibold"
+          style={{ backgroundColor: '#AAED10', color: '#000' }}
+        >
+          마이페이지로
+        </button>
+      </div>
+    );
+  }
+
   const repInfo = getBrainimalIcon(report.representativeBrainimal);
   const delta = report.brainAgeVsChronologicalDelta;
   const deltaGood = delta <= 0;

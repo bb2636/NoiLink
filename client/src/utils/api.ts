@@ -309,6 +309,57 @@ class ApiClient {
     }) as Promise<ApiResponse<User> & { message?: string }>;
   }
 
+  /** 가입 가능한 기업 목록 */
+  async listOrganizations(): Promise<
+    ApiResponse<Array<{ id: string; name: string; memberCount: number }>>
+  > {
+    return this.request<Array<{ id: string; name: string; memberCount: number }>>(
+      '/users/organizations',
+    );
+  }
+
+  /** 개인 회원 → 특정 기업 가입 신청 */
+  async requestOrganizationJoin(
+    organizationId: string,
+  ): Promise<ApiResponse<User> & { message?: string }> {
+    return this.request<User>('/users/me/organization-join-request', {
+      method: 'POST',
+      body: JSON.stringify({ organizationId }),
+    }) as Promise<ApiResponse<User> & { message?: string }>;
+  }
+
+  /** 개인 회원 가입 신청 취소 */
+  async cancelOrganizationJoin(): Promise<ApiResponse<User> & { message?: string }> {
+    return this.request<User>('/users/me/organization-join-request/cancel', {
+      method: 'POST',
+    }) as Promise<ApiResponse<User> & { message?: string }>;
+  }
+
+  /** 기업 관리자: 가입 신청 대기 회원 목록 */
+  async getPendingOrganizationMembers(): Promise<ApiResponse<User[]>> {
+    return this.request<User[]>('/users/me/pending-organization-members');
+  }
+
+  /** 기업 관리자: 가입 신청 승인 */
+  async approveOrganizationMember(
+    userId: string,
+  ): Promise<ApiResponse<User> & { message?: string }> {
+    return this.request<User>(
+      `/users/me/pending-organization-members/${userId}/approve`,
+      { method: 'POST' },
+    ) as Promise<ApiResponse<User> & { message?: string }>;
+  }
+
+  /** 기업 관리자: 가입 신청 반려 */
+  async rejectOrganizationMember(
+    userId: string,
+  ): Promise<ApiResponse<User> & { message?: string }> {
+    return this.request<User>(
+      `/users/me/pending-organization-members/${userId}/reject`,
+      { method: 'POST' },
+    ) as Promise<ApiResponse<User> & { message?: string }>;
+  }
+
   // Password Reset API (3-step OTP flow)
   /**
    * 1단계: 휴대폰 번호로 OTP 발급 요청.
