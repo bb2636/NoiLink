@@ -619,71 +619,88 @@ function ComprehensiveTabSection({ report: _report }: { report: OrganizationInsi
 function MembersTabSection({ members }: { members: User[] }) {
   return (
     <section
-      className="rounded-2xl border overflow-hidden"
-      style={{ backgroundColor: '#1A1A1A', borderColor: '#333' }}
+      className="rounded-2xl border p-4"
+      style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
     >
-      <div className="p-4 pb-2">
-        <h3 className="text-base font-bold text-white mb-1">소속 인원 현황</h3>
-        <p className="text-xs text-gray-400">총 {members.length}명</p>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-base font-bold text-white">소속 인원 현황</h3>
+        <span className="text-xs text-gray-400">총 {members.length}명</span>
       </div>
 
       {members.length === 0 ? (
         <p className="text-sm text-gray-400 p-4 text-center">소속 인원 데이터가 없습니다.</p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr style={{ backgroundColor: '#0F0F0F', color: '#888' }}>
-                <th className="text-left py-2 px-3 font-medium">이름</th>
-                <th className="text-right py-2 px-3 font-medium">뇌지컬 점수</th>
-                <th className="text-left py-2 px-3 font-medium">브레이니멀</th>
-                <th className="text-left py-2 px-3 font-medium">생년</th>
-                <th className="text-left py-2 px-3 font-medium">최근 검사일</th>
-              </tr>
-            </thead>
-            <tbody>
-              {members.map((m) => {
-                const info = m.brainimalType ? getBrainimalIcon(m.brainimalType) : null;
-                const birthYear = m.age != null ? new Date().getFullYear() - m.age : null;
-                const lastTest = m.lastTrainingDate
-                  ? formatShortDate(m.lastTrainingDate)
-                  : '-';
-                return (
-                  <tr
-                    key={m.id}
-                    className="border-t"
-                    style={{ borderColor: '#2A2A2A' }}
-                  >
-                    <td className="py-2 px-3 text-white font-medium">{m.name}</td>
-                    <td className="py-2 px-3 text-right">
-                      {m.brainAge != null ? (
-                        <span className="text-white font-semibold">{m.brainAge}점</span>
-                      ) : (
-                        <span className="text-gray-500">-</span>
-                      )}
-                    </td>
-                    <td className="py-2 px-3">
-                      {info ? (
-                        <span className="text-gray-300">{info.name}</span>
-                      ) : (
-                        <span className="text-gray-500">-</span>
-                      )}
-                    </td>
-                    <td className="py-2 px-3 text-gray-300">
-                      {birthYear ? `${birthYear}` : '-'}
-                    </td>
-                    <td className="py-2 px-3 text-gray-300">{lastTest}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="space-y-2">
+          {members.map((m) => (
+            <MemberCard key={m.id} member={m} />
+          ))}
         </div>
       )}
-      <p className="px-4 py-3 text-[10px] text-gray-500">
+
+      <p className="mt-3 text-[10px] text-gray-500">
         ※ 정확한 생년월일은 회원 프로필 입력 후 표시됩니다 (현재는 만 나이 기반 추정).
       </p>
     </section>
+  );
+}
+
+function MemberCard({ member }: { member: User }) {
+  const info = member.brainimalType ? getBrainimalIcon(member.brainimalType) : null;
+  const birthYear = member.age != null ? new Date().getFullYear() - member.age : null;
+  const lastTest = member.lastTrainingDate
+    ? formatShortDate(member.lastTrainingDate)
+    : '-';
+
+  return (
+    <div
+      className="rounded-xl p-3 flex items-center gap-3"
+      style={{ backgroundColor: '#0F0F0F', border: '1px solid #1F1F1F' }}
+    >
+      {/* 아바타 */}
+      <div
+        className="w-11 h-11 rounded-full flex items-center justify-center shrink-0"
+        style={{ backgroundColor: '#1A2A14', border: '1px solid #264213' }}
+      >
+        {info?.icon ? (
+          <img src={info.icon} alt="" className="w-7 h-7 object-contain" />
+        ) : (
+          <span className="text-base">{info?.emoji ?? '👤'}</span>
+        )}
+      </div>
+
+      {/* 이름 + 브레이니멀 라벨 */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-semibold text-white truncate">{member.name}</span>
+          <span className="text-[10px] text-gray-500 shrink-0">
+            {birthYear ? `${birthYear}년생` : ''}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          {info && (
+            <span
+              className="px-1.5 py-0.5 rounded text-[10px] font-medium"
+              style={{ backgroundColor: '#1A2A14', color: '#AAED10' }}
+            >
+              {info.name}
+            </span>
+          )}
+          <span className="text-[10px] text-gray-500">최근 {lastTest}</span>
+        </div>
+      </div>
+
+      {/* 점수 */}
+      <div className="text-right shrink-0">
+        {member.brainAge != null ? (
+          <>
+            <span className="text-base font-bold text-white">{member.brainAge}</span>
+            <span className="text-xs text-gray-400 ml-0.5">점</span>
+          </>
+        ) : (
+          <span className="text-xs text-gray-500">-</span>
+        )}
+      </div>
+    </div>
   );
 }
 
