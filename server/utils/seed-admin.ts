@@ -22,13 +22,19 @@ const TEST_EMAIL = 'test@test.com';
 const TEST_USERNAME = 'test';
 const TEST_PASSWORD = 'test1234';
 
+const ORG_EMAIL = 'org@org.com';
+const ORG_USERNAME = 'org';
+const ORG_PASSWORD = 'org1234';
+const ORG_ID = 'demo-org-001';
+const ORG_NAME = '데모 기업';
+
 /**
  * 시드된 비밀번호가 약한지 판정.
  * - 환경변수가 아닌 코드 내 fallback 값 (admin1234 / test1234) 일 때 true.
  * - true면 password 레코드에 mustChange=true 플래그를 박아 로그인 후 강제 변경 안내.
  */
 function isWeakSeedPassword(password: string): boolean {
-  return password === 'admin1234' || password === 'test1234';
+  return password === 'admin1234' || password === 'test1234' || password === 'org1234';
 }
 
 async function seedUser(opts: {
@@ -37,6 +43,8 @@ async function seedUser(opts: {
   password: string;
   name: string;
   userType: 'ADMIN' | 'PERSONAL' | 'ORGANIZATION';
+  organizationId?: string;
+  organizationName?: string;
 }): Promise<void> {
   // 락 안에서 존재 확인 + push
   const created = await withKeyLock(KV_LOCK.USERS, async (): Promise<User | null> => {
@@ -82,6 +90,8 @@ function createUserShape(opts: {
   username: string;
   name: string;
   userType: 'ADMIN' | 'PERSONAL' | 'ORGANIZATION';
+  organizationId?: string;
+  organizationName?: string;
 }): User {
   return {
     id: `${opts.userType.toLowerCase()}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
@@ -89,7 +99,9 @@ function createUserShape(opts: {
     email: opts.email,
     name: opts.name,
     userType: opts.userType,
-    organizationId: undefined,
+    organizationId: opts.organizationId,
+    organizationName: opts.organizationName,
+    approvalStatus: opts.userType === 'ORGANIZATION' ? 'APPROVED' : undefined,
     deviceId: undefined,
     brainimalType: undefined,
     brainimalConfidence: undefined,
@@ -157,8 +169,17 @@ export async function seedAdminAccount(): Promise<void> {
         name: '테스트 사용자',
         userType: 'PERSONAL',
       });
+      await seedUser({
+        email: ORG_EMAIL,
+        username: ORG_USERNAME,
+        password: ORG_PASSWORD,
+        name: '데모 기업 관리자',
+        userType: 'ORGANIZATION',
+        organizationId: ORG_ID,
+        organizationName: ORG_NAME,
+      });
     } else {
-      console.log('ℹ️  [seed-admin] PRODUCTION: 테스트 계정 시드는 건너뜁니다.');
+      console.log('ℹ️  [seed-admin] PRODUCTION: 테스트/기업 계정 시드는 건너뜁니다.');
     }
   } catch (error) {
     console.error('❌ Failed to seed accounts:', error);
