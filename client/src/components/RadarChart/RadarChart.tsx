@@ -32,7 +32,6 @@ const METRICS = [
 ];
 
 const ACCENT = '#AAED10';
-const ARROW_RED = '#FF3B30';
 
 export default function RadarChart({
   data,
@@ -105,45 +104,6 @@ export default function RadarChart({
     ctx.fill();
     ctx.stroke();
 
-    // 빨간 화살표 — 외곽 ring(반지름 R) → 데이터 꼭짓점 방향으로 안쪽으로 향함
-    METRICS.forEach((metric) => {
-      const value = data[metric.key as keyof typeof data] || 0;
-      const n = Math.max(0, Math.min(1, value / 100));
-      const angle = ((metric.angle - 90) * Math.PI) / 180;
-      // 외곽 → 꼭짓점 방향(안쪽). 화살표 길이는 데이터까지의 1/3 정도.
-      const outerX = center + radius * Math.cos(angle);
-      const outerY = center + radius * Math.sin(angle);
-      const vertexX = center + radius * n * Math.cos(angle);
-      const vertexY = center + radius * n * Math.sin(angle);
-      // 시작/끝: 외곽에서 약간 안쪽으로 들어와서 꼭짓점 직전까지
-      const sx = outerX - 2 * Math.cos(angle);
-      const sy = outerY - 2 * Math.sin(angle);
-      const ex = vertexX + 7 * Math.cos(angle);
-      const ey = vertexY + 7 * Math.sin(angle);
-      ctx.strokeStyle = ARROW_RED;
-      ctx.fillStyle = ARROW_RED;
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(ex, ey);
-      ctx.stroke();
-      // 화살촉
-      const headLen = 5;
-      const headAngle = Math.PI / 7;
-      ctx.beginPath();
-      ctx.moveTo(ex, ey);
-      ctx.lineTo(
-        ex + headLen * Math.cos(angle + Math.PI - headAngle),
-        ey + headLen * Math.sin(angle + Math.PI - headAngle),
-      );
-      ctx.lineTo(
-        ex + headLen * Math.cos(angle + Math.PI + headAngle),
-        ey + headLen * Math.sin(angle + Math.PI + headAngle),
-      );
-      ctx.closePath();
-      ctx.fill();
-    });
-
     // 꼭짓점 — 모두 동일한 라임 + 흰색 외곽 (원형 디자인 유지)
     METRICS.forEach((metric) => {
       const value = data[metric.key as keyof typeof data] || 0;
@@ -208,15 +168,15 @@ export default function RadarChart({
         style={{ width: size, height: size }}
         onClick={handleClick}
       />
-      {/* 우상단 고정 핀 — 선택 지표 + 평균 점수 (컴팩트) */}
+      {/* 우상단 고정 핀 — 선택 지표 + 평균 점수 (컴팩트, 라임 액센트) */}
       <div
         className="absolute rounded-md px-2 py-1 text-[9px] leading-tight shadow"
         style={{
           top: 0,
           right: 0,
-          backgroundColor: '#2A2A2A',
+          backgroundColor: '#1A1A1A',
           color: '#E5E5E5',
-          border: '1px solid #3A3A3A',
+          border: '1px solid rgba(170,237,16,0.55)',
         }}
       >
         <div className="font-semibold text-white">{selectedMetric.label}</div>

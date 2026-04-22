@@ -1,5 +1,4 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { lazy, Suspense } from 'react';
 import { MobileLayout } from './components/Layout';
 import { useLocation } from 'react-router-dom';
 
@@ -28,7 +27,7 @@ import SignUp from './pages/SignUp';
 import FindPassword from './pages/FindPassword';
 import Ranking from './pages/Ranking';
 import Report from './pages/Report';
-const OrganizationReport = lazy(() => import('./pages/OrganizationReport'));
+import OrganizationReport from './pages/OrganizationReport';
 import Record from './pages/Record';
 import TrainingSetup from './pages/TrainingSetup';
 import TrainingSessionPlay from './pages/TrainingSessionPlay';
@@ -281,15 +280,7 @@ function AppRoutes() {
                   path="/report/organization"
                   element={
                     <ProtectedRoute>
-                      <Suspense
-                        fallback={
-                          <div className="px-4 py-10 text-center text-gray-400 text-sm">
-                            리포트 불러오는 중…
-                          </div>
-                        }
-                      >
-                        <OrganizationReport />
-                      </Suspense>
+                      <OrganizationReport />
                     </ProtectedRoute>
                   }
                 />

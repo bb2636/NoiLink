@@ -433,106 +433,176 @@ function BrainimalTabSection({ report }: { report: OrganizationInsightReport }) 
 // =============================================================================
 // 뇌지컬 종합 평가 탭 (본인 브레이니멀 + 평가)
 // =============================================================================
-function ComprehensiveTabSection({ report }: { report: OrganizationInsightReport }) {
+function ComprehensiveTabSection({ report: _report }: { report: OrganizationInsightReport }) {
   const { user } = useAuth();
   const myBrainimal = user?.brainimalType
     ? getBrainimalIcon(user.brainimalType)
     : DEFAULT_BRAINIMAL;
-  const myScore = user?.brainAge ?? '-';
+  const userName = user?.name ?? '홍길동';
+  const ageDelta = (() => {
+    if (!user?.brainAge || !user?.age) return 1;
+    const d = user.age - user.brainAge;
+    return d > 0 ? d : 1;
+  })();
+
+  const [evalOpen, setEvalOpen] = useState(true);
+  const [selectedFeedback, setSelectedFeedback] = useState(0);
 
   return (
-    <section
-      className="rounded-2xl p-4 border space-y-5"
-      style={{ backgroundColor: '#1A1A1A', borderColor: '#333' }}
-    >
-      {/* 본인 브레이니멀 카드 */}
-      <div
-        className="rounded-2xl p-5 text-center"
+    <div className="space-y-4">
+      {/* 본인 브레이니멀 카드 — 마스코트 + 두뇌나이 */}
+      <section
+        className="rounded-2xl p-6 text-center"
         style={{
-          background: 'radial-gradient(circle at top, #1f3a14 0%, #0F0F0F 70%)',
+          background: 'radial-gradient(circle at top, #14331c 0%, #0F1A12 70%)',
           border: '1px solid #2A4A14',
         }}
       >
-        <p className="text-xs text-gray-400 mb-2">홀길동님, 축하해요</p>
-        <div className="flex justify-center mb-2">
-          {myBrainimal.icon ? (
-            <img src={myBrainimal.icon} alt="" className="w-12 h-12 object-contain" />
-          ) : (
-            <span className="text-4xl">{myBrainimal.emoji}</span>
-          )}
+        <p className="text-xs text-gray-300 mb-3">{userName}님, 축하드려요.</p>
+        <div className="flex justify-center mb-3">
+          <div
+            className="w-20 h-20 rounded-full flex items-center justify-center"
+            style={{
+              backgroundColor: '#0F0F0F',
+              border: '2px solid #AAED10',
+              boxShadow: '0 0 0 3px rgba(170,237,16,0.15)',
+            }}
+          >
+            {myBrainimal.icon ? (
+              <img src={myBrainimal.icon} alt="" className="w-12 h-12 object-contain" />
+            ) : (
+              <span className="text-4xl">{myBrainimal.emoji}</span>
+            )}
+          </div>
         </div>
-        <h4 className="text-lg font-bold" style={{ color: '#AAED10' }}>
+        <h4 className="text-2xl font-extrabold" style={{ color: '#AAED10' }}>
           {myBrainimal.name}
         </h4>
-        <p className="text-[11px] text-gray-500 mt-1">
-          현재 LV.{user?.streak ?? 1} 동급생 중 1등 / 1명 중
+        <p className="text-xs text-gray-400 mt-3">두뇌 나이 평균보다</p>
+        <p className="text-base font-semibold text-white mt-0.5">
+          {ageDelta}살 더 젊어요!
         </p>
-      </div>
+      </section>
 
-      {/* 뇌지컬 종합 평가 헤더 */}
-      <h3 className="text-base font-bold text-white">뇌지컬 종합 평가</h3>
+      {/* 뇌지컬 종합 평가 — 접이식 */}
+      <section
+        className="rounded-2xl border"
+        style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
+      >
+        <button
+          type="button"
+          onClick={() => setEvalOpen((v) => !v)}
+          className="w-full flex items-center justify-between p-4"
+        >
+          <span className="text-base font-bold text-white">뇌지컬 종합 평가</span>
+          <span className="text-gray-400">{evalOpen ? '⌃' : '⌄'}</span>
+        </button>
 
-      {/* 상세 분석 */}
-      <div>
-        <h4 className="text-xs font-semibold text-gray-400 mb-2">📊 상세 분석</h4>
-        <div className="space-y-2">
-          <EvalRow icon="📈" title="쉽게 휘둘리지 않는 무뚝뚝" body={report.factText} />
-          <EvalRow icon="💎" title="화려한 일렉보다는 잔잔한 신뢰감" body={report.lifeText} />
-          <EvalRow icon="🪨" title="판단 시간만 잡은 명품 보고하면 학생 회무로" body={report.strengthText} />
-        </div>
-      </div>
+        {evalOpen && (
+          <div className="px-4 pb-4 space-y-5">
+            {/* 상세 분석 */}
+            <div>
+              <h4 className="text-xs text-gray-400 mb-2 pl-2 border-l-2" style={{ borderColor: '#AAED10' }}>
+                상세 분석
+              </h4>
+              <div className="space-y-2">
+                <EvalRowV2 icon="📈" title="쉽게 포기하지 않는 꾸준형" />
+                <EvalRowV2 icon="🛡️" title="화려한 말뱉보다는 행동으로 보여주는 신뢰형" />
+                <EvalRowV2 icon="🚩" title="한번 시작한 일은 끝을 보고야 마는 완주형" />
+              </div>
+            </div>
 
-      {/* 강점 분석 */}
-      <div>
-        <h4 className="text-xs font-semibold text-gray-400 mb-2">💪 강점 분석</h4>
-        <div className="grid grid-cols-3 gap-2">
-          <MiniGauge label="감정 안정성" value={88} />
-          <MiniGauge label="집중력 유지" value={75} />
-          <MiniGauge label="적응력 회복" value={45} />
-        </div>
-      </div>
-
-      {/* 약점 분석 */}
-      <div>
-        <h4 className="text-xs font-semibold text-gray-400 mb-2">🎯 약점 분석</h4>
-        <div className="rounded-xl p-3" style={{ backgroundColor: '#0F0F0F' }}>
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-sm text-white">반응 시간 변동성</span>
-            <span className="text-sm font-bold text-white">35점</span>
+            {/* 강점 분석 */}
+            <div>
+              <h4 className="text-xs text-gray-400 mb-3 pl-2 border-l-2" style={{ borderColor: '#AAED10' }}>
+                강점 분석
+              </h4>
+              <div className="grid grid-cols-3 gap-2">
+                <StrengthGauge value={92} status="탁월함" label="강인한 인내심" />
+                <StrengthGauge value={78} status="안정적" label="집중력 유지" />
+                <StrengthGauge value={55} status="성장 중" label="정보 처리 속도" />
+              </div>
+            </div>
           </div>
-          <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: '#2A2A2A' }}>
-            <div className="h-full rounded-full" style={{ width: '35%', backgroundColor: '#fb923c' }} />
-          </div>
-          <div className="flex items-center justify-between mt-3 mb-1">
-            <span className="text-sm text-white">긍정성</span>
-          </div>
-          <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: '#2A2A2A' }}>
-            <div className="h-full rounded-full" style={{ width: '50%', backgroundColor: '#fb923c' }} />
-          </div>
-        </div>
-      </div>
+        )}
+      </section>
 
       {/* 생활 밀착 피드백 */}
-      <div>
-        <h4 className="text-xs font-semibold text-gray-400 mb-2">💡 생활 밀착 피드백</h4>
-        <div className="space-y-2">
-          <FeedbackStep n={1} title="5시간마다 스트레칭하기" />
-          <FeedbackStep n={2} title="새로운 선택 도전하기" />
-          <FeedbackStep n={3} title="주변에 도움 요청하기" />
-        </div>
-      </div>
-
-      {/* 본인 점수 표시 */}
-      <div
-        className="rounded-xl p-3 text-center"
-        style={{ backgroundColor: '#0F0F0F' }}
+      <section
+        className="rounded-2xl p-4 border"
+        style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
       >
-        <p className="text-xs text-gray-400">내 뇌지컬 나이</p>
-        <p className="text-2xl font-bold mt-1" style={{ color: '#AAED10' }}>
-          {myScore}{typeof myScore === 'number' ? '세' : ''}
+        <h4 className="text-xs text-gray-400 mb-3 pl-2 border-l-2" style={{ borderColor: '#AAED10' }}>
+          생활 밀착 피드백
+        </h4>
+        <div className="space-y-2">
+          {[
+            { n: 1, icon: '🧘', title: '1시간마다 스트레칭하기' },
+            { n: 2, icon: '🎯', title: '새로운 선택 도전해보기' },
+            { n: 3, icon: '🤝', title: '주변에 도움 요청하기' },
+          ].map((f, i) => (
+            <FeedbackStepV2
+              key={f.n}
+              n={f.n}
+              icon={f.icon}
+              title={f.title}
+              selected={i === selectedFeedback}
+              onClick={() => setSelectedFeedback(i)}
+            />
+          ))}
+        </div>
+      </section>
+
+      {/* 롤모델 */}
+      <section
+        className="rounded-2xl p-5 border text-center"
+        style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
+      >
+        <p className="text-xs text-gray-400">{userName}님의 롤모델</p>
+        <h4 className="text-2xl font-extrabold text-white mt-2">워런 버핏</h4>
+        <p className="text-sm mt-3" style={{ color: '#AAED10' }}>
+          "원칙이 있으면 흔들리지 않는다!"
         </p>
-      </div>
-    </section>
+
+        <div className="text-left mt-5 space-y-4">
+          <div>
+            <p className="text-xs text-gray-400 mb-2">
+              <span className="font-bold mr-1" style={{ color: '#AAED10' }}>01</span>
+              핵심특성
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {['꾸준함', '장기 사고', '원칙 고수'].map((t) => (
+                <span
+                  key={t}
+                  className="px-3 py-1 rounded-full text-xs"
+                  style={{
+                    backgroundColor: '#0F0F0F',
+                    color: '#AAED10',
+                    border: '1px solid #2A4A14',
+                  }}
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs text-gray-400 mb-2">
+              <span className="font-bold mr-1" style={{ color: '#AAED10' }}>02</span>
+              뇌지컬 연결성
+            </p>
+            <p className="text-sm font-semibold text-white leading-relaxed">
+              흔들리지 않는 원칙, 복리의 마법으로 돌아옵니다.
+            </p>
+            <p className="text-xs mt-2 leading-relaxed" style={{ color: '#B6B6B9' }}>
+              단기 변동에 일희일비하지 않는 우직함이 버핏을 만들었습니다.
+              당신의 꾸준함도 곧 거대한 성과가 될 거예요.
+            </p>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -722,24 +792,34 @@ function describeArcStroke(cx: number, cy: number, r: number, startDeg: number, 
   return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y}`;
 }
 
-function EvalRow({ icon, title, body }: { icon: string; title: string; body: string }) {
+function EvalRowV2({ icon, title }: { icon: string; title: string }) {
   return (
     <div
-      className="rounded-xl p-3 flex items-start gap-2"
-      style={{ backgroundColor: '#0F0F0F' }}
+      className="rounded-xl px-3 py-3 flex items-center gap-2.5"
+      style={{ backgroundColor: '#0F0F0F', border: '1px solid #1F1F1F' }}
     >
-      <span className="text-base">{icon}</span>
-      <div className="flex-1">
-        <p className="text-xs font-semibold text-white">{title}</p>
-        <p className="text-[11px] text-gray-400 mt-0.5 line-clamp-2">{body}</p>
-      </div>
+      <span
+        className="w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0"
+        style={{ backgroundColor: '#1A2A14' }}
+      >
+        {icon}
+      </span>
+      <p className="text-[13px] text-white">{title}</p>
     </div>
   );
 }
 
-function MiniGauge({ label, value }: { label: string; value: number }) {
-  const SIZE = 70;
-  const STROKE = 5;
+function StrengthGauge({
+  value,
+  status,
+  label,
+}: {
+  value: number;
+  status: string;
+  label: string;
+}) {
+  const SIZE = 78;
+  const STROKE = 6;
   const R = (SIZE - STROKE) / 2;
   const C = 2 * Math.PI * R;
   const offset = C * (1 - value / 100);
@@ -761,28 +841,56 @@ function MiniGauge({ label, value }: { label: string; value: number }) {
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-sm font-bold text-white">{value}</span>
+          <span className="text-[11px] font-bold text-white">{status}</span>
         </div>
       </div>
-      <span className="text-[10px] text-gray-400 mt-1 text-center">{label}</span>
+      <span className="text-[11px] text-gray-300 mt-2 text-center">{label}</span>
     </div>
   );
 }
 
-function FeedbackStep({ n, title }: { n: number; title: string }) {
+function FeedbackStepV2({
+  n,
+  icon,
+  title,
+  selected,
+  onClick,
+}: {
+  n: number;
+  icon: string;
+  title: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
   return (
-    <div
-      className="rounded-xl p-3 flex items-center gap-3"
-      style={{ backgroundColor: '#0F0F0F' }}
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full rounded-xl px-3 py-3 flex items-center gap-3 text-left transition-colors"
+      style={{
+        backgroundColor: selected ? '#1F2D14' : '#0F0F0F',
+        border: selected ? '1px solid #AAED10' : '1px solid #1F1F1F',
+      }}
     >
       <span
-        className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-        style={{ backgroundColor: '#264213', color: '#AAED10' }}
+        className="text-xs font-bold shrink-0 w-6"
+        style={{ color: selected ? '#AAED10' : '#888' }}
       >
         0{n}
       </span>
-      <span className="text-sm text-white">{title}</span>
-    </div>
+      <span className="text-base shrink-0">{icon}</span>
+      <span
+        className="text-sm flex-1"
+        style={{ color: selected ? '#FFFFFF' : '#B6B6B9' }}
+      >
+        {title}
+      </span>
+      {selected && (
+        <span className="text-xs shrink-0" style={{ color: '#AAED10' }}>
+          ✓
+        </span>
+      )}
+    </button>
   );
 }
 
