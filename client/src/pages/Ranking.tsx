@@ -193,15 +193,28 @@ export default function Ranking() {
   const nickname = user?.name || user?.username || '홍길동';
   const myCardTitle = isOrgAdmin ? '기업 내 나의 랭킹' : '나의 랭킹';
 
+  // 실제 로그인 사용자 데이터로 통계 카드 보강
+  const liveStreak = user?.streak ?? myStats.streakDays;
+  const liveComposite = user?.brainAge ?? myStats.composite;
+
   return (
     <MobileLayout>
-      <div className="max-w-md mx-auto px-4 py-6" style={{ paddingBottom: '120px' }}>
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
-          {/* 헤더 */}
-          <h1 className="text-xl font-bold mb-5 flex items-center gap-2" style={{ color: '#fff' }}>
-            <span style={{ color: '#AAED10' }}>📊</span> 랭킹
-          </h1>
+      {/* 상단 고정 헤더 — 노치/상단바 안전영역 + 고정 위치 */}
+      <header
+        className="sticky top-0 z-30 backdrop-blur"
+        style={{
+          backgroundColor: 'rgba(10,10,10,0.92)',
+          borderBottom: '1px solid #1A1A1A',
+        }}
+      >
+        <div className="max-w-md mx-auto px-4 py-3 flex items-center gap-2">
+          <span style={{ color: '#AAED10' }}>📊</span>
+          <h1 className="text-base font-bold" style={{ color: '#fff' }}>랭킹</h1>
+        </div>
+      </header>
 
+      <div className="max-w-md mx-auto px-4 pt-4 pb-6" style={{ paddingBottom: '120px' }}>
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
           {/* 나의 랭킹 카드 */}
           <h2 className="text-sm font-semibold mb-2" style={{ color: '#ddd' }}>{myCardTitle}</h2>
           <div
@@ -229,9 +242,9 @@ export default function Ranking() {
             <div className="h-px mb-3" style={{ backgroundColor: '#2a2a2a' }} />
 
             <div className="grid grid-cols-2 gap-y-2 text-sm">
-              <Stat label="종합트레이닝" value={`${myStats.composite}점`} />
+              <Stat label="종합트레이닝" value={`${liveComposite}점`} />
               <Stat label="합계 시간"    value={`${myStats.totalTime}${myStats.totalTimeUnit}`} />
-              <Stat label="연속 트레이닝" value={`${myStats.streakDays}일`} />
+              <Stat label="연속 트레이닝" value={`${liveStreak}일`} />
               <Stat label="출석률"       value={`${myStats.attendanceRate}%`} />
             </div>
           </div>
