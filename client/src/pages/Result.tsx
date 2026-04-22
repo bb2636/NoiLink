@@ -11,6 +11,7 @@ import { motion } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
+import { DEMO_PROFILE } from '../utils/demoProfile';
 
 export type TrainingResultState = {
   title: string;
@@ -33,8 +34,8 @@ export default function Result() {
       state.yieldsScore !== undefined ||
       state.displayScore != null);
 
-  // 점수 데이터 (실데이터 없으면 placeholder)
-  const todayScore = state?.displayScore ?? 80;
+  // 점수 데이터 (실데이터 없으면 데모 프로필 점수 사용 → 다른 화면과 일치)
+  const todayScore = state?.displayScore ?? DEMO_PROFILE.brainIndex;
   // TODO: 서버에서 직전 점수 받아오기 — 현재는 임시로 todayScore - 12
   const prevScore = state?.previousScore ?? Math.max(0, todayScore - 12);
   const diff = todayScore - prevScore;

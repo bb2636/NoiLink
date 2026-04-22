@@ -1,5 +1,17 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { MobileLayout } from './components/Layout';
+import { useLocation } from 'react-router-dom';
+
+/**
+ * 외곽 MobileLayout 래퍼 — 트레이닝 진행/결과처럼 몰입형 화면에서는 하단 탭바를 숨김.
+ * (해당 페이지가 자체 MobileLayout을 사용하더라도 외곽 탭바 중복 렌더를 방지)
+ */
+function OuterMobileLayout({ children }: { children: React.ReactNode }) {
+  const { pathname } = useLocation();
+  const noNavRoutes = ['/training/session', '/result'];
+  const hideNav = noNavRoutes.some((r) => pathname.startsWith(r));
+  return <MobileLayout hideBottomNav={hideNav}>{children}</MobileLayout>;
+}
 import { useAuth, AuthProvider } from './hooks/useAuth';
 
 // Pages
@@ -174,7 +186,7 @@ function AppRoutes() {
         <Route
           path="/*"
           element={
-            <MobileLayout>
+            <OuterMobileLayout>
               <Routes>
                 <Route
                   path="/"
@@ -305,7 +317,7 @@ function AppRoutes() {
                   }
                 />
               </Routes>
-            </MobileLayout>
+            </OuterMobileLayout>
           }
         />
       </Routes>

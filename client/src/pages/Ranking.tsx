@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
+import { DEMO_PROFILE } from '../utils/demoProfile';
 
 type TabKey = 'composite' | 'time' | 'streak';
 
@@ -102,21 +103,21 @@ const ORG_ROWS: Record<TabKey, Row[]> = {
   ],
 };
 
-// 내 랭킹 통계 (이미지 시안)
+// 내 랭킹 통계 — 단일 데모 프로필(DEMO_PROFILE)에서 가져와 다른 화면과 일치시킴
 const PERSONAL_MY_RANK = {
-  rankByTab: { composite: 13, time: 27, streak: 19 } as Record<TabKey, number>,
-  composite: 82,
-  totalTime: 4,        // 시간
-  streakDays: 5,
-  attendanceRate: 90,
+  rankByTab: DEMO_PROFILE.rankByTab as Record<TabKey, number>,
+  composite: DEMO_PROFILE.brainIndex,
+  totalTime: DEMO_PROFILE.totalTimeHours,
+  streakDays: DEMO_PROFILE.streakDays,
+  attendanceRate: DEMO_PROFILE.attendanceRate,
   totalTimeUnit: '시간',
 };
 const ORG_MY_RANK = {
   rankByTab: { composite: 13, time: 13, streak: 13 } as Record<TabKey, number>,
-  composite: 82,
-  totalTime: 14,       // 회 (이미지 시안: "합계 시간 14회")
-  streakDays: 5,
-  attendanceRate: 90,
+  composite: DEMO_PROFILE.brainIndex,
+  totalTime: DEMO_PROFILE.totalSessionsOrg,
+  streakDays: DEMO_PROFILE.streakDays,
+  attendanceRate: DEMO_PROFILE.attendanceRate,
   totalTimeUnit: '회',
 };
 

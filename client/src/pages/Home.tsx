@@ -5,18 +5,20 @@ import { useHome } from '../hooks/useHome';
 import { useNavigate } from 'react-router-dom';
 import Logo from '../components/Logo';
 import { getBrainimalIcon } from '../utils/brainimalIcons';
+import { DEMO_PROFILE } from '../utils/demoProfile';
 
-// TODO: 실제 API 데이터로 교체 — 리포트 화면과 일치하는 데모 값
+// 데모 프로필 단일 출처 — 리포트/랭킹과 동일한 수치를 사용
+// TODO: 실제 API 데이터로 교체
 const MOCK_HOME = {
-  brainimalType: 'FOX_BALANCED' as const,
-  brainIndex: 80,            // 리포트 평균 점수 (78+82+88+74+91+69)/6 ≈ 80
-  bpmAvg: 92,                // 리포트 recommendedBPM
-  weeklyChange: 12,          // 주간 성장률
-  scoreUpDelta: 20,          // 최근 트렌드 상승폭
-  trendPoints: [62, 66, 70, 68, 72, 75, 78, 76, 80, 82],
-  checkedDays: [true, true, true, true, true, false, false] as boolean[], // 5일 연속
-  streakDays: 5,
-  topTrainings: ['기억력 트레이닝', '집중력 트레이닝', '프리트레이닝'],
+  brainimalType: DEMO_PROFILE.brainimalType,
+  brainIndex: DEMO_PROFILE.brainIndex,
+  bpmAvg: DEMO_PROFILE.bpmAvg,
+  weeklyChange: DEMO_PROFILE.weeklyChange,
+  scoreUpDelta: DEMO_PROFILE.scoreUpDelta,
+  trendPoints: DEMO_PROFILE.trendPoints,
+  checkedDays: DEMO_PROFILE.checkedDays,
+  streakDays: DEMO_PROFILE.streakDays,
+  topTrainings: DEMO_PROFILE.topTrainings,
 };
 
 type HomeVariant = 'first-time' | 'streak-active' | 'streak-broken' | 'enterprise';
@@ -114,7 +116,7 @@ interface StandardProps {
 
 function StandardHome({ variant, home, user }: StandardProps) {
   const navigate = useNavigate();
-  const { condition, banners } = home;
+  const { banners } = home;
 
   // 배너 캐러셀
   const [bannerIdx, setBannerIdx] = useState(0);
@@ -132,11 +134,13 @@ function StandardHome({ variant, home, user }: StandardProps) {
     };
   }, [displayBanners.length]);
 
-  // 리포트와 동일한 목업 데이터 사용
-  const brainIndex = condition?.score ?? MOCK_HOME.brainIndex;
+  // 리포트/랭킹과 동일한 단일 데모 프로필 사용
+  // 데모 사용자는 화면 간 100% 일치를 보장하기 위해 서버값(condition?.score, user.streak)을 무시하고
+  // DEMO_PROFILE 값을 사용. 실제 사용자 데이터는 추후 API 연동 시 분기.
+  const brainIndex = MOCK_HOME.brainIndex;
   const bpmAvg = MOCK_HOME.bpmAvg;
   const weeklyChange = MOCK_HOME.weeklyChange;
-  const streakDays = user?.streak && user.streak > 0 ? user.streak : MOCK_HOME.streakDays;
+  const streakDays = MOCK_HOME.streakDays;
   const nickname = user?.nickname || user?.name || '회원';
   const brainimalInfo = getBrainimalIcon(MOCK_HOME.brainimalType);
 

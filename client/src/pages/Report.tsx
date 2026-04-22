@@ -6,25 +6,26 @@ import RadarChart from '../components/RadarChart';
 import MultiTrendChart, { type TrendPoint } from '../components/MultiTrendChart/MultiTrendChart';
 import { calculateBrainAge, calculateBrainAgeChange } from '../utils/brainAge';
 import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
+import { DEMO_PROFILE, DEMO_METRICS } from '../utils/demoProfile';
 import type { Report, MetricsScore, Session } from '@noilink/shared';
 
-// TODO: 실제 API 데이터로 교체 — 데모용 개인 리포트 목업
+// TODO: 실제 API 데이터로 교체 — 홈/랭킹과 동일한 단일 데모 프로필 사용
 const MOCK_PERSONAL_REPORT: Report = {
   id: 'mock-report-001',
   userId: 'mock-user',
   reportVersion: 12,
-  brainimalType: 'FOX_BALANCED',
-  confidence: 86,
+  brainimalType: DEMO_PROFILE.brainimalType,
+  confidence: DEMO_PROFILE.confidence,
   metricsScore: {
     sessionId: 'mock-session',
     userId: 'mock-user',
-    memory: 78,
-    comprehension: 82,
-    focus: 88,
-    judgment: 74,
-    agility: 91,
-    endurance: 69,
-    rhythm: 80,
+    memory: DEMO_METRICS.memory,
+    comprehension: DEMO_METRICS.comprehension,
+    focus: DEMO_METRICS.focus,
+    judgment: DEMO_METRICS.judgment,
+    agility: DEMO_METRICS.agility,
+    endurance: DEMO_METRICS.endurance,
+    rhythm: DEMO_PROFILE.brainIndex,
     createdAt: new Date().toISOString(),
   },
   factText:
@@ -49,7 +50,7 @@ const MOCK_PERSONAL_REPORT: Report = {
     description:
       '빠른 판단과 안정된 집중력을 동시에 요구하는 분야에서 두각을 나타냅니다. 데이터 분석가, 응급의료, 트레이더 등이 대표적인 롤모델입니다.',
   },
-  recommendedBPM: 92,
+  recommendedBPM: DEMO_PROFILE.bpmAvg,
   createdAt: new Date().toISOString(),
 };
 
