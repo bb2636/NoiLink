@@ -70,26 +70,36 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
     sessions.push(session);
     await db.set('sessions', sessions);
     
-    // 사용자 정보 업데이트 (lastTrainingDate, streak)
+    // 사용자 정보 업데이트 (lastTrainingDate, streak, bestStreak)
+    // 규칙:
+    //   - 오늘 처음 훈련: 어제 훈련 기록 있으면 streak + 1, 없으면 streak = 1 (중간에 빠진 경우 초기화)
+    //   - bestStreak 는 역대 최고 기록이라 절대 감소하지 않음 (리셋 시에도 보관)
+    //   - 같은 날 추가 세션: streak 변화 없음 (중복 카운트 방지)
     const userIndex = users.findIndex((u: User) => u.id === userId);
     if (userIndex !== -1) {
       const today = new Date().toISOString().split('T')[0];
       const lastDate = users[userIndex].lastTrainingDate
         ? new Date(users[userIndex].lastTrainingDate).toISOString().split('T')[0]
         : null;
-      
+
       if (lastDate !== today) {
-        // 새로운 날짜면 streak 업데이트
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = yesterday.toISOString().split('T')[0];
-        
+
         if (lastDate === yesterdayStr) {
           users[userIndex].streak = (users[userIndex].streak || 0) + 1;
-        } else if (lastDate !== today) {
+        } else {
+          // 첫 훈련이거나 하루 이상 빠진 경우 → 1부터 다시 시작
           users[userIndex].streak = 1;
         }
-        
+
+        // 최고 기록 갱신 (보관)
+        const prevBest = users[userIndex].bestStreak || 0;
+        if (users[userIndex].streak > prevBest) {
+          users[userIndex].bestStreak = users[userIndex].streak;
+        }
+
         users[userIndex].lastTrainingDate = new Date().toISOString();
         await db.set('users', users);
       }

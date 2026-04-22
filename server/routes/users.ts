@@ -281,7 +281,30 @@ router.get('/me', async (req: Request, res: Response) => {
         error: 'User not found'
       });
     }
-    
+
+    // 연속 트레이닝 자동 리셋 (조회 시점 기준)
+    // - 마지막 훈련일이 어제·오늘이 아니면 현재 streak 은 0으로 리셋
+    // - bestStreak 는 그대로 보관 (랭킹/기록 보존)
+    if (user.lastTrainingDate && (user.streak ?? 0) > 0) {
+      const today = new Date().toISOString().split('T')[0];
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      const lastDate = new Date(user.lastTrainingDate).toISOString().split('T')[0];
+      if (lastDate !== today && lastDate !== yesterdayStr) {
+        const prevBest = user.bestStreak || 0;
+        if (user.streak > prevBest) {
+          user.bestStreak = user.streak;
+        }
+        user.streak = 0;
+        const idx = users.findIndex((u: any) => u.id === user.id);
+        if (idx !== -1) {
+          users[idx] = user;
+          await db.set('users', users);
+        }
+      }
+    }
+
     // 비밀번호 정보 제외
     const { password: _, ...userWithoutPassword } = user as any;
     

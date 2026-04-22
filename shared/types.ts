@@ -83,7 +83,8 @@ export interface User {
   brainimalConfidence?: number;        // 신뢰도 (0~100)
   brainAge?: number;                   // 뇌지컬 나이
   previousBrainAge?: number;           // 이전 뇌지컬 나이 (변화 추이용)
-  streak: number;                      // 연속 트레이닝 일수
+  streak: number;                      // 현재 연속 트레이닝 일수 (중간 빠지면 0으로 리셋)
+  bestStreak?: number;                 // 역대 최고 연속 트레이닝 일수 (보관용, 리셋되지 않음)
   lastTrainingDate?: string;           // 마지막 트레이닝 일시
   createdAt: string;                  // 생성일시 (ISO 8601)
   lastLoginAt?: string;                 // 마지막 로그인 일시
