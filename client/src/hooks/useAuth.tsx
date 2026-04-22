@@ -33,6 +33,7 @@ interface AuthContextValue {
     password?: string;
     phone?: string;
     userType?: 'PERSONAL' | 'ORGANIZATION';
+    organizationName?: string;
   }) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   refreshUser: () => Promise<void>;

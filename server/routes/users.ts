@@ -50,7 +50,7 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
     
-    const { userType = 'PERSONAL', organizationId, password, phone } = req.body;
+    const { userType = 'PERSONAL', organizationId, organizationName, password, phone } = req.body;
     
     // ADMIN 타입은 회원가입으로 생성 불가
     if (userType === 'ADMIN') {
@@ -59,7 +59,15 @@ router.post('/', async (req: Request, res: Response) => {
         error: 'Admin accounts cannot be created through signup'
       });
     }
-    
+
+    // 기업 회원: organizationId가 전달되지 않으면 신규 조직 ID를 자동 발급해
+    // ORGANIZATION 권한(소속 조직 자원 접근/랭킹 등)이 정상 동작하도록 보장.
+    const isOrgSignup = userType === 'ORGANIZATION';
+    const resolvedOrganizationId =
+      isOrgSignup
+        ? (organizationId || `org_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`)
+        : undefined;
+
     const newUser = {
       id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       username,
@@ -67,7 +75,10 @@ router.post('/', async (req: Request, res: Response) => {
       name: name || username,
       phone: phone || undefined,
       userType: userType || 'PERSONAL',
-      organizationId: organizationId || undefined,
+      organizationId: resolvedOrganizationId,
+      organizationName: isOrgSignup ? (organizationName || name || username) : undefined,
+      // 기업 회원은 운영자 승인 후 사용 가능 — 데모 환경이라면 즉시 사용을 위해 APPROVED 처리도 고려
+      approvalStatus: isOrgSignup ? 'PENDING' as const : undefined,
       deviceId: deviceId || undefined,
       brainimalType: undefined,
       brainimalConfidence: undefined,
