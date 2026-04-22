@@ -155,29 +155,27 @@ export default function TrainingSetup() {
 
         {/* Pod 연결 */}
         <section className="mb-6">
-          <h2 className="text-sm font-semibold text-white mb-3">Pod 연결</h2>
-
-          {/* NoiPod 메인 상태 */}
-          <button
-            onClick={() => navigate('/device')}
-            className="w-full flex items-center justify-between px-4 py-3 rounded-xl mb-3"
-            style={{ backgroundColor: '#1A1A1A' }}
-          >
-            <div className="flex items-center gap-3">
+          {/* 헤더: 좌측 블루투스+타이틀 / 우측 연결 수 배지 */}
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
               <svg
-                className="w-5 h-5"
+                className="w-4 h-4"
                 style={{ color: isPrimaryConnected ? '#AAED10' : '#888' }}
                 viewBox="0 0 24 24"
                 fill="currentColor"
               >
                 <path d="M17.71 7.71L12 2h-1v7.59L6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l5.71-5.71-4.3-4.29 4.3-4.29z" />
               </svg>
-              <span className="text-white text-sm">NoiPod</span>
+              <h2 className="text-sm font-semibold text-white">Pod 연결</h2>
             </div>
-            <span className="text-sm" style={{ color: isPrimaryConnected ? '#AAED10' : '#888' }}>
-              {isPrimaryConnected ? '연결됨' : '연결 안 됨'} &gt;
-            </span>
-          </button>
+            <button
+              onClick={() => navigate('/device')}
+              className="px-4 py-1.5 rounded-full text-xs font-medium"
+              style={{ backgroundColor: '#1A1A1A', color: '#fff', border: '1px solid #2A2A2A' }}
+            >
+              {registered.length}개의 pod 연결 됨
+            </button>
+          </div>
 
           {/* 8개 Pod 그리드 (4×2) */}
           <div className="grid grid-cols-4 gap-2">
@@ -303,26 +301,30 @@ function PodSlot({
 
   return (
     <div
-      className="rounded-xl p-2 flex flex-col items-stretch"
+      className="rounded-xl px-2.5 py-2.5 flex flex-col items-stretch min-h-[72px]"
       style={{
         backgroundColor: '#1A1A1A',
-        border: isSelected ? `1.5px solid ${accent}` : '1.5px solid transparent',
-        opacity: !hasDevice ? 0.85 : 1,
+        border: isSelected ? `1.5px solid ${accent}` : '1.5px solid #2A2A2A',
       }}
     >
       {/* 위 라벨 (번호 + Pod N) */}
-      <div className="flex items-center gap-1 mb-2 px-1">
+      <div className="flex items-center gap-1.5 mb-2">
         <span
-          className="text-xs font-bold w-4 h-4 rounded-sm flex items-center justify-center"
+          className="text-[11px] font-bold w-4 h-4 rounded-[3px] flex items-center justify-center leading-none"
           style={{
             backgroundColor: isSelected ? accent : 'transparent',
-            color: isSelected ? '#000' : '#888',
-            border: isSelected ? 'none' : '1px solid #444',
+            color: isSelected ? '#000' : hasDevice ? '#888' : '#555',
+            border: isSelected ? 'none' : `1px solid ${hasDevice ? '#555' : '#3A3A3A'}`,
           }}
         >
           {slotNum}
         </span>
-        <span className="text-xs text-gray-300">Pod {slotNum}</span>
+        <span
+          className="text-xs"
+          style={{ color: hasDevice ? '#D4D4D4' : '#666' }}
+        >
+          Pod {slotNum}
+        </span>
       </div>
 
       {/* 토글 또는 기기 관리 */}
@@ -337,7 +339,8 @@ function PodSlot({
       ) : (
         <button
           onClick={onManage}
-          className="text-[10px] text-gray-400 text-left"
+          className="text-[11px] text-left"
+          style={{ color: '#666' }}
         >
           기기 관리 &gt;
         </button>
