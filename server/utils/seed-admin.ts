@@ -28,13 +28,35 @@ const ORG_PASSWORD = 'org1234';
 const ORG_ID = 'demo-org-001';
 const ORG_NAME = '데모 기업';
 
+// 기업 관리자(데모 기업) 본인 목업 — 개인 화면(홈/마이페이지) 빈칸 방지
+const ORG_ADMIN_MOCK = {
+  brainimalType: 'OWL_FOCUS' as const,
+  brainimalConfidence: 0.92,
+  brainAge: 52,
+  previousBrainAge: 55,
+  streak: 12,
+  bestStreak: 18,
+  age: 54,
+};
+
+// 시연용: 기업에 소속된 PERSONAL 회원 (개인 화면 ↔ 기업 소속 화면 구분 확인)
+const ORG_MEMBER_EMAIL = 'member@test.com';
+const ORG_MEMBER_USERNAME = 'member';
+const ORG_MEMBER_PASSWORD = 'member1234';
+const ORG_MEMBER_NAME = '홍길동';
+
 /**
  * 시드된 비밀번호가 약한지 판정.
  * - 환경변수가 아닌 코드 내 fallback 값 (admin1234 / test1234) 일 때 true.
  * - true면 password 레코드에 mustChange=true 플래그를 박아 로그인 후 강제 변경 안내.
  */
 function isWeakSeedPassword(password: string): boolean {
-  return password === 'admin1234' || password === 'test1234' || password === 'org1234';
+  return (
+    password === 'admin1234' ||
+    password === 'test1234' ||
+    password === 'org1234' ||
+    password === 'member1234'
+  );
 }
 
 async function seedUser(opts: {
@@ -45,43 +67,59 @@ async function seedUser(opts: {
   userType: 'ADMIN' | 'PERSONAL' | 'ORGANIZATION';
   organizationId?: string;
   organizationName?: string;
+  extra?: Partial<User>;
 }): Promise<void> {
-  // 락 안에서 존재 확인 + push
-  const created = await withKeyLock(KV_LOCK.USERS, async (): Promise<User | null> => {
-    const users = await db.get('users') || [];
-    const exists = users.find((u: any) =>
-      u.email === opts.email ||
-      (u.username === opts.username && u.userType === opts.userType)
-    );
-    if (exists) return null;
+  // 락 안에서 존재 확인 + push. 이미 있으면 기존 user 를 반환해 password 보정 단계로 진입.
+  const { user, justCreated } = await withKeyLock(
+    KV_LOCK.USERS,
+    async (): Promise<{ user: User | null; justCreated: boolean }> => {
+      const users = (await db.get('users')) || [];
+      const exists = users.find(
+        (u: any) =>
+          u.email === opts.email ||
+          (u.username === opts.username && u.userType === opts.userType),
+      );
+      if (exists) return { user: exists as User, justCreated: false };
 
-    const newUser: User = createUserShape(opts);
-    users.push(newUser);
-    await db.set('users', users);
-    return newUser;
-  });
+      const newUser: User = createUserShape(opts);
+      users.push(newUser);
+      await db.set('users', users);
+      return { user: newUser, justCreated: true };
+    },
+  );
 
-  if (!created) {
-    console.log(`✅ ${opts.userType} account already exists: ${opts.email}`);
-    return;
-  }
-  const newUser = created;
+  if (!user) return;
+
+  // password 가 없으면(이전 시드 중 크래시 등) 생성, 있으면 약한 시드 password 에 한해 mustChange 보정.
   await withKeyLock(KV_LOCK.PASSWORDS, async () => {
-    const hashed = await hashPassword(opts.password);
-    const passwords = await db.get('passwords') || [];
+    const passwords = (await db.get('passwords')) || [];
+    const existingPwd = passwords.find((p: any) => p.userId === user.id);
     const mustChange = isWeakSeedPassword(opts.password);
-    passwords.push({
-      userId: newUser.id,
-      email: opts.email,
-      password: hashed,
-      mustChange,
-      createdAt: new Date().toISOString(),
-    });
-    await db.set('passwords', passwords);
-    console.log(
-      `✅ ${opts.userType} account created: ${opts.email}` +
-        (mustChange ? ' ⚠️  (weak default password — mustChange=true)' : ''),
-    );
+
+    if (!existingPwd) {
+      const hashed = await hashPassword(opts.password);
+      passwords.push({
+        userId: user.id,
+        email: opts.email,
+        password: hashed,
+        mustChange,
+        createdAt: new Date().toISOString(),
+      });
+      await db.set('passwords', passwords);
+      console.log(
+        `✅ ${opts.userType} account ${justCreated ? 'created' : 'password recovered'}: ${opts.email}` +
+          (mustChange ? ' ⚠️  (weak default password — mustChange=true)' : ''),
+      );
+      return;
+    }
+
+    if (mustChange && existingPwd.mustChange !== true) {
+      existingPwd.mustChange = true;
+      await db.set('passwords', passwords);
+      console.log(`⚠️  mustChange=true 보정: ${opts.email}`);
+    } else if (!justCreated) {
+      console.log(`✅ ${opts.userType} account already exists: ${opts.email}`);
+    }
   });
 }
 
@@ -92,6 +130,7 @@ function createUserShape(opts: {
   userType: 'ADMIN' | 'PERSONAL' | 'ORGANIZATION';
   organizationId?: string;
   organizationName?: string;
+  extra?: Partial<User>;
 }): User {
   return {
     id: `${opts.userType.toLowerCase()}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
@@ -112,7 +151,89 @@ function createUserShape(opts: {
     createdAt: new Date().toISOString(),
     lastLoginAt: new Date().toISOString(),
     updatedAt: undefined,
+    ...(opts.extra || {}),
   };
+}
+
+/**
+ * 기존 시드 계정에 누락된 목업 필드(brainAge/brainimalType 등)를 패치.
+ * - 사용자가 이미 본인 데이터를 갖고 있으면 덮어쓰지 않음 (필드별 빈 값일 때만 채움).
+ */
+async function patchUserMockData(
+  email: string,
+  patch: Partial<User>,
+): Promise<void> {
+  await withKeyLock(KV_LOCK.USERS, async () => {
+    const users = (await db.get('users')) || [];
+    const idx = users.findIndex((u: any) => u.email === email);
+    if (idx === -1) return;
+    const current = users[idx];
+    let changed = false;
+    const next = { ...current };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined || v === null) continue;
+      if (current[k] === undefined || current[k] === null || current[k] === 0) {
+        next[k] = v;
+        changed = true;
+      }
+    }
+    if (changed) {
+      next.updatedAt = new Date().toISOString();
+      users[idx] = next;
+      await db.set('users', users);
+      console.log(`✅ Mock data patched for ${email}`);
+    }
+  });
+}
+
+/**
+ * 시연용: 데모 기업에 소속된 PERSONAL 회원 시드.
+ * - 기업 관리자가 트레이닝 진행 회원으로 선택 가능.
+ * - approvalStatus 없이 organizationId 만으로 소속 처리(개인회원 → 기업 소속 형태).
+ * - 조직 레코드의 memberUserIds 에 함께 등록.
+ */
+async function seedDemoOrgPersonalMember(): Promise<void> {
+  await seedUser({
+    email: ORG_MEMBER_EMAIL,
+    username: ORG_MEMBER_USERNAME,
+    password: ORG_MEMBER_PASSWORD,
+    name: ORG_MEMBER_NAME,
+    userType: 'PERSONAL',
+    organizationId: ORG_ID,
+    organizationName: ORG_NAME,
+    extra: {
+      age: 62,
+      brainimalType: 'DOLPHIN_BRILLIANT',
+      brainimalConfidence: 0.88,
+      brainAge: 58,
+      previousBrainAge: 61,
+      streak: 7,
+      bestStreak: 14,
+      lastTrainingDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    },
+  });
+
+  // 조직 memberUserIds 에 추가 — 운영 코드(approval 엔드포인트)와 동일하게 USERS 락으로 보호하여
+  // organizations RMW 가 다른 cross-collection write 와 직렬화되도록 한다.
+  await withKeyLock(KV_LOCK.USERS, async () => {
+    const users = (await db.get('users')) || [];
+    const member = users.find((u: any) => u.email === ORG_MEMBER_EMAIL);
+    if (!member) return;
+    const organizations = (await db.get('organizations')) || [];
+    const idx = organizations.findIndex((o: any) => o.id === ORG_ID);
+    if (idx === -1) return;
+    const memberIds: string[] = Array.isArray(organizations[idx].memberUserIds)
+      ? organizations[idx].memberUserIds
+      : [];
+    if (memberIds.includes(member.id)) return;
+    organizations[idx] = {
+      ...organizations[idx],
+      memberUserIds: [...memberIds, member.id],
+      updatedAt: new Date().toISOString(),
+    };
+    await db.set('organizations', organizations);
+    console.log(`✅ Personal org member linked to ${ORG_ID}: ${ORG_MEMBER_EMAIL}`);
+  });
 }
 
 /**
@@ -197,23 +318,31 @@ async function seedDemoOrgMembers(): Promise<void> {
     }
   });
 
-  // 조직 레코드 동기화 (organization-members API가 organizations.memberUserIds 를 참조)
-  const allMemberIds = adminUserId ? [adminUserId, ...memberIds] : memberIds;
-  const organizations: any[] = (await db.get('organizations')) || [];
-  const idx = organizations.findIndex((o: any) => o.id === ORG_ID);
-  const orgRecord = {
-    id: ORG_ID,
-    name: ORG_NAME,
-    memberUserIds: allMemberIds,
-    createdAt: idx >= 0 ? organizations[idx].createdAt : new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  if (idx >= 0) {
-    organizations[idx] = { ...organizations[idx], ...orgRecord };
-  } else {
-    organizations.push(orgRecord);
-  }
-  await db.set('organizations', organizations);
+  // 조직 레코드 동기화 — organizations RMW 는 USERS 락(운영 코드와 동일 컨벤션)으로 보호하여
+  // 다른 cross-collection 변경(승인 등)과 직렬화한다. 기존 memberUserIds 는 보존(union).
+  await withKeyLock(KV_LOCK.USERS, async () => {
+    const seededIds = adminUserId ? [adminUserId, ...memberIds] : memberIds;
+    const organizations: any[] = (await db.get('organizations')) || [];
+    const idx = organizations.findIndex((o: any) => o.id === ORG_ID);
+    const existingIds: string[] =
+      idx >= 0 && Array.isArray(organizations[idx].memberUserIds)
+        ? organizations[idx].memberUserIds
+        : [];
+    const merged = Array.from(new Set([...existingIds, ...seededIds]));
+    const orgRecord = {
+      id: ORG_ID,
+      name: ORG_NAME,
+      memberUserIds: merged,
+      createdAt: idx >= 0 ? organizations[idx].createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    if (idx >= 0) {
+      organizations[idx] = { ...organizations[idx], ...orgRecord };
+    } else {
+      organizations.push(orgRecord);
+    }
+    await db.set('organizations', organizations);
+  });
 }
 
 async function backfillMustChangeFlag(): Promise<void> {
@@ -276,6 +405,9 @@ export async function seedAdminAccount(): Promise<void> {
         organizationName: ORG_NAME,
       });
       await seedDemoOrgMembers();
+      await seedDemoOrgPersonalMember();
+      // 기존에 시드된 기업 관리자에게 본인용 목업 데이터(브레이니멀/뇌나이/연속) 보강
+      await patchUserMockData(ORG_EMAIL, ORG_ADMIN_MOCK);
     } else {
       console.log('ℹ️  [seed-admin] PRODUCTION: 테스트/기업 계정 시드는 건너뜁니다.');
     }
