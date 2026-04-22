@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
@@ -121,6 +121,52 @@ const ORG_MY_RANK = {
 };
 
 const VISIBLE_DEFAULT = 10;
+const PAGE_SIZE = 10;
+
+// =============================================================================
+// 데모 데이터 확장: 무한 스크롤 시연을 위해 11위 이하 가짜 데이터를 자동 생성
+// TODO: 실제 API(/rankings?cursor=…)로 교체. 서버 페이지네이션 도입 시 useInfiniteQuery로 대체
+// =============================================================================
+const FILLER_NICKS_PERSONAL = [
+  '구름빵', '솔솔바람', '단단무지', '한입콜라', '청량한봄', '느긋한곰', '자유로운새', '하늘빛', '잔잔호수', '눈송이',
+  '햇살가득', '별이반짝', '달빛산책', '꽃향기', '바람결', '숲속요정', '파도소리', '노을빛', '새벽이슬', '첫눈',
+  '향기로운차', '따스한손', '맑은물결', '두근두근', '도전왕', '기록깨기', '꾸준함', '집념의불꽃', '근면성실', '뇌지컬왕',
+  '성장중', '한걸음씩', '레벨업', '지구력만렙', '뉴런폭주', '도파민러', '몰입러', '리듬타기', '뚝딱이', '고요한밤',
+];
+const FILLER_NICKS_ORG = [
+  '강민수', '윤서아', '백도훈', '서지원', '양하린', '문채영', '신유찬', '조은서', '권태민', '송나윤',
+  '배도현', '홍서윤', '안지호', '유리아', '임건우', '전소율', '황민준', '나예린', '곽시우', '주하윤',
+  '구도윤', '명승현', '여승아', '성우진', '진예원', '하도경', '엄지안', '현우석', '태수영', '연지호',
+];
+
+function generateFillerRows(seedRows: Row[], nicks: string[], lastValue: number): Row[] {
+  const out: Row[] = [];
+  let prevVal = lastValue;
+  let rank = (seedRows[seedRows.length - 1]?.rank ?? 10) + 1;
+  for (let i = 0; i < nicks.length; i++) {
+    // 값은 자연스럽게 감소 (랭킹 하위로 갈수록 점수↓)
+    const drop = Math.max(1, Math.round((i % 3) + 1));
+    const v = Math.max(1, prevVal - drop);
+    out.push({ rank, nickname: nicks[i], value: v });
+    prevVal = v;
+    rank += 1;
+  }
+  return out;
+}
+
+function buildFullDataset(
+  base: Record<TabKey, Row[]>,
+  nicks: string[],
+): Record<TabKey, Row[]> {
+  return {
+    composite: [...base.composite, ...generateFillerRows(base.composite, nicks, base.composite[base.composite.length - 1].value)],
+    time:      [...base.time,      ...generateFillerRows(base.time,      nicks, base.time[base.time.length - 1].value)],
+    streak:    [...base.streak,    ...generateFillerRows(base.streak,    nicks, base.streak[base.streak.length - 1].value)],
+  };
+}
+
+const PERSONAL_ROWS_FULL = buildFullDataset(PERSONAL_ROWS, FILLER_NICKS_PERSONAL);
+const ORG_ROWS_FULL      = buildFullDataset(ORG_ROWS,      FILLER_NICKS_ORG);
 
 export default function Ranking() {
   const { user } = useAuth();
@@ -130,7 +176,7 @@ export default function Ranking() {
   // 기업 관리자 계정만 기업 내 랭킹 열람 가능.
   // 기업 소속 개인은 일반 개인 랭킹(전체)만 볼 수 있음.
   const isOrgAdmin = user?.userType === 'ORGANIZATION';
-  const dataset = isOrgAdmin ? ORG_ROWS : PERSONAL_ROWS;
+  const dataset = isOrgAdmin ? ORG_ROWS_FULL : PERSONAL_ROWS_FULL;
   const myStats = isOrgAdmin ? ORG_MY_RANK : PERSONAL_MY_RANK;
 
   const rows = useMemo(() => dataset[tab], [dataset, tab]);
@@ -236,26 +282,58 @@ export default function Ranking() {
             ))}
           </ul>
 
-          {/* 더보기 */}
-          {visible < rows.length ? (
-            <button
-              type="button"
-              onClick={() => setVisible((v) => v + 10)}
-              className="w-full mt-4 flex flex-col items-center gap-0.5 text-sm"
-              style={{ color: '#999' }}
-            >
-              더보기
-              <span style={{ fontSize: 14, lineHeight: 1 }}>⌄</span>
-            </button>
-          ) : (
-            <div className="w-full mt-4 flex flex-col items-center gap-0.5 text-sm" style={{ color: '#555' }}>
-              더보기
-              <span style={{ fontSize: 14, lineHeight: 1 }}>⌄</span>
-            </div>
+          {/* 무한 스크롤 sentinel */}
+          <InfiniteSentinel
+            hasMore={visible < rows.length}
+            onLoadMore={() => setVisible((v) => Math.min(v + PAGE_SIZE, rows.length))}
+          />
+          {visible >= rows.length && rows.length > VISIBLE_DEFAULT && (
+            <p className="w-full mt-4 text-center text-xs" style={{ color: '#555' }}>
+              마지막 순위까지 모두 표시되었습니다
+            </p>
           )}
         </motion.div>
       </div>
     </MobileLayout>
+  );
+}
+
+// IntersectionObserver 기반 무한 스크롤 트리거
+function InfiniteSentinel({
+  hasMore,
+  onLoadMore,
+}: {
+  hasMore: boolean;
+  onLoadMore: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!hasMore) return;
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          onLoadMore();
+        }
+      },
+      { rootMargin: '120px 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, onLoadMore]);
+
+  if (!hasMore) return null;
+
+  return (
+    <div ref={ref} className="w-full mt-4 flex flex-col items-center gap-1 text-sm" style={{ color: '#666' }}>
+      <span
+        className="inline-block w-4 h-4 rounded-full border-2 border-t-transparent animate-spin"
+        style={{ borderColor: '#AAED10', borderTopColor: 'transparent' }}
+      />
+      <span className="text-xs">불러오는 중…</span>
+    </div>
   );
 }
 
