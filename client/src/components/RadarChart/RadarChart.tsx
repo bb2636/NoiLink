@@ -68,9 +68,9 @@ export default function RadarChart({
       ctx.stroke();
     });
 
-    // 데이터 폴리곤
-    ctx.fillStyle = 'rgba(170, 237, 16, 0.18)';
-    ctx.strokeStyle = ACCENT;
+    // 데이터 폴리곤 (영역은 라임 반투명, 외곽선은 흰색으로 또렷하게)
+    ctx.fillStyle = 'rgba(170, 237, 16, 0.22)';
+    ctx.strokeStyle = '#FFFFFF';
     ctx.lineWidth = 2;
     ctx.beginPath();
     METRICS.forEach((metric, idx) => {
@@ -97,8 +97,8 @@ export default function RadarChart({
       ctx.beginPath();
       ctx.arc(x, y, 5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#0A0A0A';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 1.5;
       ctx.stroke();
     });
 

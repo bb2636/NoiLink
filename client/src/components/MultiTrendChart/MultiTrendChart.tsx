@@ -128,35 +128,48 @@ export default function MultiTrendChart({ data, height = 220 }: MultiTrendChartP
       ctx.fillText(String(v), padding - 6, y + 3);
     }
 
-    // 라인
+    // 라인 + 그라데이션 영역
     METRIC_ORDER.forEach(({ key, color }) => {
       if (!selected.has(key)) return;
+
+      // 좌표 수집
+      const pts: { x: number; y: number }[] = [];
+      data.forEach((point, index) => {
+        const v = point[key];
+        if (typeof v !== 'number') return;
+        const x = padding + (chartW * index) / Math.max(data.length - 1, 1);
+        const y = padding + chartH - (chartH * (v - minV)) / range;
+        pts.push({ x, y });
+      });
+      if (pts.length === 0) return;
+
+      // 라인 아래 그라데이션 영역
+      const grad = ctx.createLinearGradient(0, padding, 0, padding + chartH);
+      grad.addColorStop(0, hexToRgba(color, 0.45));
+      grad.addColorStop(1, hexToRgba(color, 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, padding + chartH);
+      pts.forEach((p) => ctx.lineTo(p.x, p.y));
+      ctx.lineTo(pts[pts.length - 1].x, padding + chartH);
+      ctx.closePath();
+      ctx.fill();
+
+      // 라인
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      let started = false;
-      data.forEach((point, index) => {
-        const v = point[key];
-        if (typeof v !== 'number') return;
-        const x = padding + (chartW * index) / Math.max(data.length - 1, 1);
-        const y = padding + chartH - (chartH * (v - minV)) / range;
-        if (!started) {
-          ctx.moveTo(x, y);
-          started = true;
-        } else {
-          ctx.lineTo(x, y);
-        }
+      pts.forEach((p, i) => {
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
       });
-      if (started) ctx.stroke();
+      ctx.stroke();
 
+      // 꼭짓점
       ctx.fillStyle = color;
-      data.forEach((point, index) => {
-        const v = point[key];
-        if (typeof v !== 'number') return;
-        const x = padding + (chartW * index) / Math.max(data.length - 1, 1);
-        const y = padding + chartH - (chartH * (v - minV)) / range;
+      pts.forEach((p) => {
         ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
         ctx.fill();
       });
     });
@@ -256,6 +269,15 @@ export default function MultiTrendChart({ data, height = 220 }: MultiTrendChartP
       />
     </div>
   );
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const r = parseInt(full.substring(0, 2), 16);
+  const g = parseInt(full.substring(2, 4), 16);
+  const b = parseInt(full.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 function DropdownItem({

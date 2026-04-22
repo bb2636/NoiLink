@@ -72,6 +72,45 @@ const MOCK_TREND_POINTS: TrendPoint[] = Array.from({ length: 8 }).map((_, i) => 
 /**
  * 개인 리포트 — 명세: 프로필 요약, 6대 지표(꼭짓점 툴팁), 변화추이, 종합 평가, 롤모델, 면책
  */
+// 흰 원 + 검은 물음표 — 호버/클릭 시 안내 말풍선 표시
+function HelpTooltip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        aria-label="도움말"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onClick={() => setOpen((v) => !v)}
+        className="w-4 h-4 rounded-full inline-flex items-center justify-center text-[10px] font-bold leading-none"
+        style={{ backgroundColor: '#FFFFFF', color: '#000000' }}
+      >
+        ?
+      </button>
+      {open && (
+        <span
+          className="absolute left-6 top-1/2 -translate-y-1/2 z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs"
+          style={{ backgroundColor: '#2A2A2A', color: '#E5E5E5', border: '1px solid #3A3A3A' }}
+        >
+          {text}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(false);
+            }}
+            className="text-[10px]"
+            style={{ color: '#888' }}
+          >
+            ✕
+          </button>
+        </span>
+      )}
+    </span>
+  );
+}
+
 export default function Report() {
   const { reportId } = useParams<{ reportId?: string }>();
   const { user, refreshUser } = useAuth();
@@ -254,102 +293,121 @@ export default function Report() {
       className="px-4 py-6 space-y-5"
       style={{ paddingBottom: '120px', color: '#fff' }}
     >
-      {/* 프로필 요약 */}
-      <section
-        className="rounded-2xl p-4 border"
-        style={{ backgroundColor: '#1A1A1A', borderColor: '#333' }}
-      >
-        <div className="flex items-start gap-4">
-          <div
-            className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold shrink-0"
-            style={{
-              backgroundColor: '#2A2A2A',
-              color: '#AAED10',
-            }}
-          >
-            {user.name.charAt(0)}
-          </div>
-          <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-bold text-white">{user.name}</h2>
-            {user.age != null && (
-              <p className="text-sm" style={{ color: '#B6B6B9' }}>
-                {user.age}세
-              </p>
-            )}
-            <div className="flex flex-wrap items-center gap-2 mt-2">
-              <span className="text-base font-semibold text-white">
-                뇌지컬 나이 {displayBrainAge}세
+      {/* 내 프로필 */}
+      <section>
+        <h3 className="text-base font-bold text-white mb-2">내 프로필</h3>
+        <div
+          className="rounded-2xl p-4 border"
+          style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
+        >
+          {/* 상단: 아바타 + 이름/소속 */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div
+                className="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center"
+                style={{ backgroundColor: '#2A2A2A' }}
+              >
+                {brainimalInfo.icon ? (
+                  <img
+                    src={brainimalInfo.icon}
+                    alt={brainimalInfo.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-xl font-bold" style={{ color: '#AAED10' }}>
+                    {user.name.charAt(0)}
+                  </span>
+                )}
+              </div>
+              <span className="text-white font-semibold text-[15px]">
+                {user.name} 님
               </span>
+            </div>
+            {orgLabel && (
+              <span className="text-xs" style={{ color: '#B6B6B9' }}>
+                소속 <span className="text-white ml-1">{orgLabel}</span>
+              </span>
+            )}
+          </div>
+
+          {/* 나이 / 뇌지컬 나이 한 줄 */}
+          <div
+            className="flex items-center justify-between rounded-xl px-4 py-3 mb-3"
+            style={{ backgroundColor: '#0F0F0F' }}
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-xs" style={{ color: '#888' }}>나이</span>
+              <span className="text-white font-semibold text-sm">
+                {user.age != null ? `${user.age}세` : '-'}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs" style={{ color: '#888' }}>뇌지컬 나이</span>
+              <span className="text-white font-semibold text-sm">{displayBrainAge}세</span>
               {brainAgeChange && (
                 <span
-                  className="text-sm font-medium"
+                  className="text-xs font-medium"
                   style={{ color: brainAgeChange.isImproved ? '#AAED10' : '#f87171' }}
                 >
-                  {brainAgeChange.isImproved ? '↓' : '↑'} {brainAgeChange.value}세 (지난 검사 대비)
+                  ({brainAgeChange.isImproved ? '-' : '+'}{brainAgeChange.value})
                 </span>
               )}
             </div>
-            <p className="text-sm mt-1" style={{ color: '#B6B6B9' }}>
-              브레이니멀:{' '}
-              <span style={{ color: '#AAED10' }}>{brainimalInfo.name}</span>
-            </p>
-            {orgLabel && (
-              <p className="text-sm mt-1" style={{ color: '#B6B6B9' }}>
-                소속 기관: <span className="text-white">{orgLabel}</span>
-              </p>
-            )}
           </div>
-        </div>
-        <div className="flex gap-2 mt-4">
-          <button
-            type="button"
-            onClick={() => navigate('/profile')}
-            className="flex-1 py-2.5 rounded-xl text-sm font-semibold border"
-            style={{ borderColor: '#444', color: '#fff' }}
-          >
-            모든 타입 보기
-          </button>
-          <button
-            type="button"
-            className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
-            style={{ backgroundColor: '#AAED10', color: '#000' }}
-            onClick={() => {
-              if (navigator.share) {
-                void navigator.share({
-                  title: 'NoiLink 리포트',
-                  text: `${user.name}님의 뇌지컬 리포트`,
-                });
-              }
-            }}
-          >
-            공유하기
-          </button>
+
+          {/* 브레이니멀 라벨 + 모든 타입 보기 */}
+          <div className="flex items-center justify-between">
+            <span
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold"
+              style={{ backgroundColor: '#2A2A2A', color: brainimalInfo.color }}
+            >
+              {brainimalInfo.icon && (
+                <img src={brainimalInfo.icon} alt="" className="w-4 h-4 rounded-full object-cover" />
+              )}
+              {brainimalInfo.name}
+            </span>
+            <button
+              type="button"
+              onClick={() => navigate('/profile')}
+              className="text-xs font-medium"
+              style={{ color: '#B6B6B9' }}
+            >
+              모든 타입 보기 &gt;
+            </button>
+          </div>
         </div>
       </section>
 
-      {/* 6대 지표 */}
-      <section
-        className="rounded-2xl p-4 border"
-        style={{ backgroundColor: '#1A1A1A', borderColor: '#333' }}
-      >
-        <h3 className="text-lg font-bold mb-2 text-white">핵심 두뇌 능력</h3>
-        <p className="text-xs mb-3" style={{ color: '#888' }}>
-          그래프 끝(꼭짓점)을 누르면 해당 항목의 점수가 표시됩니다.
-        </p>
-        <div className="flex justify-center">
-          <RadarChart data={effectiveReport.metricsScore} size={280} />
+      {/* 6대 지표 그래프 */}
+      <section>
+        <h3 className="text-base font-bold text-white mb-2">6대 지표 그래프</h3>
+        <div
+          className="rounded-2xl p-4 border"
+          style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
+        >
+          <p className="text-sm font-semibold text-white mb-3">핵심 두뇌 능력 결과</p>
+          <div className="flex justify-center">
+            <RadarChart data={effectiveReport.metricsScore} size={280} />
+          </div>
+          <p className="text-[11px] mt-3" style={{ color: '#666' }}>
+            그래프 끝(꼭짓점)을 누르면 해당 항목의 점수가 표시됩니다.
+          </p>
         </div>
       </section>
 
       {/* 변화추이 */}
       <section
         className="rounded-2xl p-4 border"
-        style={{ backgroundColor: '#1A1A1A', borderColor: '#333' }}
+        style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
       >
-        <h3 className="text-lg font-bold mb-2 text-white">변화추이</h3>
-        <p className="text-xs mb-3" style={{ color: '#888' }}>
-          최근 10회차 종합 세션 기준 · 표시 기준에서 보고 싶은 항목을 선택하세요.
-        </p>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-1.5 relative">
+            <h3 className="text-lg font-bold text-white">변화 추이</h3>
+            <HelpTooltip
+              text={`최근 ${orgLabel ? `‘${orgLabel}’` : '세션'}을 기준으로 표시된 변화추이 입니다`}
+            />
+          </div>
+        </div>
         <MultiTrendChart data={effectiveTrendPoints} height={220} />
       </section>
 
