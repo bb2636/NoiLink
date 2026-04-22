@@ -105,10 +105,11 @@ export default function Result() {
   }
 
   return (
-    <MobileLayout>
+    <MobileLayout hideBottomNav>
       <div
-        className="min-h-screen flex flex-col"
+        className="flex flex-col"
         style={{
+          minHeight: '100vh',
           background: 'radial-gradient(ellipse at top, #1a3a1a 0%, #0A0A0A 60%)',
         }}
       >
@@ -132,13 +133,13 @@ export default function Result() {
           ))}
         </div>
 
-        <div className="max-w-md mx-auto w-full px-5 pt-16 pb-8 flex-1 flex flex-col">
+        <div className="max-w-md mx-auto w-full px-5 pt-6 pb-4 flex-1 flex flex-col">
           {/* 헤더 메시지 */}
           <motion.h1
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
-            className="text-3xl font-bold text-white text-center leading-tight mb-2"
+            className="text-2xl font-bold text-white text-center leading-tight mb-1"
           >
             수고했어요,
           </motion.h1>
@@ -146,7 +147,7 @@ export default function Result() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.1 }}
-            className="text-3xl font-bold text-center mb-12"
+            className="text-2xl font-bold text-center mb-5"
           >
             <span style={{ color: '#AAED10' }}>{nickname}</span>
             <span className="text-white"> 님</span>
@@ -158,24 +159,24 @@ export default function Result() {
             initial={{ opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.5, delay: 0.2 }}
-            className="flex justify-center mb-10"
+            className="flex justify-center mb-5"
           >
             <div
-              className="w-44 h-44 rounded-full flex flex-col items-center justify-center"
+              className="w-32 h-32 rounded-full flex flex-col items-center justify-center"
               style={{
                 border: '2px solid #AAED10',
                 background: 'radial-gradient(circle, rgba(170,237,16,0.12) 0%, rgba(0,0,0,0) 70%)',
                 boxShadow: '0 0 30px rgba(170,237,16,0.25)',
               }}
             >
-              <span className="text-white text-5xl font-bold">{todayScore}</span>
+              <span className="text-white text-4xl font-bold leading-none">{todayScore}</span>
               {diff > 0 && (
-                <span className="text-sm mt-1" style={{ color: '#AAED10' }}>
+                <span className="text-xs mt-1" style={{ color: '#AAED10' }}>
                   +{diff}점 향상
                 </span>
               )}
               {diff <= 0 && (
-                <span className="text-sm mt-1 text-gray-400">오늘의 점수</span>
+                <span className="text-xs mt-1 text-gray-400">오늘의 점수</span>
               )}
             </div>
           </motion.div>
@@ -185,7 +186,7 @@ export default function Result() {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.3 }}
-            className="rounded-2xl p-4 mb-4"
+            className="rounded-2xl p-3 mb-3"
             style={{ backgroundColor: '#1A1A1A' }}
           >
             <div className="flex items-center justify-around">
@@ -208,10 +209,10 @@ export default function Result() {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.4 }}
-            className="rounded-2xl p-4 mb-8"
+            className="rounded-2xl p-3 mb-4"
             style={{ backgroundColor: '#1A1A1A' }}
           >
-            <p className="text-sm text-gray-300 leading-relaxed">
+            <p className="text-xs text-gray-300 leading-relaxed">
               💡 직전 대비{' '}
               <span className="font-bold" style={{ color: '#AAED10' }}>
                 {pctChange > 0 ? '+' : ''}
@@ -229,7 +230,7 @@ export default function Result() {
             transition={{ duration: 0.5, delay: 0.5 }}
             whileTap={{ scale: 0.97 }}
             onClick={() => navigate('/')}
-            className="w-full py-4 rounded-full font-bold mt-auto"
+            className="w-full py-3.5 rounded-full font-bold mt-auto"
             style={{ backgroundColor: '#AAED10', color: '#000' }}
           >
             완료
