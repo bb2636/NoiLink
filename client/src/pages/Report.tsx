@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
@@ -112,13 +112,29 @@ function HelpTooltip({ text }: { text: string }) {
   );
 }
 
+// 사용자/리포트 단위 모듈 캐시 — 탭 재진입 시 즉시 이전 데이터 노출
+const reportCache = new Map<string, { report: Report | null; trendPoints: TrendPoint[] }>();
+const reportInFlight = new Map<string, boolean>();
+
 export default function Report() {
   const { reportId } = useParams<{ reportId?: string }>();
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
-  const [report, setReport] = useState<Report | null>(null);
-  const [trendPoints, setTrendPoints] = useState<TrendPoint[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = user ? `${user.id}:${reportId ?? 'latest'}` : '';
+  const cached = cacheKey ? reportCache.get(cacheKey) : undefined;
+  const [report, setReport] = useState<Report | null>(cached?.report ?? null);
+  const [trendPoints, setTrendPoints] = useState<TrendPoint[]>(cached?.trendPoints ?? []);
+  const [loading, setLoading] = useState<boolean>(!!cacheKey && !cached);
+
+  // 캐시 키 변경 시 새 키의 캐시로 즉시 상태 재수화
+  const lastKeyRef = useRef<string>(cacheKey);
+  if (lastKeyRef.current !== cacheKey) {
+    lastKeyRef.current = cacheKey;
+    const c = cacheKey ? reportCache.get(cacheKey) : undefined;
+    setReport(c?.report ?? null);
+    setTrendPoints(c?.trendPoints ?? []);
+    setLoading(!!cacheKey && !c);
+  }
 
   useEffect(() => {
     loadReport();
@@ -126,23 +142,31 @@ export default function Report() {
 
   const loadReport = async () => {
     if (!user) return;
+    const key = `${user.id}:${reportId ?? 'latest'}`;
+    if (reportInFlight.get(key)) return;
+    reportInFlight.set(key, true);
 
+    const hasCache = !!reportCache.get(key);
     try {
-      setLoading(true);
+      if (!hasCache) setLoading(true);
 
+      let nextReport: Report | null = null;
       if (reportId) {
         const reportRes = await api.get<Report>(`/reports/${reportId}`);
         if (reportRes.success && reportRes.data) {
-          setReport(reportRes.data);
+          nextReport = reportRes.data;
+          setReport(nextReport);
         }
       } else {
         const reportsRes = await api.getUserReports(user.id, 1);
         if (reportsRes.success && reportsRes.data && reportsRes.data.length > 0) {
-          setReport(reportsRes.data[0]);
+          nextReport = reportsRes.data[0];
+          setReport(nextReport);
         } else {
           const generateRes = await api.generateReport(user.id);
           if (generateRes.success && generateRes.data) {
-            setReport(generateRes.data);
+            nextReport = generateRes.data;
+            setReport(nextReport);
           }
         }
       }
@@ -175,12 +199,24 @@ export default function Report() {
           };
         });
         setTrendPoints(points);
+        const prev = reportCache.get(key);
+        reportCache.set(key, {
+          report: nextReport ?? prev?.report ?? null,
+          trendPoints: points.length > 0 ? points : (prev?.trendPoints ?? []),
+        });
+      } else {
+        const prev = reportCache.get(key);
+        reportCache.set(key, {
+          report: nextReport ?? prev?.report ?? null,
+          trendPoints: prev?.trendPoints ?? [],
+        });
       }
 
       await refreshUser();
     } catch (error) {
       console.error('Failed to load report:', error);
     } finally {
+      reportInFlight.set(key, false);
       setLoading(false);
     }
   };
