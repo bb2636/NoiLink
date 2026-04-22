@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
 import MobileLayout from '../components/Layout/MobileLayout';
+import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 
 interface Inquiry {
   id: string;
@@ -26,6 +27,10 @@ export default function Support() {
   const [newInquiry, setNewInquiry] = useState({ title: '', content: '' });
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  // 인앱 토스트 (브라우저 alert 대체 — 다른 화면과 통일)
+  const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
+  const showToast = (message: string, tone: 'success' | 'error' = 'success') =>
+    setToast({ message, tone });
 
   useEffect(() => {
     // ProtectedRoute가 이미 인증을 체크하므로, 여기서는 로딩만 확인
@@ -53,25 +58,25 @@ export default function Support() {
 
   const handleCreateInquiry = async () => {
     if (!newInquiry.title.trim() || !newInquiry.content.trim()) {
-      alert('제목과 내용을 입력해주세요.');
+      showToast('제목과 내용을 입력해주세요.', 'error');
       return;
     }
 
     try {
       setSubmitting(true);
       const response = await api.createInquiry(newInquiry.title, newInquiry.content);
-      
+
       if (response.success) {
         setNewInquiry({ title: '', content: '' });
         setActiveTab('history');
         await loadInquiries();
-        alert('문의가 등록되었습니다.');
+        showToast('문의가 등록되었습니다.', 'success');
       } else {
-        alert(response.error || '문의 등록에 실패했습니다.');
+        showToast(response.error || '문의 등록에 실패했습니다.', 'error');
       }
     } catch (error) {
       console.error('Failed to create inquiry:', error);
-      alert('문의 등록에 실패했습니다.');
+      showToast('문의 등록에 실패했습니다.', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -254,6 +259,15 @@ export default function Support() {
           )}
         </div>
       </div>
+
+      {/* 인앱 토스트 배너 */}
+      <SuccessBanner
+        isOpen={!!toast}
+        message={toast?.message ?? ''}
+        backgroundColor={toast?.tone === 'error' ? '#3a1212' : '#1A1A1A'}
+        textColor={toast?.tone === 'error' ? '#fca5a5' : '#AAED10'}
+        onClose={() => setToast(null)}
+      />
     </MobileLayout>
   );
 }
