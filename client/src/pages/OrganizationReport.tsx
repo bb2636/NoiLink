@@ -23,9 +23,9 @@ import type { BrainimalType, OrganizationInsightReport, User } from '@noilink/sh
 // =============================================================================
 const MOCK_REPORT: OrganizationInsightReport = {
   id: 'mock-org-report',
-  organizationId: 'mock-org',
-  organizationName: '송산치매안심센터',
-  managedMemberCount: 32,
+  organizationId: 'demo-org-001',
+  organizationName: '데모 기업',
+  managedMemberCount: 12,
   avgBrainAge: 79.9,
   cohortActualAvgAge: 79.7,
   brainAgeVsChronologicalDelta: 0.2,

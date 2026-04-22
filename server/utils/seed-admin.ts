@@ -119,6 +119,103 @@ function createUserShape(opts: {
  * 마이그레이션: 이미 시드된 admin/test 계정의 password 레코드에 mustChange 플래그가 없으면 추가.
  * (이전 배포에서 생성된 약한 비밀번호 계정 보호)
  */
+/**
+ * 데모 기업의 소속 인원을 일괄 시드.
+ * - 기관 리포트(소속 인원 현황), 랭킹(기업 필터), 분포 차트 등이 실제 데이터로 채워짐.
+ * - 비밀번호 미발급(로그인 불가, 단순 표시용 계정).
+ * - 멱등: 이미 동일 username + organizationId 가 있으면 건너뜀.
+ */
+const DEMO_ORG_MEMBERS: Array<{
+  username: string;
+  name: string;
+  age: number;
+  brainAge: number;
+  brainimalType: User['brainimalType'];
+  streak: number;
+  daysAgoLastTraining: number;
+}> = [
+  { username: 'kim01',  name: '김순자', age: 78, brainAge: 76, brainimalType: 'FOX_BALANCED',     streak: 5, daysAgoLastTraining: 0 },
+  { username: 'lee02',  name: '이영희', age: 82, brainAge: 84, brainimalType: 'BEAR_ENDURANCE',   streak: 3, daysAgoLastTraining: 1 },
+  { username: 'park03', name: '박정수', age: 75, brainAge: 71, brainimalType: 'OWL_FOCUS',        streak: 8, daysAgoLastTraining: 0 },
+  { username: 'choi04', name: '최말순', age: 80, brainAge: 81, brainimalType: 'KOALA_CALM',       streak: 2, daysAgoLastTraining: 2 },
+  { username: 'jung05', name: '정복례', age: 77, brainAge: 75, brainimalType: 'FOX_BALANCED',     streak: 6, daysAgoLastTraining: 1 },
+  { username: 'kang06', name: '강만수', age: 84, brainAge: 87, brainimalType: 'CHEETAH_JUDGMENT', streak: 1, daysAgoLastTraining: 4 },
+  { username: 'shin07', name: '신옥자', age: 79, brainAge: 78, brainimalType: 'DOLPHIN_BRILLIANT',streak: 4, daysAgoLastTraining: 0 },
+  { username: 'song08', name: '송상철', age: 76, brainAge: 73, brainimalType: 'TIGER_STRATEGIC',  streak: 7, daysAgoLastTraining: 1 },
+  { username: 'oh09',   name: '오금자', age: 81, brainAge: 82, brainimalType: 'CAT_DELICATE',     streak: 2, daysAgoLastTraining: 3 },
+  { username: 'yoon10', name: '윤덕수', age: 78, brainAge: 76, brainimalType: 'EAGLE_INSIGHT',    streak: 5, daysAgoLastTraining: 0 },
+  { username: 'lim11',  name: '임순녀', age: 83, brainAge: 86, brainimalType: 'LION_BOLD',        streak: 1, daysAgoLastTraining: 5 },
+  { username: 'han12',  name: '한봉수', age: 75, brainAge: 72, brainimalType: 'DOG_SOCIAL',       streak: 9, daysAgoLastTraining: 0 },
+];
+
+async function seedDemoOrgMembers(): Promise<void> {
+  let memberIds: string[] = [];
+  let adminUserId: string | undefined;
+  await withKeyLock(KV_LOCK.USERS, async () => {
+    const users: User[] = (await db.get('users')) || [];
+    let added = 0;
+    for (const m of DEMO_ORG_MEMBERS) {
+      const exists = users.find(
+        (u: any) => u.username === m.username && u.organizationId === ORG_ID,
+      );
+      if (exists) {
+        memberIds.push((exists as any).id);
+        continue;
+      }
+      const now = Date.now();
+      const lastTraining = new Date(now - m.daysAgoLastTraining * 24 * 60 * 60 * 1000).toISOString();
+      const newUser: User = {
+        id: `org_member_${m.username}_${now}_${Math.random().toString(36).substr(2, 4)}`,
+        username: m.username,
+        email: `${m.username}@demo-org.local`,
+        name: m.name,
+        userType: 'ORGANIZATION',
+        organizationId: ORG_ID,
+        organizationName: ORG_NAME,
+        approvalStatus: 'APPROVED',
+        age: m.age,
+        brainAge: m.brainAge,
+        brainimalType: m.brainimalType,
+        brainimalConfidence: 0.85,
+        streak: m.streak,
+        lastTrainingDate: lastTraining,
+        createdAt: new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString(),
+        lastLoginAt: lastTraining,
+        updatedAt: undefined,
+      };
+      users.push(newUser);
+      memberIds.push(newUser.id);
+      added += 1;
+    }
+    const admin = users.find((u: any) => u.email === ORG_EMAIL);
+    if (admin) adminUserId = (admin as any).id;
+    if (added > 0) {
+      await db.set('users', users);
+      console.log(`✅ Demo org members seeded: ${added}명 (organizationId=${ORG_ID})`);
+    } else {
+      console.log(`✅ Demo org members already present (organizationId=${ORG_ID})`);
+    }
+  });
+
+  // 조직 레코드 동기화 (organization-members API가 organizations.memberUserIds 를 참조)
+  const allMemberIds = adminUserId ? [adminUserId, ...memberIds] : memberIds;
+  const organizations: any[] = (await db.get('organizations')) || [];
+  const idx = organizations.findIndex((o: any) => o.id === ORG_ID);
+  const orgRecord = {
+    id: ORG_ID,
+    name: ORG_NAME,
+    memberUserIds: allMemberIds,
+    createdAt: idx >= 0 ? organizations[idx].createdAt : new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  if (idx >= 0) {
+    organizations[idx] = { ...organizations[idx], ...orgRecord };
+  } else {
+    organizations.push(orgRecord);
+  }
+  await db.set('organizations', organizations);
+}
+
 async function backfillMustChangeFlag(): Promise<void> {
   // users는 read-only이므로 락 불필요. passwords는 RMW이므로 PASSWORDS 락으로 보호.
   await withKeyLock(KV_LOCK.PASSWORDS, async () => {
@@ -178,6 +275,7 @@ export async function seedAdminAccount(): Promise<void> {
         organizationId: ORG_ID,
         organizationName: ORG_NAME,
       });
+      await seedDemoOrgMembers();
     } else {
       console.log('ℹ️  [seed-admin] PRODUCTION: 테스트/기업 계정 시드는 건너뜁니다.');
     }
