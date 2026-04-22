@@ -1,7 +1,8 @@
 /**
  * 6대 지표 레이더 차트
- *  - 꼭짓점 클릭 시 해당 위치에 툴팁(점수 표시) 띄움
- *  - onPointClick(label, value)로 부모에도 통지(선택)
+ *  - 각 축에 빨간 화살표(외곽 → 데이터 꼭짓점) 항상 표시
+ *  - 우상단 라운드 핀에 선택된 지표/평균 점수 노출 (기본: 기억력)
+ *  - 꼭짓점 클릭 시 선택 지표 변경 + onPointClick 통지(선택)
  */
 import { useRef, useEffect, useState } from 'react';
 
@@ -15,6 +16,8 @@ interface RadarChartProps {
     endurance?: number;
   };
   size?: number;
+  /** 핀 라벨 (기본: 조직 평균) */
+  pinLabel?: string;
   onPointClick?: (metricLabel: string, value: number) => void;
   onPointHover?: (metric: string, value: number) => void;
 }
@@ -29,17 +32,24 @@ const METRICS = [
 ];
 
 const ACCENT = '#AAED10';
+const ARROW_RED = '#FF3B30';
 
 export default function RadarChart({
   data,
   size = 200,
+  pinLabel = '조직 평균',
   onPointClick,
   onPointHover,
 }: RadarChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [tip, setTip] = useState<{ x: number; y: number; label: string; value: number } | null>(null);
+  // 기본 선택: 기억력 (시안 동일)
+  const [selectedKey, setSelectedKey] = useState<string>('memory');
   const center = size / 2;
   const radius = size * 0.4;
+  const selectedMetric = METRICS.find((m) => m.key === selectedKey) ?? METRICS[0];
+  const selectedValue = Math.round(
+    (data[selectedMetric.key as keyof typeof data] as number) || 0,
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -86,20 +96,62 @@ export default function RadarChart({
     ctx.fill();
     ctx.stroke();
 
-    // 꼭짓점
+    // 빨간 화살표 — 외곽 ring(반지름 R) → 데이터 꼭짓점 방향으로 안쪽으로 향함
+    METRICS.forEach((metric) => {
+      const value = data[metric.key as keyof typeof data] || 0;
+      const n = Math.max(0, Math.min(1, value / 100));
+      const angle = ((metric.angle - 90) * Math.PI) / 180;
+      // 외곽 → 꼭짓점 방향(안쪽). 화살표 길이는 데이터까지의 1/3 정도.
+      const outerX = center + radius * Math.cos(angle);
+      const outerY = center + radius * Math.sin(angle);
+      const vertexX = center + radius * n * Math.cos(angle);
+      const vertexY = center + radius * n * Math.sin(angle);
+      // 시작/끝: 외곽에서 약간 안쪽으로 들어와서 꼭짓점 직전까지
+      const sx = outerX - 2 * Math.cos(angle);
+      const sy = outerY - 2 * Math.sin(angle);
+      const ex = vertexX + 7 * Math.cos(angle);
+      const ey = vertexY + 7 * Math.sin(angle);
+      ctx.strokeStyle = ARROW_RED;
+      ctx.fillStyle = ARROW_RED;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+      // 화살촉
+      const headLen = 5;
+      const headAngle = Math.PI / 7;
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(
+        ex + headLen * Math.cos(angle + Math.PI - headAngle),
+        ey + headLen * Math.sin(angle + Math.PI - headAngle),
+      );
+      ctx.lineTo(
+        ex + headLen * Math.cos(angle + Math.PI + headAngle),
+        ey + headLen * Math.sin(angle + Math.PI + headAngle),
+      );
+      ctx.closePath();
+      ctx.fill();
+    });
+
+    // 꼭짓점 — 선택된 항목은 흰색 강조, 그 외는 라임 도트
     METRICS.forEach((metric) => {
       const value = data[metric.key as keyof typeof data] || 0;
       const n = value / 100;
       const angle = ((metric.angle - 90) * Math.PI) / 180;
       const x = center + radius * n * Math.cos(angle);
       const y = center + radius * n * Math.sin(angle);
-      ctx.fillStyle = ACCENT;
+      const isSel = metric.key === selectedKey;
+      ctx.fillStyle = isSel ? '#FFFFFF' : ACCENT;
       ctx.beginPath();
-      ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.arc(x, y, isSel ? 5 : 3.5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      if (isSel) {
+        ctx.strokeStyle = ACCENT;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     });
 
     // 라벨
@@ -114,7 +166,7 @@ export default function RadarChart({
       const y = center + labelRadius * Math.sin(angle);
       ctx.fillText(metric.label, x, y);
     });
-  }, [data, size, center, radius]);
+  }, [data, size, center, radius, selectedKey]);
 
   const handleClick: React.MouseEventHandler<HTMLCanvasElement> = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -122,7 +174,7 @@ export default function RadarChart({
     const scaleY = size / rect.height;
     const px = (e.clientX - rect.left) * scaleX;
     const py = (e.clientY - rect.top) * scaleY;
-    let best: { label: string; value: number; d: number; vx: number; vy: number } | null = null;
+    let best: { key: string; label: string; value: number; d: number } | null = null;
     METRICS.forEach((metric) => {
       const value = data[metric.key as keyof typeof data] || 0;
       const n = value / 100;
@@ -130,32 +182,18 @@ export default function RadarChart({
       const vx = center + radius * n * Math.cos(rad);
       const vy = center + radius * n * Math.sin(rad);
       const d = Math.hypot(px - vx, py - vy);
-      if (!best || d < best.d) best = { label: metric.label, value, d, vx, vy };
+      if (!best || d < best.d) best = { key: metric.key, label: metric.label, value, d };
     });
-    const found = best as { label: string; value: number; d: number; vx: number; vy: number } | null;
-    if (found && found.d <= 26) {
-      // 캔버스 좌표 → 표시 좌표
-      setTip({
-        x: found.vx / scaleX,
-        y: found.vy / scaleY,
-        label: found.label,
-        value: Math.round(found.value),
-      });
+    const found = best as { key: string; label: string; value: number; d: number } | null;
+    if (found && found.d <= 30) {
+      setSelectedKey(found.key);
       onPointClick?.(found.label, found.value);
       onPointHover?.(found.label, found.value);
-    } else {
-      setTip(null);
     }
   };
 
   return (
-    <div
-      className="relative inline-block"
-      style={{ width: size, height: size }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) setTip(null);
-      }}
-    >
+    <div className="relative inline-block" style={{ width: size, height: size }}>
       <canvas
         ref={canvasRef}
         width={size}
@@ -164,31 +202,22 @@ export default function RadarChart({
         style={{ width: size, height: size }}
         onClick={handleClick}
       />
-      {tip && (
-        <div
-          className="absolute pointer-events-none rounded-lg px-2.5 py-1 text-xs font-bold shadow-lg whitespace-nowrap"
-          style={{
-            left: tip.x,
-            top: tip.y,
-            transform: 'translate(-50%, -130%)',
-            backgroundColor: ACCENT,
-            color: '#000',
-          }}
-        >
-          {tip.label} {tip.value}점
-          <span
-            className="absolute left-1/2 -translate-x-1/2"
-            style={{
-              bottom: -4,
-              width: 0,
-              height: 0,
-              borderLeft: '5px solid transparent',
-              borderRight: '5px solid transparent',
-              borderTop: `5px solid ${ACCENT}`,
-            }}
-          />
+      {/* 우상단 고정 핀 — 선택 지표 + 평균 점수 */}
+      <div
+        className="absolute rounded-xl px-3 py-1.5 text-[11px] leading-tight shadow-md"
+        style={{
+          top: 0,
+          right: 0,
+          backgroundColor: '#2A2A2A',
+          color: '#E5E5E5',
+          border: '1px solid #3A3A3A',
+        }}
+      >
+        <div className="font-semibold text-white">{selectedMetric.label}</div>
+        <div className="mt-0.5">
+          {pinLabel} : <span className="font-bold" style={{ color: ACCENT }}>{selectedValue}점</span>
         </div>
-      )}
+      </div>
     </div>
   );
 }

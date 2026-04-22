@@ -207,10 +207,26 @@ async function seedDemoOrgPersonalMember(): Promise<void> {
       brainimalConfidence: 0.88,
       brainAge: 58,
       previousBrainAge: 61,
-      streak: 7,
+      streak: 5,
       bestStreak: 14,
-      lastTrainingDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      lastTrainingDate: new Date().toISOString(),
     },
+  });
+
+  // seedUser 는 신규 생성 시에만 extra 가 적용되고, 이후 시연 정합을 위해
+  // 본 계정의 streak / lastTrainingDate 는 매번 강제 동기화한다.
+  await withKeyLock(KV_LOCK.USERS, async () => {
+    const users = (await db.get('users')) || [];
+    const idx = users.findIndex((u: any) => u.email === ORG_MEMBER_EMAIL);
+    if (idx === -1) return;
+    users[idx] = {
+      ...users[idx],
+      streak: 5,
+      bestStreak: Math.max(users[idx].bestStreak ?? 0, 14),
+      lastTrainingDate: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await db.set('users', users);
   });
 
   // 조직 memberUserIds 에 추가 — 운영 코드(approval 엔드포인트)와 동일하게 USERS 락으로 보호하여

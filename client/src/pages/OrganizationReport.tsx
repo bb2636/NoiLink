@@ -342,7 +342,10 @@ function MetricsTabSection({
       </div>
 
       <div>
-        <h4 className="text-sm font-semibold text-white mb-2">변화 추이</h4>
+        <div className="flex items-center gap-1.5 mb-2">
+          <h4 className="text-sm font-semibold text-white">변화 추이</h4>
+          <HelpDot text="최근 세션을 기준으로 표시된 팀 평균 변화추이 입니다" />
+        </div>
         {trendPoints.length > 0 ? (
           <MultiTrendChart data={trendPoints} height={200} />
         ) : (
@@ -610,6 +613,45 @@ function MembersTabSection({ members }: { members: User[] }) {
 // =============================================================================
 // 공용 컴포넌트
 // =============================================================================
+// 헤더 옆 작은 도움말 점(?) — 폰트 크기와 비슷한 크기로 유지
+function HelpDot({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        aria-label="도움말"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onClick={() => setOpen((v) => !v)}
+        className="w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[9px] font-bold leading-none"
+        style={{ backgroundColor: '#FFFFFF', color: '#000000' }}
+      >
+        ?
+      </button>
+      {open && (
+        <span
+          className="absolute left-5 top-1/2 -translate-y-1/2 z-20 inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[10px]"
+          style={{ backgroundColor: '#2A2A2A', color: '#E5E5E5', border: '1px solid #3A3A3A' }}
+        >
+          {text}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(false);
+            }}
+            className="text-[10px]"
+            style={{ color: '#888' }}
+          >
+            ✕
+          </button>
+        </span>
+      )}
+    </span>
+  );
+}
+
 function CollapsibleCard({
   title,
   open,

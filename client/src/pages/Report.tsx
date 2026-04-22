@@ -84,14 +84,14 @@ function HelpTooltip({ text }: { text: string }) {
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
         onClick={() => setOpen((v) => !v)}
-        className="w-4 h-4 rounded-full inline-flex items-center justify-center text-[10px] font-bold leading-none"
+        className="w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[9px] font-bold leading-none"
         style={{ backgroundColor: '#FFFFFF', color: '#000000' }}
       >
         ?
       </button>
       {open && (
         <span
-          className="absolute left-6 top-1/2 -translate-y-1/2 z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs"
+          className="absolute left-5 top-1/2 -translate-y-1/2 z-20 inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[10px]"
           style={{ backgroundColor: '#2A2A2A', color: '#E5E5E5', border: '1px solid #3A3A3A' }}
         >
           {text}
