@@ -136,7 +136,7 @@ function StandardHome({ variant, home, user }: StandardProps) {
   const brainIndex = condition?.score ?? MOCK_HOME.brainIndex;
   const bpmAvg = MOCK_HOME.bpmAvg;
   const weeklyChange = MOCK_HOME.weeklyChange;
-  const streakDays = user?.streak ?? MOCK_HOME.streakDays;
+  const streakDays = user?.streak && user.streak > 0 ? user.streak : MOCK_HOME.streakDays;
   const nickname = user?.nickname || user?.name || '회원';
   const brainimalInfo = getBrainimalIcon(MOCK_HOME.brainimalType);
 
