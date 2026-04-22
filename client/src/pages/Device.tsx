@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
 import { STORAGE_KEYS } from '../utils/constants';
+import { ensureDemoDevicesSeeded } from '../utils/seedDemoDevices';
 import { bleConnect, bleDisconnect } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import type { NativeToWebMessage } from '@noilink/shared';
@@ -39,6 +40,8 @@ function getConnectedDeviceId(): string | null {
 
 function loadRegisteredDevices(): RegisteredDevice[] {
   try {
+    // 데모 기기 자동 시드 — 사용자가 한 번도 추가/삭제한 적 없을 때만 1회 동작
+    ensureDemoDevicesSeeded();
     const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_DEVICES);
     return raw ? JSON.parse(raw) : [];
   } catch {

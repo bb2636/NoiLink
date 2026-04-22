@@ -20,6 +20,7 @@ import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
 import { STORAGE_KEYS } from '../utils/constants';
 import { TRAINING_BY_ID } from '../utils/trainingConfig';
+import { ensureDemoDevicesSeeded } from '../utils/seedDemoDevices';
 import MemberSelectModal from '../components/MemberSelectModal/MemberSelectModal';
 import type { User, Level, TrainingMode } from '@noilink/shared';
 import { SESSION_MAX_MS } from '@noilink/shared';
@@ -64,6 +65,8 @@ export default function TrainingSetup() {
 
   useEffect(() => {
     try {
+      // 데모용 기기 자동 시드 (등록된 기기가 0대일 때만 1회)
+      ensureDemoDevicesSeeded();
       const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_DEVICES);
       const list: RegisteredDevice[] = raw ? JSON.parse(raw) : [];
       setRegistered(Array.isArray(list) ? list.slice(0, TOTAL_POD_SLOTS) : []);
