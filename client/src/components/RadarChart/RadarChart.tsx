@@ -59,12 +59,21 @@ export default function RadarChart({
 
     ctx.clearRect(0, 0, size, size);
 
-    // 격자
+    // 격자 — 흰색 중첩 육각형 (벌집 모양)
     for (let i = 1; i <= 5; i++) {
-      ctx.strokeStyle = '#2A2A2A';
+      const r = (radius * i) / 5;
+      // 외곽 링은 좀 더 또렷하게, 안쪽은 살짝 흐리게
+      ctx.strokeStyle = i === 5 ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.18)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(center, center, (radius * i) / 5, 0, Math.PI * 2);
+      METRICS.forEach((metric, idx) => {
+        const angle = ((metric.angle - 90) * Math.PI) / 180;
+        const x = center + r * Math.cos(angle);
+        const y = center + r * Math.sin(angle);
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.closePath();
       ctx.stroke();
     }
 
@@ -135,23 +144,20 @@ export default function RadarChart({
       ctx.fill();
     });
 
-    // 꼭짓점 — 선택된 항목은 흰색 강조, 그 외는 라임 도트
+    // 꼭짓점 — 모두 동일한 라임 + 흰색 외곽 (원형 디자인 유지)
     METRICS.forEach((metric) => {
       const value = data[metric.key as keyof typeof data] || 0;
       const n = value / 100;
       const angle = ((metric.angle - 90) * Math.PI) / 180;
       const x = center + radius * n * Math.cos(angle);
       const y = center + radius * n * Math.sin(angle);
-      const isSel = metric.key === selectedKey;
-      ctx.fillStyle = isSel ? '#FFFFFF' : ACCENT;
+      ctx.fillStyle = ACCENT;
       ctx.beginPath();
-      ctx.arc(x, y, isSel ? 5 : 3.5, 0, Math.PI * 2);
+      ctx.arc(x, y, 5, 0, Math.PI * 2);
       ctx.fill();
-      if (isSel) {
-        ctx.strokeStyle = ACCENT;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
     });
 
     // 라벨
@@ -202,9 +208,9 @@ export default function RadarChart({
         style={{ width: size, height: size }}
         onClick={handleClick}
       />
-      {/* 우상단 고정 핀 — 선택 지표 + 평균 점수 */}
+      {/* 우상단 고정 핀 — 선택 지표 + 평균 점수 (컴팩트) */}
       <div
-        className="absolute rounded-xl px-3 py-1.5 text-[11px] leading-tight shadow-md"
+        className="absolute rounded-md px-2 py-1 text-[9px] leading-tight shadow"
         style={{
           top: 0,
           right: 0,
@@ -214,7 +220,7 @@ export default function RadarChart({
         }}
       >
         <div className="font-semibold text-white">{selectedMetric.label}</div>
-        <div className="mt-0.5">
+        <div>
           {pinLabel} : <span className="font-bold" style={{ color: ACCENT }}>{selectedValue}점</span>
         </div>
       </div>
