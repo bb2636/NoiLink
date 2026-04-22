@@ -283,6 +283,7 @@ export default function Profile() {
         message="로그아웃 하시겠습니까?"
         confirmText="확인"
         cancelText="아니요"
+        reverseActions
         onConfirm={handleLogout}
         onCancel={() => setShowLogoutModal(false)}
       />
@@ -291,9 +292,10 @@ export default function Profile() {
       <ConfirmModal
         isOpen={showWithdrawModal}
         title="회원탈퇴"
-        message="정말 회원탈퇴를 하시겠습니까? 탈퇴 후 모든 데이터가 삭제됩니다."
+        message="정말 회원탈퇴 하시겠습니까?"
         confirmText="확인"
         cancelText="아니요"
+        reverseActions
         onConfirm={handleWithdraw}
         onCancel={() => setShowWithdrawModal(false)}
       />
