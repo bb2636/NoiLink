@@ -26,7 +26,7 @@ const ORG_EMAIL = 'org@org.com';
 const ORG_USERNAME = 'org';
 const ORG_PASSWORD = 'org1234';
 const ORG_ID = 'demo-org-001';
-const ORG_NAME = '데모 기업';
+const ORG_NAME = 'nobuilder';
 
 // 기업 관리자(데모 기업) 본인 목업 — 개인 화면(홈/마이페이지) 빈칸 방지
 const ORG_ADMIN_MOCK = {
@@ -345,6 +345,52 @@ async function seedDemoOrgMembers(): Promise<void> {
   });
 }
 
+/**
+ * 기업명 변경 시 organizations + 소속 users 의 organizationName 을 일괄 동기화.
+ * - 멱등: 모두 이미 ORG_NAME 이면 no-op.
+ * - cross-collection RMW 이므로 USERS 락으로 직렬화.
+ */
+async function renameDemoOrganization(): Promise<void> {
+  await withKeyLock(KV_LOCK.USERS, async () => {
+    let changed = false;
+
+    const organizations = (await db.get('organizations')) || [];
+    const orgIdx = organizations.findIndex((o: any) => o.id === ORG_ID);
+    if (orgIdx >= 0 && organizations[orgIdx].name !== ORG_NAME) {
+      organizations[orgIdx] = {
+        ...organizations[orgIdx],
+        name: ORG_NAME,
+        updatedAt: new Date().toISOString(),
+      };
+      await db.set('organizations', organizations);
+      changed = true;
+    }
+
+    const users = (await db.get('users')) || [];
+    let userChanged = false;
+    for (let i = 0; i < users.length; i += 1) {
+      const u = users[i];
+      if (u.organizationId === ORG_ID && u.organizationName !== ORG_NAME) {
+        users[i] = { ...u, organizationName: ORG_NAME, updatedAt: new Date().toISOString() };
+        userChanged = true;
+      }
+      // 가입 신청 중인 pendingOrganizationName 도 함께 동기화
+      if (u.pendingOrganizationId === ORG_ID && u.pendingOrganizationName !== ORG_NAME) {
+        users[i] = { ...users[i], pendingOrganizationName: ORG_NAME };
+        userChanged = true;
+      }
+    }
+    if (userChanged) {
+      await db.set('users', users);
+      changed = true;
+    }
+
+    if (changed) {
+      console.log(`✅ Organization renamed → "${ORG_NAME}" (id=${ORG_ID})`);
+    }
+  });
+}
+
 async function backfillMustChangeFlag(): Promise<void> {
   // users는 read-only이므로 락 불필요. passwords는 RMW이므로 PASSWORDS 락으로 보호.
   await withKeyLock(KV_LOCK.PASSWORDS, async () => {
@@ -406,6 +452,8 @@ export async function seedAdminAccount(): Promise<void> {
       });
       await seedDemoOrgMembers();
       await seedDemoOrgPersonalMember();
+      // 기업명이 변경된 경우 기존 organization/users 레코드의 organizationName 도 동기화
+      await renameDemoOrganization();
       // 기존에 시드된 기업 관리자에게 본인용 목업 데이터(브레이니멀/뇌나이/연속) 보강
       await patchUserMockData(ORG_EMAIL, ORG_ADMIN_MOCK);
     } else {
