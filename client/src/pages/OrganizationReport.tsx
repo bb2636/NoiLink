@@ -317,7 +317,7 @@ export default function OrganizationReport() {
       )}
 
       {(tab === 'all' || tab === 'brainimal') && (
-        <BrainimalTabSection report={report} />
+        <BrainimalTabSection report={report} totalMembers={members.length} />
       )}
 
       {(tab === 'all' || tab === 'comprehensive') && (
@@ -383,7 +383,13 @@ function MetricsTabSection({
 // =============================================================================
 // 브레이니멀 유형 분포 탭
 // =============================================================================
-function BrainimalTabSection({ report }: { report: OrganizationInsightReport }) {
+function BrainimalTabSection({
+  report,
+  totalMembers,
+}: {
+  report: OrganizationInsightReport;
+  totalMembers: number;
+}) {
   const repInfo = getBrainimalIcon(report.representativeBrainimal);
 
   // 도넛 데이터
@@ -403,6 +409,15 @@ function BrainimalTabSection({ report }: { report: OrganizationInsightReport }) 
     });
   }, [report.brainimalDistribution, total]);
 
+  const [hoveredType, setHoveredType] = useState<string | null>(null);
+  const hoveredSlice = hoveredType
+    ? slices.find((s) => s.type === hoveredType) ?? null
+    : null;
+  const hoveredCount = hoveredSlice
+    ? Math.max(1, Math.round((hoveredSlice.percent / 100) * (totalMembers || 0)))
+    : 0;
+  const hoveredInfo = hoveredSlice ? getBrainimalIcon(hoveredSlice.type) : null;
+
   return (
     <section
       className="rounded-2xl p-4 border space-y-4"
@@ -410,12 +425,43 @@ function BrainimalTabSection({ report }: { report: OrganizationInsightReport }) 
     >
       <h3 className="text-base font-bold text-white">브레이니멀 유형 분포</h3>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-start gap-4 relative">
         {/* 도넛 */}
-        <DonutChart slices={slices} size={140} />
+        <div className="relative">
+          <DonutChart
+            slices={slices}
+            size={140}
+            onHover={setHoveredType}
+          />
+          {/* 호버 툴팁 */}
+          {hoveredSlice && hoveredInfo && (
+            <div
+              className="absolute z-10 pointer-events-none rounded-lg px-3 py-2 shadow-lg whitespace-nowrap"
+              style={{
+                left: '100%',
+                top: -6,
+                transform: 'translateX(8px)',
+                backgroundColor: '#2A2A2A',
+                border: '1px solid #3A3A3A',
+              }}
+            >
+              <div className="flex items-center gap-1.5 text-[12px]">
+                {hoveredInfo.icon ? (
+                  <img src={hoveredInfo.icon} alt="" className="w-4 h-4 object-contain" />
+                ) : (
+                  <span>{hoveredInfo.emoji}</span>
+                )}
+                <span className="font-semibold text-white">{hoveredInfo.name}</span>
+              </div>
+              <div className="text-[11px] text-gray-300 mt-0.5 text-center">
+                {hoveredCount}명
+              </div>
+            </div>
+          )}
+        </div>
 
-        {/* 범례 */}
-        <div className="flex-1 grid grid-cols-2 gap-x-2 gap-y-1.5">
+        {/* 범례 — % 만 표시 (이름 제거) */}
+        <div className="flex-1 grid grid-cols-2 gap-x-3 gap-y-1.5">
           <p className="text-[11px] text-gray-400 col-span-2 mb-0.5">분포 현황</p>
           {slices.map((s) => (
             <div key={s.type} className="flex items-center gap-1.5 text-[11px]">
@@ -424,7 +470,6 @@ function BrainimalTabSection({ report }: { report: OrganizationInsightReport }) 
                 style={{ backgroundColor: s.color }}
               />
               <span className="text-white font-semibold">{s.percent}%</span>
-              <span className="text-gray-400 truncate">{getBrainimalIcon(s.type).name}</span>
             </div>
           ))}
         </div>
@@ -941,16 +986,23 @@ function CollapsibleCard({
 function DonutChart({
   slices,
   size,
+  onHover,
 }: {
   slices: { type: string; color: string; percent: number; startAngle: number; endAngle: number }[];
   size: number;
+  onHover?: (type: string | null) => void;
 }) {
   const STROKE = 22;
   const R = (size - STROKE) / 2;
   const C = size / 2;
 
   return (
-    <svg width={size} height={size} className="-rotate-90">
+    <svg
+      width={size}
+      height={size}
+      className="-rotate-90"
+      onMouseLeave={() => onHover?.(null)}
+    >
       <circle cx={C} cy={C} r={R} stroke="#2A2A2A" strokeWidth={STROKE} fill="none" />
       {slices.map((s) => {
         if (s.endAngle <= s.startAngle) return null;
@@ -961,6 +1013,9 @@ function DonutChart({
             stroke={s.color}
             strokeWidth={STROKE}
             fill="none"
+            style={{ cursor: onHover ? 'pointer' : undefined }}
+            onMouseEnter={() => onHover?.(s.type)}
+            onMouseMove={() => onHover?.(s.type)}
           />
         );
       })}
