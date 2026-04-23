@@ -28,18 +28,14 @@ type HomeVariant = 'first-time' | 'streak-active' | 'streak-broken' | 'enterpris
 
 /**
  * 사용자 상태 → 홈 분기 결정
- *  1. 첫 회원가입 (트레이닝 첫 시도 전): lastTrainingDate 없음
- *  2. 트레이닝 연속 (어제·오늘 훈련): streak > 0 && days since last <= 1
- *  3. 트레이닝 연속 끊김: 이외
- *  4. 기업 회원: userType === ORGANIZATION → 연속 여부와 무관하게 전용 화면
+ *  - 기업 회원(userType === ORGANIZATION) → 기업 전용 홈
+ *  - 그 외 모든 개인 회원(기업 소속 여부와 무관) → 일반 개인 홈(트레이닝 요약 / 나의 트렌드)
  */
 function resolveVariant(
   user: { userType?: string; organizationId?: string; streak?: number; lastTrainingDate?: string } | null,
 ): HomeVariant {
   if (!user) return 'first-time';
-  // 기업 소속(개인 회원이 기업에 가입했거나 기업 회원 본인) → 전용 화면
   if (user.userType === 'ORGANIZATION') return 'enterprise';
-  if (user.userType === 'PERSONAL' && user.organizationId) return 'enterprise';
   // TODO: 실 데이터 도입 시 first-time/broken 분기 복구
   // 데모: 항상 streak-active 화면(목업)을 노출하여 빈 화면 방지
   return 'streak-active';
