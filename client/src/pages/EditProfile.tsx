@@ -193,7 +193,7 @@ export default function EditProfile() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: '#0A0A0A' }}>
-      <div className="max-w-md mx-auto px-4 pt-3" style={{ paddingBottom: 'calc(6.5rem + env(safe-area-inset-bottom))' }}>
+      <div className="max-w-md mx-auto px-4" style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top))', paddingBottom: 'calc(6.5rem + env(safe-area-inset-bottom))' }}>
         {/* 헤더 */}
         <div className="flex items-center mb-8 relative">
           <button

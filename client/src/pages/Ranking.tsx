@@ -198,15 +198,16 @@ export default function Ranking() {
 
   return (
     <>
-      {/* 상단 고정 헤더 — 외곽 MobileLayout이 safe-area 패딩을 이미 처리하므로 단순 sticky top:0 사용 */}
+      {/* 통일 헤더 — paddingTop으로 노치/상단바 안전영역 자체 보정 */}
       <header
         className="sticky top-0 z-40"
         style={{
           backgroundColor: '#0A0A0A',
           borderBottom: '1px solid #1A1A1A',
+          paddingTop: 'env(safe-area-inset-top)',
         }}
       >
-        <div className="max-w-md mx-auto px-4 py-3 flex items-center gap-2">
+        <div className="max-w-md mx-auto px-4 h-12 flex items-center gap-2">
           <svg
             className="w-5 h-5 text-white"
             fill="currentColor"

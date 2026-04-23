@@ -85,9 +85,10 @@ export default function OrganizationJoin() {
         style={{
           backgroundColor: '#0A0A0A',
           borderBottom: '1px solid #1A1A1A',
+          paddingTop: 'env(safe-area-inset-top)',
         }}
       >
-        <div className="max-w-md mx-auto px-4 py-3 flex items-center gap-2">
+        <div className="max-w-md mx-auto px-4 h-12 flex items-center gap-2">
           <button
             type="button"
             onClick={() => navigate(-1)}

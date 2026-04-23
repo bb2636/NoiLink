@@ -103,8 +103,8 @@ export default function TrainingSessionPlay() {
   return (
     <MobileLayout hideBottomNav>
       <div
-        className="max-w-md mx-auto px-4 py-6 flex flex-col min-h-screen"
-        style={{ paddingBottom: '120px', color: '#fff' }}
+        className="max-w-md mx-auto px-4 pb-6 flex flex-col min-h-screen"
+        style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '120px', color: '#fff' }}
       >
         {/* 헤더 */}
         <div className="flex items-center gap-3 mb-10">

@@ -60,7 +60,7 @@ export default function Result() {
   if (hasPayload && state?.yieldsScore === false) {
     return (
       <MobileLayout>
-        <div className="max-w-md mx-auto px-4 py-12 text-center">
+        <div className="max-w-md mx-auto px-4 pb-12 text-center" style={{ paddingTop: 'calc(3rem + env(safe-area-inset-top))' }}>
           <h1 className="text-2xl font-bold text-white mb-3">수고했어요!</h1>
           <p className="text-gray-300 mb-8 text-sm">
             자유 트레이닝은 점수를 산출하지 않습니다.<br />합계 시간·스트릭에만 반영됩니다.
@@ -88,7 +88,7 @@ export default function Result() {
   if (!hasPayload) {
     return (
       <MobileLayout>
-        <div className="max-w-md mx-auto px-4 py-12">
+        <div className="max-w-md mx-auto px-4 pb-12" style={{ paddingTop: 'calc(3rem + env(safe-area-inset-top))' }}>
           <h1 className="text-2xl font-bold text-white mb-3">결과 없음</h1>
           <p className="text-sm text-gray-400 mb-6">
             트레이닝을 마친 뒤 이 화면으로 이동해야 점수·세션 정보가 표시됩니다.
@@ -112,6 +112,7 @@ export default function Result() {
         style={{
           minHeight: '100vh',
           background: 'radial-gradient(ellipse at top, #1a3a1a 0%, #0A0A0A 60%)',
+          paddingTop: 'env(safe-area-inset-top)',
         }}
       >
         {/* 반짝이 입자 */}

@@ -94,7 +94,7 @@ export default function Support() {
 
   return (
     <MobileLayout>
-      <div style={{ backgroundColor: '#0A0A0A', paddingBottom: '100px' }}>
+      <div style={{ backgroundColor: '#0A0A0A', paddingTop: 'env(safe-area-inset-top)', paddingBottom: '100px' }}>
         <div className="max-w-md mx-auto px-4 py-6">
           {/* 헤더 */}
           <div className="mb-6 flex items-center gap-4">

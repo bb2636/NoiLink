@@ -55,7 +55,7 @@ export default function Record() {
 
   return (
     <MobileLayout>
-      <div className="max-w-md mx-auto px-4 py-6" style={{ paddingBottom: '120px' }}>
+      <div className="max-w-md mx-auto px-4 pb-6" style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '120px' }}>
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold" style={{ color: '#fff' }}>
             기록

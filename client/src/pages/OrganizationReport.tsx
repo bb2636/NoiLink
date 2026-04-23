@@ -159,7 +159,7 @@ export default function OrganizationReport() {
   const deltaGood = delta <= 0;
 
   return (
-    <div className="px-4 py-6 space-y-4" style={{ paddingBottom: '120px', color: '#fff' }}>
+    <div className="px-4 pb-6 space-y-4" style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '120px', color: '#fff' }}>
       {/* 제목 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">

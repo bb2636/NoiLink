@@ -76,9 +76,10 @@ function FirstTimeHome() {
   const navigate = useNavigate();
   return (
     <div style={{ backgroundColor: '#0A0A0A', minHeight: '100vh' }} className="flex flex-col">
-      {/* 상단 로고 */}
+      {/* 상단 로고 — 노치/상단바 안전영역 보정 */}
       <div
-        className="px-4 pt-6"
+        className="px-4"
+        style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))' }}
       >
         <div className="max-w-md mx-auto">
           <Logo size="md" white />
@@ -163,18 +164,22 @@ function StandardHome({ variant, home, user }: StandardProps) {
 
   return (
     <div style={{ backgroundColor: '#0A0A0A', minHeight: '100vh' }}>
-      {/* 헤더 — sticky로 변경하여 부모 safe-area 패딩과 자연스럽게 정합 */}
-      <div
+      {/* 통일 헤더 — paddingTop으로 노치/상단바 안전영역 자체 보정 */}
+      <header
         className="sticky top-0 left-0 right-0 z-40"
-        style={{ backgroundColor: '#0A0A0A' }}
+        style={{
+          backgroundColor: '#0A0A0A',
+          borderBottom: '1px solid #1A1A1A',
+          paddingTop: 'env(safe-area-inset-top)',
+        }}
       >
-        <div className="max-w-md mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-md mx-auto px-4 h-12 flex items-center justify-between">
           <Logo size="md" white />
           <button onClick={() => navigate('/device')} className="text-white text-sm">
             기기 관리 &gt;
           </button>
         </div>
-      </div>
+      </header>
 
       <div
         className="max-w-md mx-auto px-4"
@@ -516,18 +521,22 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
 
   return (
     <div style={{ backgroundColor: '#0A0A0A', minHeight: '100vh' }}>
-      {/* 헤더 — sticky로 변경하여 부모 safe-area 패딩과 자연스럽게 정합 */}
-      <div
+      {/* 통일 헤더 — paddingTop으로 노치/상단바 안전영역 자체 보정 */}
+      <header
         className="sticky top-0 left-0 right-0 z-40"
-        style={{ backgroundColor: '#0A0A0A' }}
+        style={{
+          backgroundColor: '#0A0A0A',
+          borderBottom: '1px solid #1A1A1A',
+          paddingTop: 'env(safe-area-inset-top)',
+        }}
       >
-        <div className="max-w-md mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-md mx-auto px-4 h-12 flex items-center justify-between">
           <Logo size="md" white />
           <button onClick={() => navigate('/device')} className="text-white text-sm">
             기기 관리 &gt;
           </button>
         </div>
-      </div>
+      </header>
 
       <div
         className="max-w-md mx-auto px-4"

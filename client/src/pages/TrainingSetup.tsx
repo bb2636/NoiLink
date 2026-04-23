@@ -131,7 +131,7 @@ export default function TrainingSetup() {
 
   return (
     <MobileLayout>
-      <div className="max-w-md mx-auto px-4 py-6" style={{ paddingBottom: '120px' }}>
+      <div className="max-w-md mx-auto px-4 pb-6" style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '120px' }}>
         {/* 헤더 */}
         <div className="mb-4 flex items-center gap-3">
           <button onClick={() => navigate('/training')} className="text-white">

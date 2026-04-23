@@ -120,30 +120,32 @@ export default function Profile() {
         duration={3000}
       />
 
-      {/* 고정 상단바 */}
+      {/* 통일 헤더 — paddingTop으로 노치/상단바 안전영역 자체 보정 */}
       <div
-        className="sticky top-0 z-30 max-w-md mx-auto px-4 flex items-center"
+        className="sticky top-0 z-30"
         style={{
           backgroundColor: '#0A0A0A',
-          height: 44,
-          borderBottom: '1px solid #161616',
+          borderBottom: '1px solid #1A1A1A',
+          paddingTop: 'env(safe-area-inset-top)',
         }}
       >
-        <svg
-          className="w-4 h-4 mr-1.5"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          style={{ color: '#FFFFFF' }}
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-          />
-        </svg>
-        <h1 className="text-[15px] font-semibold text-white">마이페이지</h1>
+        <div className="max-w-md mx-auto px-4 h-12 flex items-center">
+          <svg
+            className="w-4 h-4 mr-1.5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            style={{ color: '#FFFFFF' }}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+            />
+          </svg>
+          <h1 className="text-[15px] font-semibold text-white">마이페이지</h1>
+        </div>
       </div>
 
       <div
@@ -151,8 +153,8 @@ export default function Profile() {
         style={{
           paddingBottom: 'calc(96px + env(safe-area-inset-bottom))',
           overflowY: 'auto',
-          height: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 44px - 64px - 12px)',
-          maxHeight: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 44px - 64px - 12px)',
+          height: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 48px - 64px - 12px)',
+          maxHeight: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 48px - 64px - 12px)',
           WebkitOverflowScrolling: 'touch',
         }}
       >

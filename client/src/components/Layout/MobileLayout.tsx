@@ -88,7 +88,8 @@ export default function MobileLayout({ children, hideBottomNav = false }: Mobile
       className="min-h-screen overflow-y-auto scrollbar-hide" 
       style={{ 
         backgroundColor: '#0A0A0A',
-        paddingTop: 'env(safe-area-inset-top)',
+        // safe-area-inset-top은 각 페이지의 PageHeader 또는 root container가 직접 처리.
+        // (이 컨테이너에서 처리하면 sticky 헤더가 노치를 덮을 수 없어 콘텐츠가 가려짐)
         paddingBottom: hideBottomNav
           ? 'env(safe-area-inset-bottom)'
           : 'calc(64px + env(safe-area-inset-bottom) + 12px)', // 하단바 높이 + safe area + 인디케이터 여유

@@ -33,7 +33,7 @@ export default function Training() {
 
   return (
     <MobileLayout>
-      <div className="max-w-md mx-auto px-4 py-6" style={{ paddingBottom: '120px' }}>
+      <div className="max-w-md mx-auto px-4 pb-6" style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '120px' }}>
         {/* 페이지 헤더 */}
         <div className="flex items-center gap-2 mb-6">
           <svg

@@ -233,7 +233,7 @@ export default function Report() {
     return (
       <div
         className="max-w-md mx-auto px-4"
-        style={{ backgroundColor: '#0A0A0A', minHeight: '70vh' }}
+        style={{ backgroundColor: '#0A0A0A', minHeight: '70vh', paddingTop: 'env(safe-area-inset-top)' }}
       >
         {/* 헤더 */}
         <div className="flex items-center pt-4 pb-2">
@@ -327,8 +327,8 @@ export default function Report() {
 
   return (
     <div
-      className="px-4 py-6 space-y-5"
-      style={{ paddingBottom: '120px', color: '#fff' }}
+      className="px-4 pb-6 space-y-5"
+      style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '120px', color: '#fff' }}
     >
       {/* 내 프로필 */}
       <section>
