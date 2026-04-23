@@ -266,10 +266,10 @@ export default function OrganizationReport() {
         </div>
       </CollapsibleCard>
 
-      {/* 탭 스트립 */}
+      {/* 탭 스트립 — 밑줄형 */}
       <div
-        className="grid grid-cols-5 gap-1 rounded-xl p-1"
-        style={{ backgroundColor: '#0F0F0F' }}
+        className="grid grid-cols-5"
+        style={{ borderBottom: '1px solid #2A2A2A' }}
       >
         {TABS.map((t) => {
           const active = t.key === tab;
@@ -278,13 +278,18 @@ export default function OrganizationReport() {
               key={t.key}
               type="button"
               onClick={() => setTab(t.key)}
-              className="rounded-lg py-2 px-1 text-[11px] font-medium leading-tight whitespace-pre-line text-center transition-colors"
+              className="relative py-3 px-1 text-[11px] font-medium leading-tight whitespace-pre-line text-center transition-colors"
               style={{
-                backgroundColor: active ? '#1F2A0E' : 'transparent',
                 color: active ? '#AAED10' : '#888',
               }}
             >
               {t.label}
+              {active && (
+                <span
+                  className="absolute left-2 right-2 -bottom-px h-0.5 rounded-full"
+                  style={{ backgroundColor: '#AAED10' }}
+                />
+              )}
             </button>
           );
         })}
