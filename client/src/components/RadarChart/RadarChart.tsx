@@ -42,14 +42,20 @@ export default function RadarChart({
   onPointHover,
 }: RadarChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // 기본 선택: 기억력 (시안 동일)
+  // 기본 선택: 기억력 (우상단 핀용)
   const [selectedKey, setSelectedKey] = useState<string>('memory');
+  // 빨간 화살표 툴팁 — 클릭한 꼭짓점에만 일시 표시
+  const [arrowKey, setArrowKey] = useState<string | null>(null);
   const center = size / 2;
   const radius = size * 0.4;
   const selectedMetric = METRICS.find((m) => m.key === selectedKey) ?? METRICS[0];
   const selectedValue = Math.round(
     (data[selectedMetric.key as keyof typeof data] as number) || 0,
   );
+  const arrowMetric = arrowKey ? METRICS.find((m) => m.key === arrowKey) : null;
+  const arrowValue = arrowMetric
+    ? Math.round((data[arrowMetric.key as keyof typeof data] as number) || 0)
+    : 0;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -130,7 +136,60 @@ export default function RadarChart({
       const y = center + labelRadius * Math.sin(angle);
       ctx.fillText(metric.label, x, y);
     });
-  }, [data, size, center, radius, selectedKey]);
+
+    // 빨간 화살표 — 클릭한 꼭짓점만 강조 (외곽 → 데이터 꼭짓점)
+    if (arrowMetric) {
+      const value = (data[arrowMetric.key as keyof typeof data] as number) || 0;
+      const n = value / 100;
+      const ang = ((arrowMetric.angle - 90) * Math.PI) / 180;
+      const tipX = center + radius * n * Math.cos(ang);
+      const tipY = center + radius * n * Math.sin(ang);
+      // 외곽 약간 바깥에서 시작
+      const startR = radius + 14;
+      const startX = center + startR * Math.cos(ang);
+      const startY = center + startR * Math.sin(ang);
+
+      const RED = '#EF4444';
+      ctx.strokeStyle = RED;
+      ctx.fillStyle = RED;
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+
+      // 화살표 줄기 (촉 직전까지)
+      const HEAD = 9;
+      const dx = tipX - startX;
+      const dy = tipY - startY;
+      const len = Math.hypot(dx, dy);
+      const ux = dx / len;
+      const uy = dy / len;
+      const shaftEndX = tipX - ux * HEAD * 0.6;
+      const shaftEndY = tipY - uy * HEAD * 0.6;
+
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(shaftEndX, shaftEndY);
+      ctx.stroke();
+
+      // 화살촉 (꼭짓점을 향하는 삼각형)
+      const leftX = tipX - HEAD * (ux * Math.cos(0.5) - uy * Math.sin(0.5));
+      const leftY = tipY - HEAD * (uy * Math.cos(0.5) + ux * Math.sin(0.5));
+      const rightX = tipX - HEAD * (ux * Math.cos(-0.5) - uy * Math.sin(-0.5));
+      const rightY = tipY - HEAD * (uy * Math.cos(-0.5) + ux * Math.sin(-0.5));
+
+      ctx.beginPath();
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(leftX, leftY);
+      ctx.lineTo(rightX, rightY);
+      ctx.closePath();
+      ctx.fill();
+
+      // 꼭짓점 위 빨간 도트(강조)
+      ctx.fillStyle = RED;
+      ctx.beginPath();
+      ctx.arc(tipX, tipY, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }, [data, size, center, radius, selectedKey, arrowMetric]);
 
   const handleClick: React.MouseEventHandler<HTMLCanvasElement> = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -151,10 +210,25 @@ export default function RadarChart({
     const found = best as { key: string; label: string; value: number; d: number } | null;
     if (found && found.d <= 30) {
       setSelectedKey(found.key);
+      // 같은 꼭짓점 재클릭 시 토글로 닫기
+      setArrowKey((prev) => (prev === found.key ? null : found.key));
       onPointClick?.(found.label, found.value);
       onPointHover?.(found.label, found.value);
+    } else {
+      setArrowKey(null);
     }
   };
+
+  // 빨간 화살표 툴팁 위치 (꼭짓점 바깥쪽 — 외곽 + 28px)
+  const arrowTooltipPos = (() => {
+    if (!arrowMetric) return null;
+    const ang = ((arrowMetric.angle - 90) * Math.PI) / 180;
+    const r = radius + 30;
+    return {
+      x: center + r * Math.cos(ang),
+      y: center + r * Math.sin(ang),
+    };
+  })();
 
   return (
     <div className="relative inline-block" style={{ width: size, height: size }}>
@@ -183,6 +257,26 @@ export default function RadarChart({
           {pinLabel} : <span className="font-bold" style={{ color: ACCENT }}>{selectedValue}점</span>
         </div>
       </div>
+
+      {/* 빨간 화살표 툴팁 — 클릭한 꼭짓점에만 노출 */}
+      {arrowMetric && arrowTooltipPos && (
+        <div
+          className="absolute pointer-events-none rounded-md px-2 py-1 text-[10px] leading-tight whitespace-nowrap shadow-lg"
+          style={{
+            left: arrowTooltipPos.x,
+            top: arrowTooltipPos.y,
+            transform: 'translate(-50%, -50%)',
+            backgroundColor: '#1A1A1A',
+            color: '#FFFFFF',
+            border: '1px solid #EF4444',
+          }}
+        >
+          <span className="font-semibold" style={{ color: '#EF4444' }}>
+            {arrowMetric.label}
+          </span>
+          <span className="ml-1 font-bold">{arrowValue}점</span>
+        </div>
+      )}
     </div>
   );
 }
