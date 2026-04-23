@@ -90,15 +90,15 @@ function HelpTooltip({
           type="button"
           aria-label="도움말"
           onClick={() => setOpen((v) => !v)}
-          className="w-[18px] h-[18px] rounded-full inline-flex items-center justify-center text-[11px] font-bold leading-none"
-          style={{ backgroundColor: '#3A3A3A', color: '#FFFFFF' }}
+          className="w-[14px] h-[14px] rounded-full inline-flex items-center justify-center text-[9px] font-bold leading-none"
+          style={{ backgroundColor: '#FFFFFF', color: '#000000' }}
         >
           ?
         </button>
       </div>
       {open && (
         <div
-          className="absolute left-0 top-full mt-2 z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-[12px]"
+          className="absolute left-0 top-full mt-2 z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-[12px]"
           style={{ backgroundColor: '#2A2A2A', color: '#E5E5E5' }}
         >
           <span>{text}</span>
