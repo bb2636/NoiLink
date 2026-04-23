@@ -8,25 +8,34 @@ import {
   type TrainingCatalogId,
 } from '@noilink/shared';
 
+/**
+ * 트레이닝 카드 배경 — 외부 호스팅 차단/네트워크 이슈에 영향받지 않도록
+ * 인라인 SVG data URI 그라데이션으로 대체.
+ */
+function gradientSvg(c1: string, c2: string, label: string): string {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 250'>
+    <defs>
+      <linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>
+        <stop offset='0%' stop-color='${c1}'/>
+        <stop offset='100%' stop-color='${c2}'/>
+      </linearGradient>
+    </defs>
+    <rect width='400' height='250' fill='url(#g)'/>
+    <text x='50%' y='50%' fill='rgba(255,255,255,0.65)' font-family='sans-serif' font-size='44' font-weight='700' text-anchor='middle' dominant-baseline='middle'>${label}</text>
+  </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 const IMAGES: Record<TrainingCatalogId, string> = {
-  COMPOSITE:
-    'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=400&h=250&fit=crop',
-  MEMORY:
-    'https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=400&h=250&fit=crop',
-  COMPREHENSION:
-    'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=400&h=250&fit=crop',
-  FOCUS:
-    'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=400&h=250&fit=crop',
-  JUDGMENT:
-    'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=400&h=250&fit=crop',
-  AGILITY:
-    'https://images.unsplash.com/photo-1461896836934-7b7a7b673ffb?w=400&h=250&fit=crop',
-  ENDURANCE:
-    'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=400&h=250&fit=crop',
-  RANDOM:
-    'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=400&h=250&fit=crop',
-  FREE:
-    'https://images.unsplash.com/photo-1529333166437-7750a6dd5a70?w=400&h=250&fit=crop',
+  COMPOSITE: gradientSvg('#AAED10', '#264213', '종합'),
+  MEMORY: gradientSvg('#3B82F6', '#1E3A8A', '기억력'),
+  COMPREHENSION: gradientSvg('#2DD4BF', '#0F766E', '이해력'),
+  FOCUS: gradientSvg('#F59E0B', '#92400E', '집중력'),
+  JUDGMENT: gradientSvg('#EF4444', '#7F1D1D', '판단력'),
+  AGILITY: gradientSvg('#84CC16', '#365314', '순발력'),
+  ENDURANCE: gradientSvg('#A78BFA', '#4C1D95', '지구력'),
+  RANDOM: gradientSvg('#F472B6', '#831843', '랜덤'),
+  FREE: gradientSvg('#9CA3AF', '#1F2937', '자유'),
 };
 
 export type TrainingListRow = TrainingCatalogEntry & { image: string };
