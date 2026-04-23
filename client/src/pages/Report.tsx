@@ -91,7 +91,7 @@ function HelpTooltip({
           aria-label="도움말"
           onClick={() => setOpen((v) => !v)}
           className="rounded-full inline-flex items-center justify-center font-bold leading-none shrink-0"
-          style={{ backgroundColor: '#FFFFFF', color: '#000000', width: 7, height: 7, fontSize: 5 }}
+          style={{ backgroundColor: '#FFFFFF', color: '#000000', width: 14, height: 14, minWidth: 14, minHeight: 14, padding: 0, fontSize: 9, lineHeight: '14px' }}
         >
           ?
         </button>
