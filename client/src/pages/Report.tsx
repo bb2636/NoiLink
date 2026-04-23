@@ -54,10 +54,10 @@ const MOCK_PERSONAL_REPORT: Report = {
   createdAt: new Date().toISOString(),
 };
 
-// TODO: 실제 API 데이터로 교체 — 데모용 변화 추이 (최근 8회)
-const MOCK_TREND_POINTS: TrendPoint[] = Array.from({ length: 8 }).map((_, i) => {
+// TODO: 실제 API 데이터로 교체 — 데모용 변화 추이 (최근 10회)
+const MOCK_TREND_POINTS: TrendPoint[] = Array.from({ length: 10 }).map((_, i) => {
   const d = new Date();
-  d.setDate(d.getDate() - (7 - i) * 3);
+  d.setDate(d.getDate() - (9 - i) * 3);
   const base = 65 + i * 2;
   return {
     date: d.toISOString(),

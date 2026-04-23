@@ -22,7 +22,7 @@ const METRIC_ORDER = [
 const ALL_KEYS = METRIC_ORDER.map((m) => m.key);
 type MetricKey = (typeof ALL_KEYS)[number];
 
-const Y_MIN = 0;
+const Y_MIN = 20;
 const Y_MAX = 100;
 const Y_STEP = 20;
 const MAX_POINTS = 10;
@@ -150,15 +150,13 @@ export default function MultiTrendChart({ data, height = 220, headerLeft }: Mult
       ctx.stroke();
     });
 
-    // x축: 시도 횟수 ("1회" ~ "n회")
+    // x축: 시도 횟수 ("1" ~ "n")
     ctx.fillStyle = '#888';
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
-    const labelEvery = recent.length > 6 ? 2 : 1;
     recent.forEach((_, index) => {
-      if (index % labelEvery !== 0 && index !== recent.length - 1) return;
       const x = padding + (chartW * index) / Math.max(recent.length - 1, 1);
-      ctx.fillText(`${index + 1}회`, x, height - 10);
+      ctx.fillText(String(index + 1), x, height - 10);
     });
   }, [recent, height, selected]);
 
