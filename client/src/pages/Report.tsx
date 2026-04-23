@@ -1,27 +1,33 @@
-import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useAuth } from '../hooks/useAuth';
-import api from '../utils/api';
-import RadarChart from '../components/RadarChart';
-import MultiTrendChart, { type TrendPoint } from '../components/MultiTrendChart/MultiTrendChart';
-import { calculateBrainAge, calculateBrainAgeChange } from '../utils/brainAge';
-import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
-import { DEMO_PROFILE, DEMO_METRICS } from '../utils/demoProfile';
-import { getMockMember, buildMockMemberReport, buildMockMemberTrend } from '../utils/mockMembers';
-import ComprehensiveEvaluation from '../components/ComprehensiveEvaluation';
-import RoleModelCard from '../components/RoleModelCard';
-import type { Report, MetricsScore, Session } from '@noilink/shared';
+import { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useAuth } from "../hooks/useAuth";
+import api from "../utils/api";
+import RadarChart from "../components/RadarChart";
+import MultiTrendChart, {
+  type TrendPoint,
+} from "../components/MultiTrendChart/MultiTrendChart";
+import { calculateBrainAge, calculateBrainAgeChange } from "../utils/brainAge";
+import { getBrainimalIcon, DEFAULT_BRAINIMAL } from "../utils/brainimalIcons";
+import { DEMO_PROFILE, DEMO_METRICS } from "../utils/demoProfile";
+import {
+  getMockMember,
+  buildMockMemberReport,
+  buildMockMemberTrend,
+} from "../utils/mockMembers";
+import ComprehensiveEvaluation from "../components/ComprehensiveEvaluation";
+import RoleModelCard from "../components/RoleModelCard";
+import type { Report, MetricsScore, Session } from "@noilink/shared";
 
 // TODO: 실제 API 데이터로 교체 — 홈/랭킹과 동일한 단일 데모 프로필 사용
 const MOCK_PERSONAL_REPORT: Report = {
-  id: 'mock-report-001',
-  userId: 'mock-user',
+  id: "mock-report-001",
+  userId: "mock-user",
   reportVersion: 12,
   brainimalType: DEMO_PROFILE.brainimalType,
   confidence: DEMO_PROFILE.confidence,
   metricsScore: {
-    sessionId: 'mock-session',
-    userId: 'mock-user',
+    sessionId: "mock-session",
+    userId: "mock-user",
     memory: DEMO_METRICS.memory,
     comprehension: DEMO_METRICS.comprehension,
     focus: DEMO_METRICS.focus,
@@ -32,46 +38,88 @@ const MOCK_PERSONAL_REPORT: Report = {
     createdAt: new Date().toISOString(),
   },
   factText:
-    '최근 12회의 종합 트레이닝 결과, 평균 종합 점수는 80.3점으로 동연령대 상위 22% 수준입니다. 특히 순발력과 집중력에서 안정적으로 높은 수치를 유지하고 있습니다.',
+    "최근 12회의 종합 트레이닝 결과, 평균 종합 점수는 80.3점으로 동연령대 상위 22% 수준입니다. 특히 순발력과 집중력에서 안정적으로 높은 수치를 유지하고 있습니다.",
   lifeText:
-    '반응 속도와 주의 유지력이 우수한 편입니다. 다만 장시간 과제에서는 후반부 정확도가 약 8% 감소하는 경향이 관찰되어, 지구력 보강 트레이닝이 도움이 될 수 있습니다.',
+    "단기 변동에 일희일비하지 않는 우직함이 버핏을 만들었습니다. 당신의 꾸준함도 곧 거대한 성과가 될 거예요.",
   hintText:
-    '아침 5분의 가벼운 인지 워밍업과 충분한 수분 섭취가 오후 집중력 유지에 효과적입니다. 주 3회 이상 종합 트레이닝을 권장드립니다.',
+    "아침 5분의 가벼운 인지 워밍업과 충분한 수분 섭취가 오후 집중력 유지에 효과적입니다. 주 3회 이상 종합 트레이닝을 권장드립니다.",
   strengthText:
-    '순발력(91점)과 집중력(88점)이 또래 평균보다 12점 이상 높습니다. 빠른 의사결정이 필요한 상황에서 강점을 발휘합니다.',
+    "순발력(91점)과 집중력(88점)이 또래 평균보다 12점 이상 높습니다. 빠른 의사결정이 필요한 상황에서 강점을 발휘합니다.",
   weaknessText:
-    '지구력(69점)이 상대적으로 낮습니다. 짧고 강한 트레이닝보다 중간 강도의 긴 세션을 통해 점진적으로 끌어올리는 것을 추천드립니다.',
+    "지구력(69점)이 상대적으로 낮습니다. 짧고 강한 트레이닝보다 중간 강도의 긴 세션을 통해 점진적으로 끌어올리는 것을 추천드립니다.",
   metricEvidenceCards: [
-    { key: 'memory', label: '기억력', body: '최근 5세션 평균 78점 — 숫자 회상 과제에서 안정적 수행을 보였습니다.' },
-    { key: 'focus', label: '집중력', body: '주의 유지 과제 정답률 92% — 상위 15% 수준입니다.' },
-    { key: 'agility', label: '순발력', body: '평균 반응속도 412ms로 동연령대 대비 18% 빠릅니다.' },
-    { key: 'endurance', label: '지구력', body: '5분 이상 세션에서 후반부 정확도 하락 폭이 평균보다 큽니다.' },
+    {
+      key: "memory",
+      label: "기억력",
+      body: "최근 5세션 평균 78점 — 숫자 회상 과제에서 안정적 수행을 보였습니다.",
+    },
+    {
+      key: "focus",
+      label: "집중력",
+      body: "주의 유지 과제 정답률 92% — 상위 15% 수준입니다.",
+    },
+    {
+      key: "agility",
+      label: "순발력",
+      body: "평균 반응속도 412ms로 동연령대 대비 18% 빠릅니다.",
+    },
+    {
+      key: "endurance",
+      label: "지구력",
+      body: "5분 이상 세션에서 후반부 정확도 하락 폭이 평균보다 큽니다.",
+    },
   ],
   recommendedRoleModel: {
-    name: '균형잡힌 여우형',
-    oneLiner: '순발력과 집중력이 균형 잡힌 분석가형',
-    description:
-      '빠른 판단과 안정된 집중력을 동시에 요구하는 분야에서 두각을 나타냅니다. 데이터 분석가, 응급의료, 트레이더 등이 대표적인 롤모델입니다.',
+    name: "워런 버핏",
+    oneLiner: "원칙이 있으면 흔들리지 않는다!",
+    description: "흔들리지 않는 원칙, 복리의 마법으로 돌아옵니다.",
   },
   recommendedBPM: DEMO_PROFILE.bpmAvg,
   createdAt: new Date().toISOString(),
 };
 
-// TODO: 실제 API 데이터로 교체 — 데모용 변화 추이 (최근 10회)
-const MOCK_TREND_POINTS: TrendPoint[] = Array.from({ length: 10 }).map((_, i) => {
-  const d = new Date();
-  d.setDate(d.getDate() - (9 - i) * 3);
-  const base = 65 + i * 2;
-  return {
-    date: d.toISOString(),
-    memory: base + Math.round(Math.sin(i) * 4) + 6,
-    comprehension: base + Math.round(Math.cos(i) * 3) + 8,
-    focus: base + 10 + Math.round(Math.sin(i + 1) * 3),
-    judgment: base + 2 + Math.round(Math.cos(i + 1) * 4),
-    agility: base + 14 + Math.round(Math.sin(i + 2) * 2),
-    endurance: base - 4 + Math.round(Math.cos(i + 2) * 3),
-  };
-});
+// TODO: 실제 API 데이터로 교체 — 데모용 변화 추이 (최근 10회 트레이닝)
+// 마지막 5회 = 최근 연속 5일 트레이닝(DEMO_PROFILE.streakDays = 5),
+// DEMO_METRICS 값으로 자연스럽게 수렴하도록 설계.
+// 처음 5회 = 그 이전 약 3주간 비연속 트레이닝(낮은 점수 → 점진적 상승).
+const MOCK_TREND_POINTS: TrendPoint[] = (() => {
+  const today = new Date();
+  // 최신이 마지막 인덱스(9), 마지막 5개는 연속 5일(오늘~4일 전)
+  const offsetDays = [22, 18, 14, 10, 7, 4, 3, 2, 1, 0];
+  const series: Array<{
+    memory: number;
+    comprehension: number;
+    focus: number;
+    judgment: number;
+    agility: number;
+    endurance: number;
+  }> = [
+    // 이전 5회 (비연속, 점진적 상승)
+    { memory: 60, comprehension: 64, focus: 68, judgment: 58, agility: 72, endurance: 55 },
+    { memory: 63, comprehension: 67, focus: 72, judgment: 60, agility: 76, endurance: 57 },
+    { memory: 66, comprehension: 70, focus: 75, judgment: 63, agility: 80, endurance: 60 },
+    { memory: 68, comprehension: 72, focus: 78, judgment: 65, agility: 82, endurance: 61 },
+    { memory: 70, comprehension: 74, focus: 80, judgment: 67, agility: 84, endurance: 63 },
+    // 최근 연속 5회 — DEMO_METRICS로 수렴
+    { memory: 72, comprehension: 76, focus: 82, judgment: 69, agility: 86, endurance: 64 },
+    { memory: 74, comprehension: 78, focus: 84, judgment: 70, agility: 88, endurance: 66 },
+    { memory: 75, comprehension: 79, focus: 85, judgment: 71, agility: 89, endurance: 67 },
+    { memory: 77, comprehension: 81, focus: 87, judgment: 73, agility: 90, endurance: 68 },
+    {
+      memory: DEMO_METRICS.memory,
+      comprehension: DEMO_METRICS.comprehension,
+      focus: DEMO_METRICS.focus,
+      judgment: DEMO_METRICS.judgment,
+      agility: DEMO_METRICS.agility,
+      endurance: DEMO_METRICS.endurance,
+    },
+  ];
+  return series.map((m, i) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() - offsetDays[i]);
+    return { date: d.toISOString(), ...m };
+  });
+})();
 
 /**
  * 개인 리포트 — 명세: 프로필 요약, 6대 지표(꼭짓점 툴팁), 변화추이, 종합 평가, 롤모델, 면책
@@ -94,7 +142,17 @@ function HelpTooltip({
           aria-label="도움말"
           onClick={() => setOpen((v) => !v)}
           className="rounded-full inline-flex items-center justify-center font-bold leading-none shrink-0"
-          style={{ backgroundColor: '#FFFFFF', color: '#000000', width: 14, height: 14, minWidth: 14, minHeight: 14, padding: 0, fontSize: 9, lineHeight: '14px' }}
+          style={{
+            backgroundColor: "#FFFFFF",
+            color: "#000000",
+            width: 14,
+            height: 14,
+            minWidth: 14,
+            minHeight: 14,
+            padding: 0,
+            fontSize: 9,
+            lineHeight: "14px",
+          }}
         >
           ?
         </button>
@@ -102,7 +160,7 @@ function HelpTooltip({
       {open && (
         <div
           className="absolute left-0 top-full mt-2 z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-full px-3 py-1 text-[12px]"
-          style={{ backgroundColor: '#2A2A2A', color: '#E5E5E5' }}
+          style={{ backgroundColor: "#2A2A2A", color: "#E5E5E5" }}
         >
           <span>{text}</span>
           <button
@@ -113,7 +171,7 @@ function HelpTooltip({
             }}
             aria-label="닫기"
             className="text-[12px] leading-none"
-            style={{ color: '#888' }}
+            style={{ color: "#888" }}
           >
             ✕
           </button>
@@ -124,17 +182,22 @@ function HelpTooltip({
 }
 
 // 사용자/리포트 단위 모듈 캐시 — 탭 재진입 시 즉시 이전 데이터 노출
-const reportCache = new Map<string, { report: Report | null; trendPoints: TrendPoint[] }>();
+const reportCache = new Map<
+  string,
+  { report: Report | null; trendPoints: TrendPoint[] }
+>();
 const reportInFlight = new Map<string, boolean>();
 
 export default function Report() {
   const { reportId } = useParams<{ reportId?: string }>();
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
-  const cacheKey = user ? `${user.id}:${reportId ?? 'latest'}` : '';
+  const cacheKey = user ? `${user.id}:${reportId ?? "latest"}` : "";
   const cached = cacheKey ? reportCache.get(cacheKey) : undefined;
   const [report, setReport] = useState<Report | null>(cached?.report ?? null);
-  const [trendPoints, setTrendPoints] = useState<TrendPoint[]>(cached?.trendPoints ?? []);
+  const [trendPoints, setTrendPoints] = useState<TrendPoint[]>(
+    cached?.trendPoints ?? [],
+  );
   const [loading, setLoading] = useState<boolean>(!!cacheKey && !cached);
 
   // 캐시 키 변경 시 새 키의 캐시로 즉시 상태 재수화
@@ -153,7 +216,7 @@ export default function Report() {
 
   const loadReport = async () => {
     if (!user) return;
-    const key = `${user.id}:${reportId ?? 'latest'}`;
+    const key = `${user.id}:${reportId ?? "latest"}`;
     if (reportInFlight.get(key)) return;
     reportInFlight.set(key, true);
 
@@ -181,7 +244,11 @@ export default function Report() {
         }
       } else {
         const reportsRes = await api.getUserReports(user.id, 1);
-        if (reportsRes.success && reportsRes.data && reportsRes.data.length > 0) {
+        if (
+          reportsRes.success &&
+          reportsRes.data &&
+          reportsRes.data.length > 0
+        ) {
           nextReport = reportsRes.data[0];
           setReport(nextReport);
         } else {
@@ -202,11 +269,16 @@ export default function Report() {
       if (sessionsRes.success && sessionsRes.data) {
         const sessions = [...sessionsRes.data].sort(
           (a: Session, b: Session) =>
-            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
         );
-        type SessionMetricsPayload = { raw: unknown; score: MetricsScore | null };
+        type SessionMetricsPayload = {
+          raw: unknown;
+          score: MetricsScore | null;
+        };
         const metricsResults = await Promise.all(
-          sessions.map((s: Session) => api.get<SessionMetricsPayload>(`/metrics/session/${s.id}`))
+          sessions.map((s: Session) =>
+            api.get<SessionMetricsPayload>(`/metrics/session/${s.id}`),
+          ),
         );
         const points: TrendPoint[] = sessions.map((s: Session, i: number) => {
           const mr = metricsResults[i];
@@ -237,7 +309,7 @@ export default function Report() {
 
       await refreshUser();
     } catch (error) {
-      console.error('Failed to load report:', error);
+      console.error("Failed to load report:", error);
     } finally {
       reportInFlight.set(key, false);
       setLoading(false);
@@ -246,7 +318,10 @@ export default function Report() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[50vh]" style={{ color: '#999' }}>
+      <div
+        className="flex items-center justify-center min-h-[50vh]"
+        style={{ color: "#999" }}
+      >
         로딩 중...
       </div>
     );
@@ -256,12 +331,27 @@ export default function Report() {
     return (
       <div
         className="max-w-md mx-auto px-4"
-        style={{ backgroundColor: '#0A0A0A', minHeight: '70vh', paddingTop: 'env(safe-area-inset-top)' }}
+        style={{
+          backgroundColor: "#0A0A0A",
+          minHeight: "70vh",
+          paddingTop: "env(safe-area-inset-top)",
+        }}
       >
         {/* 헤더 */}
         <div className="flex items-center pt-4 pb-2">
-          <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ color: '#FFFFFF' }}>
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2a4 4 0 014-4h6m-6-4h6M5 7h2m-2 4h2m-2 4h2" />
+          <svg
+            className="w-4 h-4 mr-1.5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            style={{ color: "#FFFFFF" }}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 17v-2a4 4 0 014-4h6m-6-4h6M5 7h2m-2 4h2m-2 4h2"
+            />
           </svg>
           <h1 className="text-[15px] font-semibold text-white">리포트</h1>
         </div>
@@ -269,39 +359,58 @@ export default function Report() {
         {/* 빈 상태 카드 */}
         <div
           className="rounded-2xl p-5 mt-4"
-          style={{ backgroundColor: '#1A1A1A', border: '1px solid #262626' }}
+          style={{ backgroundColor: "#1A1A1A", border: "1px solid #262626" }}
         >
           <div className="flex flex-col items-center text-center">
             <div
               className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
-              style={{ backgroundColor: '#262626' }}
+              style={{ backgroundColor: "#262626" }}
             >
-              <svg className="w-7 h-7" fill="none" stroke="#AAED10" strokeWidth={1.8} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-6h13M9 11V5h13M3 6h.01M3 12h.01M3 18h.01" />
+              <svg
+                className="w-7 h-7"
+                fill="none"
+                stroke="#AAED10"
+                strokeWidth={1.8}
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M9 17v-6h13M9 11V5h13M3 6h.01M3 12h.01M3 18h.01"
+                />
               </svg>
             </div>
             <h3 className="text-white font-semibold text-base mb-2">
               아직 리포트가 없어요
             </h3>
-            <p className="text-[13px] leading-relaxed mb-5" style={{ color: '#9CA3AF' }}>
-              종합 트레이닝 유효 세션 <span style={{ color: '#AAED10' }}>3회</span>와<br />
-              각 세션의 지표(메트릭) 계산이 쌓이면<br />
+            <p
+              className="text-[13px] leading-relaxed mb-5"
+              style={{ color: "#9CA3AF" }}
+            >
+              종합 트레이닝 유효 세션{" "}
+              <span style={{ color: "#AAED10" }}>3회</span>와<br />
+              각 세션의 지표(메트릭) 계산이 쌓이면
+              <br />
               리포트가 자동으로 생성됩니다.
             </p>
 
             <button
               type="button"
-              onClick={() => navigate('/training')}
+              onClick={() => navigate("/training")}
               className="w-full py-3 rounded-xl font-semibold text-[15px] mb-2"
-              style={{ backgroundColor: '#AAED10', color: '#0A0A0A' }}
+              style={{ backgroundColor: "#AAED10", color: "#0A0A0A" }}
             >
               트레이닝 하러 가기
             </button>
             <button
               type="button"
-              onClick={() => navigate('/')}
+              onClick={() => navigate("/")}
               className="w-full py-3 rounded-xl font-medium text-[14px]"
-              style={{ backgroundColor: 'transparent', color: '#E5E7EB', border: '1px solid #2f2f2f' }}
+              style={{
+                backgroundColor: "transparent",
+                color: "#E5E7EB",
+                border: "1px solid #2f2f2f",
+              }}
             >
               홈으로
             </button>
@@ -315,7 +424,10 @@ export default function Report() {
   const viewingMember = getMockMember(reportId);
 
   // TODO: 실제 리포트 생성 시 목업 제거 — 데모 환경에서 빈 화면 방지
-  const effectiveReport: Report = report ?? { ...MOCK_PERSONAL_REPORT, userId: user.id };
+  const effectiveReport: Report = report ?? {
+    ...MOCK_PERSONAL_REPORT,
+    userId: user.id,
+  };
   const effectiveTrendPoints: TrendPoint[] =
     trendPoints.length > 0 ? trendPoints : MOCK_TREND_POINTS;
 
@@ -326,7 +438,7 @@ export default function Report() {
     brainAge: viewingMember?.brainAge ?? user.brainAge,
     previousBrainAge: viewingMember ? undefined : user.previousBrainAge,
     organizationName: viewingMember
-      ? user.organizationName ?? '소속 기관'
+      ? (user.organizationName ?? "소속 기관")
       : user.organizationName,
     organizationId: viewingMember ? user.organizationId : user.organizationId,
   };
@@ -336,45 +448,58 @@ export default function Report() {
     : DEFAULT_BRAINIMAL;
 
   const displayBrainAge =
-    displayUser.brainAge ?? calculateBrainAge(effectiveReport.metricsScore, displayUser.age);
+    displayUser.brainAge ??
+    calculateBrainAge(effectiveReport.metricsScore, displayUser.age);
   const brainAgeChange = calculateBrainAgeChange(
     displayBrainAge,
-    displayUser.previousBrainAge
+    displayUser.previousBrainAge,
   );
 
   const evidenceCards =
-    effectiveReport.metricEvidenceCards && effectiveReport.metricEvidenceCards.length > 0
+    effectiveReport.metricEvidenceCards &&
+    effectiveReport.metricEvidenceCards.length > 0
       ? effectiveReport.metricEvidenceCards
       : [
-          { key: 'summary', label: '종합', body: '세션 데이터가 쌓이면 지표별 근거 카드가 생성됩니다.' },
+          {
+            key: "summary",
+            label: "종합",
+            body: "세션 데이터가 쌓이면 지표별 근거 카드가 생성됩니다.",
+          },
         ];
-  const roleModel =
-    effectiveReport.recommendedRoleModel ?? {
-      name: brainimalInfo.name,
-      oneLiner: brainimalInfo.description.slice(0, 48) + (brainimalInfo.description.length > 48 ? '…' : ''),
-      description: brainimalInfo.description,
-    };
+  const roleModel = effectiveReport.recommendedRoleModel ?? {
+    name: brainimalInfo.name,
+    oneLiner:
+      brainimalInfo.description.slice(0, 48) +
+      (brainimalInfo.description.length > 48 ? "…" : ""),
+    description: brainimalInfo.description,
+  };
 
-  const orgLabel = displayUser.organizationName || (displayUser.organizationId ? '소속 기관' : null);
+  const orgLabel =
+    displayUser.organizationName ||
+    (displayUser.organizationId ? "소속 기관" : null);
 
   return (
     <div
       className="px-4 pb-6 space-y-5"
-      style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '120px', color: '#fff' }}
+      style={{
+        paddingTop: "calc(1.5rem + env(safe-area-inset-top))",
+        paddingBottom: "120px",
+        color: "#fff",
+      }}
     >
       {/* 내 프로필 */}
       <section>
         <h3 className="text-base font-bold text-white mb-2">내 프로필</h3>
         <div
           className="rounded-2xl p-4 border"
-          style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
+          style={{ backgroundColor: "#1A1A1A", borderColor: "#2A2A2A" }}
         >
           {/* 상단: 아바타 + 이름/소속 */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div
                 className="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center"
-                style={{ backgroundColor: '#2A2A2A' }}
+                style={{ backgroundColor: "#2A2A2A" }}
               >
                 {brainimalInfo.icon ? (
                   <img
@@ -383,7 +508,10 @@ export default function Report() {
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <span className="text-xl font-bold" style={{ color: '#AAED10' }}>
+                  <span
+                    className="text-xl font-bold"
+                    style={{ color: "#AAED10" }}
+                  >
                     {displayUser.name.charAt(0)}
                   </span>
                 )}
@@ -393,7 +521,7 @@ export default function Report() {
               </span>
             </div>
             {orgLabel && (
-              <span className="text-xs" style={{ color: '#B6B6B9' }}>
+              <span className="text-xs" style={{ color: "#B6B6B9" }}>
                 소속 <span className="text-white ml-1">{orgLabel}</span>
               </span>
             )}
@@ -402,23 +530,32 @@ export default function Report() {
           {/* 나이 / 뇌지컬 나이 한 줄 */}
           <div
             className="flex items-center justify-between rounded-xl px-4 py-3 mb-3"
-            style={{ backgroundColor: '#0F0F0F' }}
+            style={{ backgroundColor: "#0F0F0F" }}
           >
             <div className="flex items-center gap-3">
-              <span className="text-xs" style={{ color: '#888' }}>나이</span>
+              <span className="text-xs" style={{ color: "#888" }}>
+                나이
+              </span>
               <span className="text-white font-semibold text-sm">
-                {displayUser.age != null ? `${displayUser.age}세` : '-'}
+                {displayUser.age != null ? `${displayUser.age}세` : "-"}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs" style={{ color: '#888' }}>뇌지컬 나이</span>
-              <span className="text-white font-semibold text-sm">{displayBrainAge}세</span>
+              <span className="text-xs" style={{ color: "#888" }}>
+                뇌지컬 나이
+              </span>
+              <span className="text-white font-semibold text-sm">
+                {displayBrainAge}세
+              </span>
               {brainAgeChange && (
                 <span
                   className="text-xs font-medium"
-                  style={{ color: brainAgeChange.isImproved ? '#AAED10' : '#f87171' }}
+                  style={{
+                    color: brainAgeChange.isImproved ? "#AAED10" : "#f87171",
+                  }}
                 >
-                  ({brainAgeChange.isImproved ? '-' : '+'}{brainAgeChange.value})
+                  ({brainAgeChange.isImproved ? "-" : "+"}
+                  {brainAgeChange.value})
                 </span>
               )}
             </div>
@@ -428,18 +565,22 @@ export default function Report() {
           <div className="flex items-center justify-between">
             <span
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold"
-              style={{ backgroundColor: '#2A2A2A', color: brainimalInfo.color }}
+              style={{ backgroundColor: "#2A2A2A", color: brainimalInfo.color }}
             >
               {brainimalInfo.icon && (
-                <img src={brainimalInfo.icon} alt="" className="w-4 h-4 rounded-full object-cover" />
+                <img
+                  src={brainimalInfo.icon}
+                  alt=""
+                  className="w-4 h-4 rounded-full object-cover"
+                />
               )}
               {brainimalInfo.name}
             </span>
             <button
               type="button"
-              onClick={() => navigate('/profile')}
+              onClick={() => navigate("/profile")}
               className="text-xs font-medium"
-              style={{ color: '#B6B6B9' }}
+              style={{ color: "#B6B6B9" }}
             >
               모든 타입 보기 &gt;
             </button>
@@ -450,11 +591,13 @@ export default function Report() {
       {/* 6대 지표 그래프 — 카드 테두리 제거 */}
       <section>
         <h3 className="text-base font-bold text-white mb-2">6대 지표 그래프</h3>
-        <p className="text-sm font-semibold text-white mb-3">핵심 두뇌 능력 결과</p>
+        <p className="text-sm font-semibold text-white mb-3">
+          핵심 두뇌 능력 결과
+        </p>
         <div className="flex justify-center">
           <RadarChart data={effectiveReport.metricsScore} size={280} />
         </div>
-        <p className="text-[11px] mt-3" style={{ color: '#666' }}>
+        <p className="text-[11px] mt-3" style={{ color: "#666" }}>
           그래프 끝(꼭짓점)을 누르면 해당 항목의 점수가 표시됩니다.
         </p>
       </section>
@@ -466,7 +609,7 @@ export default function Report() {
           height={220}
           headerLeft={
             <HelpTooltip
-              text={`최근 ${orgLabel ? `‘${orgLabel}’` : '세션'}을 기준으로 표시된 변화추이 입니다`}
+              text={`최근 ${orgLabel ? `‘${orgLabel}’` : "세션"}을 기준으로 표시된 변화추이 입니다`}
             >
               <h3 className="text-lg font-bold text-white">변화 추이</h3>
             </HelpTooltip>
@@ -480,16 +623,16 @@ export default function Report() {
           className="rounded-2xl p-5 flex flex-col items-center text-center"
           style={{
             background:
-              'radial-gradient(120% 100% at 50% 0%, rgba(170,237,16,0.22) 0%, rgba(170,237,16,0.06) 45%, #1A1A1A 80%)',
-            border: '1px solid #2A3A12',
+              "radial-gradient(120% 100% at 50% 0%, rgba(170,237,16,0.22) 0%, rgba(170,237,16,0.06) 45%, #1A1A1A 80%)",
+            border: "1px solid #2A3A12",
           }}
         >
-          <p className="text-xs mb-3" style={{ color: '#B6B6B9' }}>
+          <p className="text-xs mb-3" style={{ color: "#B6B6B9" }}>
             {displayUser.name}님의 브레이니멀
           </p>
           <div
             className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center mb-3"
-            style={{ backgroundColor: '#0F0F0F', border: '1px solid #2A2A2A' }}
+            style={{ backgroundColor: "#0F0F0F", border: "1px solid #2A2A2A" }}
           >
             {brainimalInfo.icon ? (
               <img
@@ -501,15 +644,15 @@ export default function Report() {
               <span className="text-3xl">{brainimalInfo.emoji}</span>
             )}
           </div>
-          <p className="text-xl font-bold" style={{ color: '#AAED10' }}>
+          <p className="text-xl font-bold" style={{ color: "#AAED10" }}>
             {brainimalInfo.name}
           </p>
           {brainAgeChange && (
-            <p className="text-xs mt-2" style={{ color: '#B6B6B9' }}>
+            <p className="text-xs mt-2" style={{ color: "#B6B6B9" }}>
               <span className="text-white font-semibold">
                 {brainAgeChange.value}점
-              </span>{' '}
-              이 {brainAgeChange.isImproved ? '올랐어요' : '내렸어요'}
+              </span>{" "}
+              이 {brainAgeChange.isImproved ? "올랐어요" : "내렸어요"}
             </p>
           )}
         </div>
@@ -523,15 +666,19 @@ export default function Report() {
 
       {/* 추천 롤모델 — 기업 리포트와 동일 UI */}
       <RoleModelCard
-        subtitle={`${displayUser.name ?? '회원'}님의 롤모델`}
+        subtitle={`${displayUser.name ?? "회원"}님의 롤모델`}
         name={roleModel.name}
         quote={roleModel.oneLiner}
         connectionHeadline={roleModel.description}
         connectionDetail={effectiveReport.lifeText}
       />
 
-      <p className="text-[11px] text-center leading-relaxed px-2" style={{ color: '#666' }}>
-        본 검사 결과는 의학적 진단을 대체하지 않으며, 참고용으로만 사용하시기 바랍니다.
+      <p
+        className="text-[11px] text-center leading-relaxed px-2"
+        style={{ color: "#666" }}
+      >
+        본 검사 결과는 의학적 진단을 대체하지 않으며, 참고용으로만 사용하시기
+        바랍니다.
       </p>
     </div>
   );
