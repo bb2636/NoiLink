@@ -249,10 +249,10 @@ export default function MultiTrendChart({ data, height = 220 }: MultiTrendChartP
         className="w-full rounded-xl"
       />
 
-      {/* 고정 범례 — 6대 지표 색상 표시 (2행 3열) */}
-      <div className="grid grid-cols-3 gap-x-4 gap-y-2 px-2 pt-2">
+      {/* 고정 범례 — 6대 지표 색상 표시 (2행 3열, 가로/세로 가운데 정렬) */}
+      <div className="grid grid-cols-3 gap-x-6 gap-y-2 pt-3 justify-items-center items-center">
         {METRIC_ORDER.map(({ key, label, color }) => (
-          <div key={key} className="flex items-center gap-1.5">
+          <div key={key} className="flex items-center justify-center gap-1.5">
             <span
               className="inline-block w-2 h-2 rounded-full shrink-0"
               style={{ backgroundColor: color }}
