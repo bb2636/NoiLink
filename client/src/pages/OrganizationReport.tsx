@@ -1014,7 +1014,7 @@ function DonutChart({
   size: number;
   onHover?: (type: string | null) => void;
 }) {
-  const STROKE = 50;
+  const STROKE = 35;
   const R = (size - STROKE) / 2;
   const C = size / 2;
 
