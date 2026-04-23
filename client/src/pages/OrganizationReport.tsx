@@ -191,37 +191,33 @@ export default function OrganizationReport() {
         open={orgInfoOpen}
         onToggle={() => setOrgInfoOpen((v) => !v)}
       >
-        <div
-          className="rounded-2xl p-4"
-          style={{ backgroundColor: '#1A1A1A', border: '1px solid #262626' }}
-        >
-          {/* 상단: 아바타 + 기관명 */}
-          <div className="flex items-center gap-3">
-            <div
-              className="w-10 h-10 rounded-full flex items-center justify-center"
-              style={{ backgroundColor: '#264213' }}
-            >
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#AAED10" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 12h.01M9 15h.01M13 9h.01M13 12h.01M13 15h.01" />
-              </svg>
-            </div>
-            <p className="text-base font-semibold text-white">{report.organizationName}</p>
+        {/* 상단: 아바타 + 기관명 */}
+        <div className="flex items-center gap-3">
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center"
+            style={{ backgroundColor: '#264213' }}
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#AAED10" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 12h.01M9 15h.01M13 9h.01M13 12h.01M13 15h.01" />
+            </svg>
           </div>
-
-          {/* 구분선 */}
-          <div className="h-px my-4" style={{ backgroundColor: '#262626' }} />
-
-          {/* 총 관리 인원 */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-400">총 관리 인원</span>
-            <span className="text-base font-semibold text-white">
-              {report.managedMemberCount}명
-            </span>
-          </div>
+          <p className="text-base font-semibold text-white">{report.organizationName}</p>
         </div>
 
+        {/* 구분선 */}
+        <div className="h-px my-4" style={{ backgroundColor: '#262626' }} />
+
+        {/* 총 관리 인원 */}
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-400">총 관리 인원</span>
+          <span className="text-base font-semibold text-white">
+            {report.managedMemberCount}명
+          </span>
+        </div>
+
+        {/* 대표 브레이니멀 — 카드 가로 꽉 채움 */}
         <div
-          className="mt-3 rounded-xl px-4 py-3 flex items-center justify-between"
+          className="mt-4 -mx-4 -mb-4 rounded-b-2xl px-4 py-3 flex items-center justify-between"
           style={{ backgroundColor: '#1F2A0E' }}
         >
           <div className="flex items-center gap-2">
