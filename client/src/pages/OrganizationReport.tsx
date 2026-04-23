@@ -231,7 +231,7 @@ export default function OrganizationReport() {
 
         {/* 대표 브레이니멀 — 카드 가로 꽉 채움 */}
         <div
-          className="mt-4 -mx-4 -mb-4 rounded-b-2xl px-4 py-3 flex items-center justify-between"
+          className="!mt-4 -mx-4 -mb-4 rounded-b-2xl px-4 py-3 flex items-center justify-between"
           style={{ backgroundColor: '#1F2A0E' }}
         >
           <div className="flex items-center gap-2">
@@ -738,8 +738,8 @@ function HelpDot({ text }: { text: string }) {
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
         onClick={() => setOpen((v) => !v)}
-        className="w-4 h-4 rounded-full inline-flex items-center justify-center text-[10px] font-semibold leading-none"
-        style={{ backgroundColor: '#3A3A3A', color: '#999999' }}
+        className="w-3 h-3 rounded-full inline-flex items-center justify-center text-[8px] font-bold leading-none"
+        style={{ backgroundColor: '#FFFFFF', color: '#000000' }}
       >
         ?
       </button>
@@ -778,19 +778,24 @@ function CollapsibleCard({
   children: React.ReactNode;
 }) {
   return (
-    <section
-      className="rounded-2xl border overflow-hidden"
-      style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
-    >
+    <section>
+      {/* 카드 밖 헤더: 제목 + 펼침 화살표 */}
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center justify-between p-4"
+        className="w-full flex items-center justify-between px-1 pb-2"
       >
         <span className="text-sm font-semibold text-white">{title}</span>
         <span className="text-gray-400 text-xs">{open ? '⌃' : '⌄'}</span>
       </button>
-      {open && <div className="px-4 pb-4 space-y-2">{children}</div>}
+      {open && (
+        <div
+          className="rounded-2xl border overflow-hidden p-4 space-y-2"
+          style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
+        >
+          {children}
+        </div>
+      )}
     </section>
   );
 }
