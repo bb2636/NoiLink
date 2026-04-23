@@ -24,6 +24,13 @@ export default function OrganizationMembers() {
     message: '',
   });
 
+  const isPending = useCallback(
+    (m: User) =>
+      !!(m as any).pendingOrganizationId &&
+      (m as any).pendingOrganizationId === user?.organizationId,
+    [user?.organizationId],
+  );
+
   const load = useCallback(async () => {
     if (!user || user.userType !== 'ORGANIZATION') {
       setLoading(false);
@@ -31,8 +38,18 @@ export default function OrganizationMembers() {
     }
     setLoading(true);
     try {
-      const res = await api.getPendingOrganizationMembers();
-      if (res.success && res.data) setMembers(res.data);
+      const [pendingRes, approvedRes] = await Promise.all([
+        api.getPendingOrganizationMembers(),
+        api.getOrganizationMembers(),
+      ]);
+      const pending = pendingRes.success && pendingRes.data ? pendingRes.data : [];
+      const approvedAll = approvedRes.success && approvedRes.data ? approvedRes.data : [];
+      // 본인(관리자)은 목록에서 제외
+      const approved = approvedAll.filter((m) => m.id !== user.id);
+      // 중복 제거 (pending 우선)
+      const seen = new Set(pending.map((p) => p.id));
+      const merged = [...pending, ...approved.filter((a) => !seen.has(a.id))];
+      setMembers(merged);
     } finally {
       setLoading(false);
     }
@@ -58,7 +75,12 @@ export default function OrganizationMembers() {
     try {
       const res = await api.approveOrganizationMember(m.id);
       if (res.success) {
-        setMembers((prev) => prev.filter((x) => x.id !== m.id));
+        const approved = (res.data as User | undefined) ?? {
+          ...m,
+          pendingOrganizationId: undefined,
+          organizationId: user?.organizationId,
+        };
+        setMembers((prev) => prev.map((x) => (x.id === m.id ? approved : x)));
         setExpandedId(null);
         setResultModal({
           open: true,
@@ -155,7 +177,7 @@ export default function OrganizationMembers() {
           <p className="py-8 text-center text-sm text-gray-400">로딩 중…</p>
         ) : filtered.length === 0 ? (
           <p className="py-8 text-center text-sm text-gray-400">
-            {keyword ? '검색 결과가 없습니다.' : '가입 신청 대기 중인 회원이 없습니다.'}
+            {keyword ? '검색 결과가 없습니다.' : '등록된 기업 회원이 없습니다.'}
           </p>
         ) : (
           <ul className="space-y-2">
@@ -163,6 +185,7 @@ export default function OrganizationMembers() {
               const expanded = expandedId === m.id;
               const info = m.brainimalType ? getBrainimalIcon(m.brainimalType) : DEFAULT_BRAINIMAL;
               const busy = working === m.id;
+              const pending = isPending(m);
 
               return (
                 <li
@@ -189,7 +212,7 @@ export default function OrganizationMembers() {
                       <span className="text-[14px] text-white truncate">{m.name}</span>
                     </div>
 
-                    {!expanded && (
+                    {!expanded && pending && (
                       <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
@@ -211,6 +234,14 @@ export default function OrganizationMembers() {
                         </button>
                       </div>
                     )}
+                    {!expanded && !pending && (
+                      <span
+                        className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium"
+                        style={{ backgroundColor: '#1F2A0E', color: '#AAED10' }}
+                      >
+                        승인됨
+                      </span>
+                    )}
                   </button>
 
                   {expanded && (
@@ -221,26 +252,28 @@ export default function OrganizationMembers() {
                         <span style={{ color: '#888' }}>전화번호</span>
                         <span className="text-white truncate">| {m.phone || '-'}</span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => reject(m)}
-                          className="flex-1 py-3 rounded-full text-sm font-bold disabled:opacity-50"
-                          style={{ backgroundColor: '#2a2222', color: '#ff8c8c', border: '1px solid #3a2a2a' }}
-                        >
-                          거절하기
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => approve(m)}
-                          className="flex-1 py-3 rounded-full text-sm font-bold disabled:opacity-50"
-                          style={{ backgroundColor: '#AAED10', color: '#000' }}
-                        >
-                          {busy ? '처리 중…' : '승인하기'}
-                        </button>
-                      </div>
+                      {pending && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => reject(m)}
+                            className="flex-1 py-3 rounded-full text-sm font-bold disabled:opacity-50"
+                            style={{ backgroundColor: '#2a2222', color: '#ff8c8c', border: '1px solid #3a2a2a' }}
+                          >
+                            거절하기
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => approve(m)}
+                            className="flex-1 py-3 rounded-full text-sm font-bold disabled:opacity-50"
+                            style={{ backgroundColor: '#AAED10', color: '#000' }}
+                          >
+                            {busy ? '처리 중…' : '승인하기'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </li>
