@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
 import { DEMO_PROFILE } from '../utils/demoProfile';
 import { api } from '../utils/api';
+import { MOCK_MEMBERS, getMockMemberTotalScore, type MockMember } from '../utils/mockMembers';
 import type { RankingEntry, RankingType } from '@noilink/shared';
 
 type TabKey = 'composite' | 'time' | 'streak';
@@ -70,51 +71,37 @@ const PERSONAL_ROWS: Record<TabKey, Row[]> = {
   ],
 };
 
-// 기업 내 랭킹 — 시드된 데모 기업 12명 + 관리자 본인(13위)과 일치
-const ORG_ROWS: Record<TabKey, Row[]> = {
-  composite: [
-    { rank: 1,  nickname: '박정수', value: 96 },
-    { rank: 2,  nickname: '한봉수', value: 94 },
-    { rank: 3,  nickname: '송상철', value: 93 },
-    { rank: 4,  nickname: '김순자', value: 91 },
-    { rank: 5,  nickname: '정복례', value: 89 },
-    { rank: 6,  nickname: '윤덕수', value: 88 },
-    { rank: 7,  nickname: '신옥자', value: 86 },
-    { rank: 8,  nickname: '최말순', value: 84 },
-    { rank: 9,  nickname: '오금자', value: 82 },
-    { rank: 10, nickname: '이영희', value: 80 },
-    { rank: 11, nickname: '임순녀', value: 78 },
-    { rank: 12, nickname: '강만수', value: 76 },
-  ],
-  time: [
-    { rank: 1,  nickname: '한봉수', value: 32 },
-    { rank: 2,  nickname: '박정수', value: 28 },
-    { rank: 3,  nickname: '송상철', value: 26 },
-    { rank: 4,  nickname: '정복례', value: 24 },
-    { rank: 5,  nickname: '김순자', value: 22 },
-    { rank: 6,  nickname: '윤덕수', value: 20 },
-    { rank: 7,  nickname: '신옥자', value: 18 },
-    { rank: 8,  nickname: '최말순', value: 16 },
-    { rank: 9,  nickname: '이영희', value: 14 },
-    { rank: 10, nickname: '오금자', value: 12 },
-    { rank: 11, nickname: '임순녀', value: 9  },
-    { rank: 12, nickname: '강만수', value: 7  },
-  ],
-  streak: [
-    { rank: 1,  nickname: '한봉수', value: 9 },
-    { rank: 2,  nickname: '박정수', value: 8 },
-    { rank: 3,  nickname: '송상철', value: 7 },
-    { rank: 4,  nickname: '정복례', value: 6 },
-    { rank: 5,  nickname: '김순자', value: 5 },
-    { rank: 5,  nickname: '윤덕수', value: 5 },
-    { rank: 7,  nickname: '신옥자', value: 4 },
-    { rank: 8,  nickname: '이영희', value: 3 },
-    { rank: 9,  nickname: '최말순', value: 2 },
-    { rank: 9,  nickname: '오금자', value: 2 },
-    { rank: 11, nickname: '강만수', value: 1 },
-    { rank: 11, nickname: '임순녀', value: 1 },
-  ],
-};
+// 기업 내 랭킹 — 회원 관리(MOCK_MEMBERS)와 동일한 인원/지표를 사용해 동적으로 산출.
+// 동일 점수면 동률 처리(같은 등수). composite는 종합 점수, time은 streak에서 파생한
+// 합계 트레이닝 횟수, streak는 연속 일수 그대로 사용.
+function rankRows(items: { nickname: string; value: number }[]): Row[] {
+  const sorted = [...items].sort((a, b) => b.value - a.value);
+  const out: Row[] = [];
+  let prevValue = Number.POSITIVE_INFINITY;
+  let prevRank = 0;
+  sorted.forEach((it, i) => {
+    const rank = it.value === prevValue ? prevRank : i + 1;
+    out.push({ rank, nickname: it.nickname, value: it.value });
+    prevValue = it.value;
+    prevRank = rank;
+  });
+  return out;
+}
+
+function buildOrgRowsFromMembers(members: MockMember[]): Record<TabKey, Row[]> {
+  // 합계 시간(회): streak 기반 + 약간의 가산(연속 외 산발 트레이닝 가정)
+  const timeItems = members.map((m) => ({
+    nickname: m.name,
+    value: m.streak * 3 + (m.id.charCodeAt(m.id.length - 1) % 7) + 5,
+  }));
+  return {
+    composite: rankRows(members.map((m) => ({ nickname: m.name, value: getMockMemberTotalScore(m) }))),
+    time:      rankRows(timeItems),
+    streak:    rankRows(members.map((m) => ({ nickname: m.name, value: m.streak }))),
+  };
+}
+
+const ORG_ROWS: Record<TabKey, Row[]> = buildOrgRowsFromMembers(MOCK_MEMBERS);
 
 // 내 랭킹 통계 — 단일 데모 프로필(DEMO_PROFILE)에서 가져와 다른 화면과 일치시킴
 const PERSONAL_MY_RANK = {
