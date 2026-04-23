@@ -145,7 +145,7 @@ export default function MultiTrendChart({ data, height = 220 }: MultiTrendChartP
 
       // 라인 아래 그라데이션 영역
       const grad = ctx.createLinearGradient(0, padding, 0, padding + chartH);
-      grad.addColorStop(0, hexToRgba(color, 0.45));
+      grad.addColorStop(0, hexToRgba(color, 0.28));
       grad.addColorStop(1, hexToRgba(color, 0));
       ctx.fillStyle = grad;
       ctx.beginPath();
@@ -157,21 +157,13 @@ export default function MultiTrendChart({ data, height = 220 }: MultiTrendChartP
 
       // 라인
       ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       pts.forEach((p, i) => {
         if (i === 0) ctx.moveTo(p.x, p.y);
         else ctx.lineTo(p.x, p.y);
       });
       ctx.stroke();
-
-      // 꼭짓점
-      ctx.fillStyle = color;
-      pts.forEach((p) => {
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-        ctx.fill();
-      });
     });
 
     // x축 날짜

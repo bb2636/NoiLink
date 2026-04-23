@@ -461,7 +461,7 @@ function BrainimalTabSection({
         </div>
 
         {/* 범례 — % 만 표시 (이름 제거), 우측 정렬 */}
-        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 shrink-0">
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 shrink-0">
           <p className="text-[11px] text-gray-400 col-span-2 mb-1">분포 현황</p>
           {slices.map((s) => (
             <div key={s.type} className="flex items-center gap-1.5 text-[11px] py-0.5">
@@ -992,7 +992,7 @@ function DonutChart({
   size: number;
   onHover?: (type: string | null) => void;
 }) {
-  const STROKE = 22;
+  const STROKE = 14;
   const R = (size - STROKE) / 2;
   const C = size / 2;
 
