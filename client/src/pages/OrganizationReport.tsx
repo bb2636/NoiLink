@@ -940,7 +940,7 @@ function HelpDot({
           aria-label="도움말"
           onClick={() => setOpen((v) => !v)}
           className="rounded-full inline-flex items-center justify-center font-bold leading-none shrink-0"
-          style={{ backgroundColor: '#FFFFFF', color: '#000000', width: 12, height: 12, fontSize: 8 }}
+          style={{ backgroundColor: '#FFFFFF', color: '#000000', width: 7, height: 7, fontSize: 5 }}
         >
           ?
         </button>
