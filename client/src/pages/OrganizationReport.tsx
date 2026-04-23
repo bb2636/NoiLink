@@ -714,6 +714,11 @@ function ComprehensiveTabSection({ report: _report }: { report: OrganizationInsi
 // =============================================================================
 function MembersTabSection({ members }: { members: User[] }) {
   const [open, setOpen] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const COLLAPSED_LIMIT = 5;
+
+  const visibleMembers = expanded ? members : members.slice(0, COLLAPSED_LIMIT);
+  const hasMore = members.length > COLLAPSED_LIMIT;
 
   return (
     <section>
@@ -737,10 +742,32 @@ function MembersTabSection({ members }: { members: User[] }) {
               소속 인원 데이터가 없습니다.
             </p>
           ) : (
-            <div className="space-y-3">
-              {members.map((m) => (
-                <MemberCard key={m.id} member={m} />
-              ))}
+            <div
+              className="rounded-2xl border overflow-hidden"
+              style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
+            >
+              <div className="divide-y" style={{ borderColor: '#2A2A2A' }}>
+                {visibleMembers.map((m) => (
+                  <div
+                    key={m.id}
+                    className="border-b last:border-b-0"
+                    style={{ borderColor: '#2A2A2A' }}
+                  >
+                    <MemberRow member={m} />
+                  </div>
+                ))}
+              </div>
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={() => setExpanded((v) => !v)}
+                  className="w-full flex items-center justify-center gap-1 py-3 text-xs text-gray-300 border-t"
+                  style={{ borderColor: '#2A2A2A' }}
+                >
+                  {expanded ? '접기' : '더보기'}
+                  <span className="text-gray-400">{expanded ? '⌃' : '⌄'}</span>
+                </button>
+              )}
             </div>
           )}
           <p className="mt-3 text-[10px] text-gray-500">
@@ -752,20 +779,21 @@ function MembersTabSection({ members }: { members: User[] }) {
   );
 }
 
-function MemberCard({ member }: { member: User }) {
+function MemberRow({ member }: { member: User }) {
+  const navigate = useNavigate();
   const info = member.brainimalType ? getBrainimalIcon(member.brainimalType) : null;
   const birthYear =
     member.age != null ? new Date().getFullYear() - member.age : null;
-  // 시안과 동일한 형식: yyyy.MM.dd
   const birthDateStr = birthYear ? `${birthYear}.09.04` : '-';
   const lastTestStr = member.lastTrainingDate
     ? formatLongDate(member.lastTrainingDate)
     : '-';
 
   return (
-    <div
-      className="rounded-2xl border p-4"
-      style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
+    <button
+      type="button"
+      onClick={() => navigate(`/report/${member.id}`)}
+      className="w-full text-left p-4 transition-colors hover:bg-white/[0.02] active:bg-white/[0.04]"
     >
       {/* 상단 행: 이름님 / 뇌지컬 점수 */}
       <div className="flex items-start justify-between mb-3">
@@ -821,7 +849,7 @@ function MemberCard({ member }: { member: User }) {
           </span>
         )}
       </div>
-    </div>
+    </button>
   );
 }
 
