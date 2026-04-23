@@ -102,7 +102,7 @@ export default function TrainingSetup() {
   // ─── 세션 설정 (간소화) ──────────────────────────────────────
   const [level] = useState<Level>(3);
   const totalDurationSec = useMemo(() => {
-    if (isComposite) return Math.min(300, SESSION_MAX_MS / 1000);
+    if (isComposite) return SESSION_MAX_MS / 1000;
     if (isFree) return 120;
     return 60;
   }, [isComposite, isFree]);

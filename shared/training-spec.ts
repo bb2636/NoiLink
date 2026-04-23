@@ -61,17 +61,17 @@ function clamp01(x: number): number {
 // 1. 공통 정책
 // =============================================================================
 
-/** 세션 최대 길이 (ms) — 300초 자동 종료 */
-export const SESSION_MAX_MS = 300_000;
+/** 세션 최대 길이 (ms) — 45초 자동 종료 (테스트용 단축) */
+export const SESSION_MAX_MS = 45_000;
 
-/** 종합 트레이닝 총 시간 (고정 300초) */
-export const COMPOSITE_TOTAL_MS = 300_000;
+/** 종합 트레이닝 총 시간 (고정 45초, 테스트용 단축) */
+export const COMPOSITE_TOTAL_MS = 45_000;
 
-/** 리듬 페이즈 길이 */
-export const RHYTHM_PHASE_MS = 30_000;
+/** 리듬 페이즈 길이 (4.5s × 5사이클 = 22.5s) */
+export const RHYTHM_PHASE_MS = 4_500;
 
-/** 인지 페이즈 길이 */
-export const COGNITIVE_PHASE_MS = 30_000;
+/** 인지 페이즈 길이 (4.5s × 5사이클 = 22.5s) */
+export const COGNITIVE_PHASE_MS = 4_500;
 
 /**
  * 의미 색 → 물리 LED 매핑 (명세 2.1)
