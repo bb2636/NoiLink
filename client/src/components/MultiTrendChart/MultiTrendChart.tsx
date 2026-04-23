@@ -9,12 +9,12 @@
 import { useEffect, useRef, useState } from 'react';
 
 const METRIC_ORDER = [
-  { key: 'memory', label: '기억력', color: '#22d3ee' },
+  { key: 'memory', label: '기억력', color: '#3b82f6' },
   { key: 'comprehension', label: '이해력', color: '#a78bfa' },
   { key: 'focus', label: '집중력', color: '#AAED10' },
   { key: 'judgment', label: '판단력', color: '#fb923c' },
-  { key: 'agility', label: '순발력', color: '#f472b6' },
-  { key: 'endurance', label: '지구력', color: '#38bdf8' },
+  { key: 'endurance', label: '지구력', color: '#f472b6' },
+  { key: 'agility', label: '순발력', color: '#38bdf8' },
 ] as const;
 
 const ALL_KEYS = METRIC_ORDER.map((m) => m.key);
@@ -242,31 +242,25 @@ export default function MultiTrendChart({ data, height = 220 }: MultiTrendChartP
         </div>
       </div>
 
-      {/* 활성 항목 미니 범례 */}
-      {selected.size > 0 && selected.size < ALL_KEYS.length && (
-        <div className="flex flex-wrap gap-2">
-          {METRIC_ORDER.filter((m) => selected.has(m.key)).map(({ key, label, color }) => (
-            <span
-              key={key}
-              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs"
-              style={{ backgroundColor: `${color}22`, color }}
-            >
-              <span
-                className="inline-block w-2 h-2 rounded-full"
-                style={{ backgroundColor: color }}
-              />
-              {label}
-            </span>
-          ))}
-        </div>
-      )}
-
       <canvas
         ref={canvasRef}
         width={400}
         height={height}
         className="w-full rounded-xl"
       />
+
+      {/* 고정 범례 — 6대 지표 색상 표시 (2행 3열) */}
+      <div className="grid grid-cols-3 gap-x-4 gap-y-2 px-2 pt-2">
+        {METRIC_ORDER.map(({ key, label, color }) => (
+          <div key={key} className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-2 h-2 rounded-full shrink-0"
+              style={{ backgroundColor: color }}
+            />
+            <span className="text-[11px] text-gray-300">{label}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

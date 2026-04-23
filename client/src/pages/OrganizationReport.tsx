@@ -192,29 +192,37 @@ export default function OrganizationReport() {
         onToggle={() => setOrgInfoOpen((v) => !v)}
       >
         <div
-          className="rounded-xl p-4 flex items-center justify-between"
-          style={{ backgroundColor: '#0F0F0F' }}
+          className="rounded-2xl p-4"
+          style={{ backgroundColor: '#1A1A1A', border: '1px solid #262626' }}
         >
+          {/* 상단: 아바타 + 기관명 */}
           <div className="flex items-center gap-3">
             <div
-              className="w-10 h-10 rounded-md flex items-center justify-center text-lg"
-              style={{ backgroundColor: '#264213', color: '#AAED10' }}
+              className="w-10 h-10 rounded-full flex items-center justify-center"
+              style={{ backgroundColor: '#264213' }}
             >
-              📋
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#AAED10" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 12h.01M9 15h.01M13 9h.01M13 12h.01M13 15h.01" />
+              </svg>
             </div>
-            <div>
-              <p className="text-base font-semibold text-white">{report.organizationName}</p>
-              <p className="text-xs mt-1 text-gray-400">총 관리 인원</p>
-            </div>
+            <p className="text-base font-semibold text-white">{report.organizationName}</p>
           </div>
-          <span className="text-base font-semibold text-white">
-            {report.managedMemberCount}명
-          </span>
+
+          {/* 구분선 */}
+          <div className="h-px my-4" style={{ backgroundColor: '#262626' }} />
+
+          {/* 총 관리 인원 */}
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-400">총 관리 인원</span>
+            <span className="text-base font-semibold text-white">
+              {report.managedMemberCount}명
+            </span>
+          </div>
         </div>
 
         <div
           className="mt-3 rounded-xl px-4 py-3 flex items-center justify-between"
-          style={{ backgroundColor: '#0F0F0F', border: '1px solid #2A2A2A' }}
+          style={{ backgroundColor: '#1F2A0E' }}
         >
           <div className="flex items-center gap-2">
             {repInfo.icon ? (
@@ -222,7 +230,7 @@ export default function OrganizationReport() {
             ) : (
               <span>{repInfo.emoji}</span>
             )}
-            <span className="text-sm" style={{ color: '#AAED10' }}>
+            <span className="text-sm font-medium" style={{ color: '#AAED10' }}>
               {report.representativeBrainimalLabel}
             </span>
           </div>
@@ -351,7 +359,7 @@ function MetricsTabSection({
       <div>
         <div className="flex items-center gap-1.5 mb-2">
           <h4 className="text-sm font-semibold text-white">변화 추이</h4>
-          <HelpDot text="최근 세션을 기준으로 표시된 팀 평균 변화추이 입니다" />
+          <HelpDot text={`최근 '${report.organizationName}'를 기준으로 표시된 변화추이 입니다`} />
         </div>
         {trendPoints.length > 0 ? (
           <MultiTrendChart data={trendPoints} height={200} />
@@ -718,14 +726,14 @@ function HelpDot({ text }: { text: string }) {
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
         onClick={() => setOpen((v) => !v)}
-        className="w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[9px] font-bold leading-none"
-        style={{ backgroundColor: '#FFFFFF', color: '#000000' }}
+        className="w-4 h-4 rounded-full inline-flex items-center justify-center text-[10px] font-semibold leading-none"
+        style={{ backgroundColor: '#3A3A3A', color: '#999999' }}
       >
         ?
       </button>
       {open && (
         <span
-          className="absolute left-5 top-1/2 -translate-y-1/2 z-20 inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[10px]"
+          className="absolute left-6 top-1/2 -translate-y-1/2 z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-md px-3 py-1.5 text-[11px]"
           style={{ backgroundColor: '#2A2A2A', color: '#E5E5E5', border: '1px solid #3A3A3A' }}
         >
           {text}
@@ -735,7 +743,7 @@ function HelpDot({ text }: { text: string }) {
               e.stopPropagation();
               setOpen(false);
             }}
-            className="text-[10px]"
+            className="text-[11px]"
             style={{ color: '#888' }}
           >
             ✕
