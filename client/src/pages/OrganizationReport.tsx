@@ -17,6 +17,7 @@ import MultiTrendChart, { type TrendPoint } from '../components/MultiTrendChart/
 import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
 import type { BrainimalType, OrganizationInsightReport, User } from '@noilink/shared';
 import { MOCK_MEMBERS as SHARED_MOCK_MEMBERS } from '../utils/mockMembers';
+import ComprehensiveEvaluation from '../components/ComprehensiveEvaluation';
 
 // =============================================================================
 // 데모용 하드코딩 데이터 (이미지 시안 그대로)
@@ -510,7 +511,7 @@ function BrainimalTabSection({
 // =============================================================================
 // 뇌지컬 종합 평가 탭 (본인 브레이니멀 + 평가)
 // =============================================================================
-function ComprehensiveTabSection({ report: _report }: { report: OrganizationInsightReport }) {
+function ComprehensiveTabSection({ report }: { report: OrganizationInsightReport }) {
   const { user } = useAuth();
   const myBrainimal = user?.brainimalType
     ? getBrainimalIcon(user.brainimalType)
@@ -522,8 +523,18 @@ function ComprehensiveTabSection({ report: _report }: { report: OrganizationInsi
     return d > 0 ? d : 1;
   })();
 
-  const [evalOpen, setEvalOpen] = useState(true);
-  const [selectedFeedback, setSelectedFeedback] = useState(0);
+  // 본인의 6대 지표 — 보고서가 본인 지표를 갖고 있지 않으면 기본값으로 폴백
+  const myMetrics = (report as any).myMetrics ?? {
+    sessionId: '',
+    userId: user?.id ?? '',
+    memory: 78,
+    comprehension: 82,
+    focus: 88,
+    judgment: 74,
+    agility: 91,
+    endurance: 69,
+    createdAt: new Date().toISOString(),
+  };
 
   return (
     <div className="space-y-4">
@@ -561,121 +572,8 @@ function ComprehensiveTabSection({ report: _report }: { report: OrganizationInsi
         </p>
       </section>
 
-      {/* 뇌지컬 종합 평가 — 외곽 카드 테두리 제거(내부 상세분석 카드는 유지) */}
-      <section>
-        <button
-          type="button"
-          onClick={() => setEvalOpen((v) => !v)}
-          className="w-full flex items-center justify-between"
-        >
-          <span className="text-base font-bold text-white">뇌지컬 종합 평가</span>
-          <span className="text-gray-400">{evalOpen ? '⌃' : '⌄'}</span>
-        </button>
-
-        {evalOpen && (
-          <div className="pt-4 space-y-5">
-            {/* 상세 분석 — 외곽 카드로 감싼 영역 */}
-            <div>
-              <h4
-                className="text-xs text-gray-300 mb-2 pl-2 border-l-2"
-                style={{ borderColor: '#AAED10' }}
-              >
-                상세 분석
-              </h4>
-              <div
-                className="rounded-2xl p-3 space-y-2"
-                style={{ backgroundColor: '#202024', border: '1px solid #2A2A2A' }}
-              >
-                <EvalRowV2
-                  iconType="trend"
-                  iconColor="#AAED10"
-                  title="쉽게 포기하지 않는 꾸준형"
-                />
-                <EvalRowV2
-                  iconType="shield"
-                  iconColor="#5EEAD4"
-                  title="화려한 말뿐보다는 행동으로 보여주는 신뢰형"
-                />
-                <EvalRowV2
-                  iconType="flag"
-                  iconColor="#A78BFA"
-                  title="한번 시작한 일은 끝을 보고야 마는 완주형"
-                />
-              </div>
-            </div>
-
-            {/* 강점 분석 */}
-            <div>
-              <h4
-                className="text-xs text-gray-300 mb-3 pl-2 border-l-2"
-                style={{ borderColor: '#AAED10' }}
-              >
-                강점 분석
-              </h4>
-              <div className="grid grid-cols-3 gap-2">
-                <StrengthGauge
-                  value={92}
-                  status="탁월함"
-                  label="강인한 인내심"
-                  color="#AAED10"
-                />
-                <StrengthGauge
-                  value={78}
-                  status="안정적"
-                  label="집중력 유지"
-                  color="#5EEAD4"
-                />
-                <StrengthGauge
-                  value={55}
-                  status="성장 중"
-                  label="정보 처리 속도"
-                  color="#D9F779"
-                />
-              </div>
-            </div>
-
-            {/* 약점 분석 */}
-            <div>
-              <h4
-                className="text-xs text-gray-300 mb-3 pl-2 border-l-2"
-                style={{ borderColor: '#AAED10' }}
-              >
-                약점 분석
-              </h4>
-              <div className="space-y-2">
-                <WeaknessRow label="변화 감지 민감도" value={35} />
-                <WeaknessRow label="공동성" value={28} />
-              </div>
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* 생활 밀착 피드백 */}
-      <section
-        className="rounded-2xl p-4 border"
-        style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
-      >
-        <h4 className="text-xs text-gray-400 mb-3 pl-2 border-l-2" style={{ borderColor: '#AAED10' }}>
-          생활 밀착 피드백
-        </h4>
-        <div className="space-y-2">
-          {[
-            { n: 1, icon: '🧘', title: '1시간마다 스트레칭하기' },
-            { n: 2, icon: '🎯', title: '새로운 선택 도전해보기' },
-            { n: 3, icon: '🤝', title: '주변에 도움 요청하기' },
-          ].map((f, i) => (
-            <FeedbackStepV2
-              key={f.n}
-              n={f.n}
-              icon={f.icon}
-              title={f.title}
-              selected={i === selectedFeedback}
-              onClick={() => setSelectedFeedback(i)}
-            />
-          ))}
-        </div>
-      </section>
+      {/* 뇌지컬 종합 평가 + 생활 밀착 피드백 — 개인 리포트와 동일 UI */}
+      <ComprehensiveEvaluation metricsScore={myMetrics} />
 
       {/* 롤모델 */}
       <section
@@ -1050,194 +948,6 @@ function describeArcStroke(cx: number, cy: number, r: number, startDeg: number, 
   return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y}`;
 }
 
-function EvalRowV2({
-  iconType,
-  iconColor,
-  title,
-}: {
-  iconType: 'trend' | 'shield' | 'flag';
-  iconColor: string;
-  title: string;
-}) {
-  const renderIcon = () => {
-    switch (iconType) {
-      case 'trend':
-        return (
-          <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke={iconColor} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="3 17 9 11 13 15 21 7" />
-            <polyline points="14 7 21 7 21 14" />
-          </svg>
-        );
-      case 'shield':
-        return (
-          <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke={iconColor} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 3l8 3v6c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V6l8-3z" />
-          </svg>
-        );
-      case 'flag':
-        return (
-          <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke={iconColor} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <path d="M5 21V4" />
-            <path d="M5 4h11l-2 4 2 4H5" />
-          </svg>
-        );
-    }
-  };
-  return (
-    <div
-      className="rounded-2xl px-3 py-3 flex items-center gap-3"
-      style={{ backgroundColor: '#2D2D33', border: '1px solid #3A3A40' }}
-    >
-      <span
-        className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
-        style={{
-          backgroundColor: '#1A1A1A',
-          border: `1.5px solid ${iconColor}40`,
-        }}
-      >
-        {renderIcon()}
-      </span>
-      <p className="text-[13px] text-white">{title}</p>
-    </div>
-  );
-}
-
-function StrengthGauge({
-  value,
-  status,
-  label,
-  color,
-}: {
-  value: number;
-  status: string;
-  label: string;
-  color: string;
-}) {
-  const SIZE = 88;
-  const STROKE = 7;
-  const R = (SIZE - STROKE) / 2;
-  const C = 2 * Math.PI * R;
-  const offset = C * (1 - value / 100);
-  return (
-    <div className="flex flex-col items-center">
-      <div className="relative" style={{ width: SIZE, height: SIZE }}>
-        <svg width={SIZE} height={SIZE} className="-rotate-90">
-          <circle cx={SIZE / 2} cy={SIZE / 2} r={R} stroke="#2A2A2A" strokeWidth={STROKE} fill="none" />
-          <circle
-            cx={SIZE / 2}
-            cy={SIZE / 2}
-            r={R}
-            stroke={color}
-            strokeWidth={STROKE}
-            fill="none"
-            strokeLinecap="round"
-            strokeDasharray={C}
-            strokeDashoffset={offset}
-          />
-        </svg>
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span
-            className="px-2 py-0.5 rounded-full text-[10px] font-bold"
-            style={{ backgroundColor: `${color}26`, color }}
-          >
-            {status}
-          </span>
-        </div>
-      </div>
-      <span className="text-[11px] text-gray-300 mt-2 text-center">{label}</span>
-    </div>
-  );
-}
-
-function WeaknessRow({ label, value }: { label: string; value: number }) {
-  const PURPLE = '#A78BFA';
-  return (
-    <div
-      className="rounded-2xl px-3 py-3"
-      style={{ backgroundColor: '#1A1A1A', border: '1px solid #2A2A2A' }}
-    >
-      <div className="flex items-center gap-2.5">
-        <span
-          className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
-          style={{ backgroundColor: '#2A1F3D' }}
-        >
-          <svg
-            className="w-3.5 h-3.5"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke={PURPLE}
-            strokeWidth={2.4}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </span>
-        <p className="flex-1 text-[13px] text-white">{label}</p>
-        <span className="text-sm font-bold" style={{ color: PURPLE }}>
-          {value}점
-        </span>
-      </div>
-      <div
-        className="mt-2.5 h-1.5 rounded-full overflow-hidden"
-        style={{ backgroundColor: '#2A2A2A' }}
-      >
-        <div
-          className="h-full rounded-full"
-          style={{
-            width: `${value}%`,
-            background: `linear-gradient(90deg, #6D4FB8 0%, ${PURPLE} 100%)`,
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function FeedbackStepV2({
-  n,
-  icon,
-  title,
-  selected,
-  onClick,
-}: {
-  n: number;
-  icon: string;
-  title: string;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full rounded-xl px-3 py-3 flex items-center gap-3 text-left transition-colors"
-      style={{
-        backgroundColor: selected ? '#1F2D14' : '#0F0F0F',
-        border: selected ? '1px solid #AAED10' : '1px solid #1F1F1F',
-      }}
-    >
-      <span
-        className="text-xs font-bold shrink-0 w-6"
-        style={{ color: selected ? '#AAED10' : '#888' }}
-      >
-        0{n}
-      </span>
-      <span className="text-base shrink-0">{icon}</span>
-      <span
-        className="text-sm flex-1"
-        style={{ color: selected ? '#FFFFFF' : '#B6B6B9' }}
-      >
-        {title}
-      </span>
-      {selected && (
-        <span className="text-xs shrink-0" style={{ color: '#AAED10' }}>
-          ✓
-        </span>
-      )}
-    </button>
-  );
-}
 
 function formatLongDate(iso: string): string {
   const d = new Date(iso);

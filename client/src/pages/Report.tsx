@@ -8,6 +8,7 @@ import { calculateBrainAge, calculateBrainAgeChange } from '../utils/brainAge';
 import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
 import { DEMO_PROFILE, DEMO_METRICS } from '../utils/demoProfile';
 import { getMockMember, buildMockMemberReport, buildMockMemberTrend } from '../utils/mockMembers';
+import ComprehensiveEvaluation from '../components/ComprehensiveEvaluation';
 import type { Report, MetricsScore, Session } from '@noilink/shared';
 
 // TODO: 실제 API 데이터로 교체 — 홈/랭킹과 동일한 단일 데모 프로필 사용
@@ -75,10 +76,6 @@ const MOCK_TREND_POINTS: TrendPoint[] = Array.from({ length: 10 }).map((_, i) =>
  * 개인 리포트 — 명세: 프로필 요약, 6대 지표(꼭짓점 툴팁), 변화추이, 종합 평가, 롤모델, 면책
  */
 // 제목 + "?" + 안내 말풍선(타이틀 줄 아래에 좌측 정렬로 표시) — 첨부 이미지와 동일
-function clampPct(v: number): number {
-  return Math.max(0, Math.min(100, Math.round(v)));
-}
-
 function HelpTooltip({
   text,
   children,
@@ -344,12 +341,6 @@ export default function Report() {
     displayUser.previousBrainAge
   );
 
-  const strengthText =
-    effectiveReport.strengthText ??
-    '최근 세션 기준으로 상대적으로 높은 지표가 강점으로 나타납니다.';
-  const weaknessText =
-    effectiveReport.weaknessText ??
-    '낮은 지표는 집중 트레이닝으로 단계적으로 끌어올릴 수 있습니다.';
   const evidenceCards =
     effectiveReport.metricEvidenceCards && effectiveReport.metricEvidenceCards.length > 0
       ? effectiveReport.metricEvidenceCards
@@ -523,137 +514,11 @@ export default function Report() {
         </div>
       </section>
 
-      {/* 뇌지컬 종합 평가 */}
-      <section className="space-y-4">
-        <h3 className="text-lg font-bold text-white">뇌지컬 종합 평가</h3>
-
-        {/* 문제 분석 */}
-        <div>
-          <h4 className="text-sm font-semibold text-white mb-2">문제 분석</h4>
-          <div
-            className="rounded-2xl p-4 space-y-2.5"
-            style={{ backgroundColor: '#1A1A1A', border: '1px solid #2A2A2A' }}
-          >
-            {evidenceCards.slice(0, 3).map((c) => (
-              <div key={c.key} className="flex items-start gap-2">
-                <span
-                  className="mt-0.5 inline-flex w-5 h-5 rounded-full items-center justify-center text-[11px] font-bold shrink-0"
-                  style={{ backgroundColor: '#AAED10', color: '#000' }}
-                >
-                  ✓
-                </span>
-                <p className="text-sm leading-relaxed text-white">
-                  <span className="font-semibold">{c.label}</span>
-                  <span style={{ color: '#B6B6B9' }}> · {c.body}</span>
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* 감정 분석 — 3개 원형 게이지 */}
-        <div>
-          <h4 className="text-sm font-semibold text-white mb-2">감정 분석</h4>
-          <div
-            className="rounded-2xl p-4 grid grid-cols-3 gap-3"
-            style={{ backgroundColor: '#1A1A1A', border: '1px solid #2A2A2A' }}
-          >
-            {[
-              { label: '지침', value: clampPct(100 - (effectiveReport.metricsScore.endurance ?? 70)) },
-              { label: '긴장', value: clampPct(100 - (effectiveReport.metricsScore.focus ?? 70)) },
-              { label: '활력', value: clampPct(effectiveReport.metricsScore.agility ?? 70) },
-            ].map((g) => (
-              <div key={g.label} className="flex flex-col items-center">
-                <div className="relative w-16 h-16">
-                  <svg className="absolute inset-0 -rotate-90" viewBox="0 0 64 64">
-                    <circle cx="32" cy="32" r="26" stroke="#2A2A2A" strokeWidth="5" fill="none" />
-                    <circle
-                      cx="32"
-                      cy="32"
-                      r="26"
-                      stroke="#AAED10"
-                      strokeWidth="5"
-                      fill="none"
-                      strokeDasharray={`${(g.value / 100) * 163.4} 163.4`}
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-white text-sm font-bold">{g.value}%</span>
-                  </div>
-                </div>
-                <span className="text-xs mt-2" style={{ color: '#B6B6B9' }}>
-                  {g.label}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* 적응 분석 */}
-        <div>
-          <h4 className="text-sm font-semibold text-white mb-2">적응 분석</h4>
-          <div
-            className="rounded-2xl p-4"
-            style={{ backgroundColor: '#1A1A1A', border: '1px solid #2A2A2A' }}
-          >
-            <div className="flex items-center gap-2">
-              <span
-                className="inline-block w-2 h-2 rounded-full"
-                style={{ backgroundColor: '#AAED10' }}
-              />
-              <span className="text-sm text-white font-semibold">변화 감지 민감도</span>
-            </div>
-            <p className="text-sm mt-2 leading-relaxed" style={{ color: '#B6B6B9' }}>
-              {effectiveReport.lifeText}
-            </p>
-          </div>
-        </div>
-
-        {/* 종합 평가 / 강점 / 보완점 */}
-        <div>
-          <h4 className="text-sm font-semibold text-white mb-2">종합 평가</h4>
-          <div
-            className="rounded-2xl p-4 space-y-3"
-            style={{ backgroundColor: '#1A1A1A', border: '1px solid #2A2A2A' }}
-          >
-            <p className="text-sm leading-relaxed text-white">
-              {effectiveReport.factText}
-            </p>
-            <div className="pt-3 border-t" style={{ borderColor: '#2A2A2A' }}>
-              <p className="text-xs font-semibold" style={{ color: '#AAED10' }}>강점</p>
-              <p className="text-sm mt-1 leading-relaxed" style={{ color: '#B6B6B9' }}>
-                {strengthText}
-              </p>
-            </div>
-            <div className="pt-3 border-t" style={{ borderColor: '#2A2A2A' }}>
-              <p className="text-xs font-semibold" style={{ color: '#f87171' }}>보완점</p>
-              <p className="text-sm mt-1 leading-relaxed" style={{ color: '#B6B6B9' }}>
-                {weaknessText}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* 생활 밀착 피드백 */}
-        <div>
-          <h4 className="text-sm font-semibold text-white mb-2">생활 밀착 피드백</h4>
-          <div
-            className="rounded-2xl p-4"
-            style={{ backgroundColor: '#1A1A1A', border: '1px solid #2A2A2A' }}
-          >
-            <div className="flex items-start gap-2">
-              <span
-                className="mt-1 inline-block w-2 h-2 rounded-full shrink-0"
-                style={{ backgroundColor: '#f87171' }}
-              />
-              <p className="text-sm leading-relaxed text-white">
-                {effectiveReport.hintText}
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
+      {/* 뇌지컬 종합 평가 — 기업 리포트와 동일 UI */}
+      <ComprehensiveEvaluation
+        metricsScore={effectiveReport.metricsScore}
+        evidenceTitles={evidenceCards.slice(0, 3).map((c) => c.label)}
+      />
 
       {/* 추천 롤모델 */}
       <section
