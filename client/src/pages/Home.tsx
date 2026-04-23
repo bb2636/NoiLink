@@ -274,14 +274,21 @@ function StandardHome({ variant, home, user }: StandardProps) {
             <div>
               <div className="text-gray-400 text-xs mb-1">뇌 지수 리포트</div>
               <div className="flex items-center gap-2">
-                <span className="text-2xl">🧠</span>
+                {/* 뇌 아이콘 (lime) */}
+                <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="#AAED10" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9.5 3a3 3 0 0 0-3 3v.2A3 3 0 0 0 4 9v.5a3 3 0 0 0 1 2.2A3 3 0 0 0 4 14v.5a3 3 0 0 0 3 3 3 3 0 0 0 3 3 V3.7A3 3 0 0 0 9.5 3Z" />
+                  <path d="M14.5 3a3 3 0 0 1 3 3v.2A3 3 0 0 1 20 9v.5a3 3 0 0 1-1 2.2 3 3 0 0 1 1 2.3v.5a3 3 0 0 1-3 3 3 3 0 0 1-3 3 V3.7A3 3 0 0 1 14.5 3Z" />
+                </svg>
                 <span className="text-white text-2xl font-bold">{brainIndex}점</span>
               </div>
             </div>
             <div>
               <div className="text-gray-400 text-xs mb-1">BPM 평균</div>
               <div className="flex items-center gap-2">
-                <span className="text-2xl">💚</span>
+                {/* 심박 파형 아이콘 (lime) */}
+                <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="#AAED10" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 12h3l2-6 4 12 2-6 2 3h5" />
+                </svg>
                 <span className="text-white text-2xl font-bold">{bpmAvg}bpm</span>
               </div>
             </div>
@@ -291,7 +298,8 @@ function StandardHome({ variant, home, user }: StandardProps) {
             {MOCK_HOME.topTrainings.map((t) => (
               <span
                 key={t}
-                className="px-3 py-1 rounded-full text-xs border border-gray-600 text-gray-300"
+                className="px-3 py-1 rounded-full text-xs"
+                style={{ border: '1px solid #AAED10', color: '#AAED10', backgroundColor: 'transparent' }}
               >
                 {t}
               </span>
@@ -352,37 +360,37 @@ function StreakSection({
       className="rounded-2xl p-4 relative overflow-hidden"
       style={{
         background: isActive
-          ? 'linear-gradient(135deg, #1a2a1a 0%, #1A1A1A 100%)'
+          ? 'radial-gradient(120% 100% at 100% 50%, rgba(170,237,16,0.18) 0%, rgba(170,237,16,0.05) 35%, #1A1A1A 70%)'
           : 'linear-gradient(135deg, #1a2a1a 0%, #1A1A1A 100%)',
       }}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between relative z-10">
         <div className="flex-1">
           <div className="text-white font-semibold mb-1">연속 트레이닝 트렌드</div>
-          <div className="text-gray-400 text-xs leading-relaxed">
+          <div className="text-gray-400 text-xs leading-relaxed whitespace-pre-line">
             {isActive ? '꾸준함이 확실히 쌓이고 있어요!' : '오늘 훈련을 완료하면\n연속 트레이닝 불씨가 켜져요!'}
           </div>
         </div>
 
         {isActive ? (
           // 원형 진행도 + 일수 + 불꽃
-          <div className="relative w-16 h-16 flex items-center justify-center">
-            <svg className="absolute inset-0 -rotate-90" viewBox="0 0 64 64">
-              <circle cx="32" cy="32" r="28" stroke="#2A2A2A" strokeWidth="4" fill="none" />
+          <div className="relative w-20 h-20 flex items-center justify-center">
+            <svg className="absolute inset-0 -rotate-90" viewBox="0 0 80 80">
+              <circle cx="40" cy="40" r="34" stroke="#2A2A2A" strokeWidth="5" fill="none" />
               <circle
-                cx="32"
-                cy="32"
-                r="28"
+                cx="40"
+                cy="40"
+                r="34"
                 stroke="#AAED10"
-                strokeWidth="4"
+                strokeWidth="5"
                 fill="none"
-                strokeDasharray={`${(Math.min(streakDays, 7) / 7) * 175.9} 175.9`}
+                strokeDasharray={`${(Math.min(streakDays, 7) / 7) * 213.6} 213.6`}
                 strokeLinecap="round"
               />
             </svg>
             <div className="text-center">
-              <div className="text-white font-bold text-lg leading-none">{streakDays}일</div>
-              <div className="text-orange-400 text-sm">🔥</div>
+              <div className="text-white font-bold text-xl leading-none">{streakDays}일</div>
+              <div className="text-base mt-1">🔥</div>
             </div>
           </div>
         ) : (
