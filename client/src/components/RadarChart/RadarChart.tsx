@@ -53,9 +53,6 @@ export default function RadarChart({
     (data[selectedMetric.key as keyof typeof data] as number) || 0,
   );
   const arrowMetric = arrowKey ? METRICS.find((m) => m.key === arrowKey) : null;
-  const arrowValue = arrowMetric
-    ? Math.round((data[arrowMetric.key as keyof typeof data] as number) || 0)
-    : 0;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -219,17 +216,6 @@ export default function RadarChart({
     }
   };
 
-  // 빨간 화살표 툴팁 위치 (꼭짓점 바깥쪽 — 외곽 + 28px)
-  const arrowTooltipPos = (() => {
-    if (!arrowMetric) return null;
-    const ang = ((arrowMetric.angle - 90) * Math.PI) / 180;
-    const r = radius + 30;
-    return {
-      x: center + r * Math.cos(ang),
-      y: center + r * Math.sin(ang),
-    };
-  })();
-
   return (
     <div className="relative inline-block" style={{ width: size, height: size }}>
       <canvas
@@ -258,25 +244,6 @@ export default function RadarChart({
         </div>
       </div>
 
-      {/* 빨간 화살표 툴팁 — 클릭한 꼭짓점에만 노출 */}
-      {arrowMetric && arrowTooltipPos && (
-        <div
-          className="absolute pointer-events-none rounded-md px-2 py-1 text-[10px] leading-tight whitespace-nowrap shadow-lg"
-          style={{
-            left: arrowTooltipPos.x,
-            top: arrowTooltipPos.y,
-            transform: 'translate(-50%, -50%)',
-            backgroundColor: '#1A1A1A',
-            color: '#FFFFFF',
-            border: '1px solid #EF4444',
-          }}
-        >
-          <span className="font-semibold" style={{ color: '#EF4444' }}>
-            {arrowMetric.label}
-          </span>
-          <span className="ml-1 font-bold">{arrowValue}점</span>
-        </div>
-      )}
     </div>
   );
 }
