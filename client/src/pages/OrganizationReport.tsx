@@ -939,7 +939,7 @@ function HelpDot({
           type="button"
           aria-label="도움말"
           onClick={() => setOpen((v) => !v)}
-          className="w-[14px] h-[14px] rounded-full inline-flex items-center justify-center text-[9px] font-bold leading-none"
+          className="w-[1em] h-[1em] rounded-full inline-flex items-center justify-center text-[0.65em] font-bold leading-none"
           style={{ backgroundColor: '#FFFFFF', color: '#000000' }}
         >
           ?
@@ -947,7 +947,7 @@ function HelpDot({
       </div>
       {open && (
         <div
-          className="absolute left-0 top-full mt-2 z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-[12px]"
+          className="absolute left-0 top-full mt-2 z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-full px-3 py-1 text-[12px]"
           style={{ backgroundColor: '#2A2A2A', color: '#E5E5E5' }}
         >
           <span>{text}</span>
