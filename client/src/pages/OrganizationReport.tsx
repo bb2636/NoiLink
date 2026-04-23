@@ -18,6 +18,7 @@ import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
 import type { BrainimalType, OrganizationInsightReport, User } from '@noilink/shared';
 import { MOCK_MEMBERS as SHARED_MOCK_MEMBERS } from '../utils/mockMembers';
 import ComprehensiveEvaluation from '../components/ComprehensiveEvaluation';
+import RoleModelCard from '../components/RoleModelCard';
 
 // =============================================================================
 // 데모용 하드코딩 데이터 (이미지 시안 그대로)
@@ -575,68 +576,14 @@ function ComprehensiveTabSection({ report }: { report: OrganizationInsightReport
       {/* 뇌지컬 종합 평가 + 생활 밀착 피드백 — 개인 리포트와 동일 UI */}
       <ComprehensiveEvaluation metricsScore={myMetrics} />
 
-      {/* 롤모델 */}
-      <section
-        className="rounded-2xl p-6 border"
-        style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
-      >
-        <div className="text-center">
-          <p className="text-xs" style={{ color: '#888' }}>
-            {user?.organizationName ?? '송산치매안심센터'}님의 롤모델
-          </p>
-          <h4 className="text-3xl font-extrabold text-white mt-2">워런 버핏</h4>
-          <p className="text-sm mt-4" style={{ color: '#AAED10' }}>
-            "원칙이 있으면 흔들리지 않는다!"
-          </p>
-        </div>
-
-        <div
-          className="my-5 h-px"
-          style={{ backgroundColor: '#2A2A2A' }}
-        />
-
-        <div className="space-y-5">
-          <div>
-            <p className="text-[13px] mb-2.5">
-              <span className="font-semibold mr-2" style={{ color: '#AAED10' }}>
-                01
-              </span>
-              <span className="text-white font-medium">핵심특성</span>
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {['꾸준함', '장기 사고', '원칙 고수'].map((t) => (
-                <span
-                  key={t}
-                  className="px-3.5 py-1.5 rounded-full text-xs font-medium"
-                  style={{
-                    backgroundColor: '#1F2A0E',
-                    color: '#AAED10',
-                    border: '1px solid #3A5C1A',
-                  }}
-                >
-                  {t}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <p className="text-[13px] mb-2.5">
-              <span className="font-semibold mr-2" style={{ color: '#AAED10' }}>
-                02
-              </span>
-              <span className="text-white font-medium">뇌지컬 연결성</span>
-            </p>
-            <p className="text-sm font-semibold text-white leading-relaxed">
-              흔들리지 않는 원칙, 복리의 마법으로 돌아옵니다.
-            </p>
-            <p className="text-xs mt-2 leading-relaxed" style={{ color: '#888' }}>
-              단기 변동에 일희일비하지 않는 우직함이 버핏을 만들었습니다.
-              당신의 꾸준함도 곧 거대한 성과가 될 거예요.
-            </p>
-          </div>
-        </div>
-      </section>
+      {/* 롤모델 — 개인 리포트와 동일 UI */}
+      <RoleModelCard
+        subtitle={`${user?.organizationName ?? '송산치매안심센터'}님의 롤모델`}
+        name="워런 버핏"
+        quote="원칙이 있으면 흔들리지 않는다!"
+        connectionHeadline="흔들리지 않는 원칙, 복리의 마법으로 돌아옵니다."
+        connectionDetail="단기 변동에 일희일비하지 않는 우직함이 버핏을 만들었습니다. 당신의 꾸준함도 곧 거대한 성과가 될 거예요."
+      />
 
     </div>
   );

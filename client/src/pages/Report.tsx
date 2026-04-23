@@ -9,6 +9,7 @@ import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
 import { DEMO_PROFILE, DEMO_METRICS } from '../utils/demoProfile';
 import { getMockMember, buildMockMemberReport, buildMockMemberTrend } from '../utils/mockMembers';
 import ComprehensiveEvaluation from '../components/ComprehensiveEvaluation';
+import RoleModelCard from '../components/RoleModelCard';
 import type { Report, MetricsScore, Session } from '@noilink/shared';
 
 // TODO: 실제 API 데이터로 교체 — 홈/랭킹과 동일한 단일 데모 프로필 사용
@@ -520,22 +521,14 @@ export default function Report() {
         evidenceTitles={evidenceCards.slice(0, 3).map((c) => c.label)}
       />
 
-      {/* 추천 롤모델 */}
-      <section
-        className="rounded-2xl p-4 border"
-        style={{ backgroundColor: '#1A1A1A', borderColor: '#333' }}
-      >
-        <h3 className="text-lg font-bold mb-3 text-white">추천 롤모델</h3>
-        <div className="rounded-xl p-4" style={{ backgroundColor: '#0A0A0A' }}>
-          <p className="text-base font-bold" style={{ color: '#AAED10' }}>
-            {roleModel.name}
-          </p>
-          <p className="text-sm mt-1 text-white">{roleModel.oneLiner}</p>
-          <p className="text-sm mt-3 leading-relaxed" style={{ color: '#B6B6B9' }}>
-            {roleModel.description}
-          </p>
-        </div>
-      </section>
+      {/* 추천 롤모델 — 기업 리포트와 동일 UI */}
+      <RoleModelCard
+        subtitle={`${displayUser.name ?? '회원'}님의 롤모델`}
+        name={roleModel.name}
+        quote={roleModel.oneLiner}
+        connectionHeadline={roleModel.description}
+        connectionDetail={effectiveReport.lifeText}
+      />
 
       <p className="text-[11px] text-center leading-relaxed px-2" style={{ color: '#666' }}>
         본 검사 결과는 의학적 진단을 대체하지 않으며, 참고용으로만 사용하시기 바랍니다.
