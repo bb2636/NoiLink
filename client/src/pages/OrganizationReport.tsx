@@ -327,6 +327,9 @@ export default function OrganizationReport() {
       {(tab === 'all' || tab === 'members') && (
         <MembersTabSection members={members} />
       )}
+
+      {/* 모든 탭 공통 푸터: 의료 면책 조항 */}
+      <DisclaimerFooter />
     </div>
   );
 }
@@ -685,23 +688,30 @@ function ComprehensiveTabSection({ report: _report }: { report: OrganizationInsi
         </div>
       </section>
 
-      {/* 면책 조항 */}
-      <section
-        className="rounded-2xl p-4 border"
-        style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
-      >
-        <p className="text-[13px] font-bold text-white mb-2">
-          의료 면책 조항 (Disclaimer)
-        </p>
-        <p className="text-[12px] leading-relaxed" style={{ color: '#888' }}>
-          본 리포트는 웰니스 및 건강 관리를 위한 참고 자료이며, 전문적인 의료적
-          진단이나 치료를 대신할 수 없습니다. 측정 결과는 환경에 따라 달라질 수
-          있으며, 의학적 소견이 필요한 경우 반드시 전문의와 상담하시기 바랍니다.
-          (주)노이랩은 본 리포트의 해석 및 활용 결과에 대해 법적인 책임을 지지
-          않습니다.
-        </p>
-      </section>
     </div>
+  );
+}
+
+// =============================================================================
+// 의료 면책 조항 — 모든 탭 공통 푸터
+// =============================================================================
+function DisclaimerFooter() {
+  return (
+    <section
+      className="rounded-2xl p-4 border"
+      style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
+    >
+      <p className="text-[13px] font-bold text-white mb-2">
+        의료 면책 조항 (Disclaimer)
+      </p>
+      <p className="text-[12px] leading-relaxed" style={{ color: '#888' }}>
+        본 리포트는 웰니스 및 건강 관리를 위한 참고 자료이며, 전문적인 의료적
+        진단이나 치료를 대신할 수 없습니다. 측정 결과는 환경에 따라 달라질 수
+        있으며, 의학적 소견이 필요한 경우 반드시 전문의와 상담하시기 바랍니다.
+        (주)노이랩은 본 리포트의 해석 및 활용 결과에 대해 법적인 책임을 지지
+        않습니다.
+      </p>
+    </section>
   );
 }
 
