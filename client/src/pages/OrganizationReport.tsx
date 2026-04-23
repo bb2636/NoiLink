@@ -939,8 +939,8 @@ function HelpDot({
           type="button"
           aria-label="도움말"
           onClick={() => setOpen((v) => !v)}
-          className="w-[0.7em] h-[0.7em] rounded-full inline-flex items-center justify-center text-[0.5em] font-bold leading-none"
-          style={{ backgroundColor: '#FFFFFF', color: '#000000' }}
+          className="rounded-full inline-flex items-center justify-center font-bold leading-none shrink-0"
+          style={{ backgroundColor: '#FFFFFF', color: '#000000', width: 12, height: 12, fontSize: 8 }}
         >
           ?
         </button>
