@@ -410,6 +410,7 @@ function BrainimalTabSection({
   }, [report.brainimalDistribution, total]);
 
   const [hoveredType, setHoveredType] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
   const hoveredSlice = hoveredType
     ? slices.find((s) => s.type === hoveredType) ?? null
     : null;
@@ -420,17 +421,37 @@ function BrainimalTabSection({
 
   return (
     <section
-      className="rounded-2xl p-4 border space-y-4"
+      className="rounded-2xl p-4 border space-y-3"
       style={{ backgroundColor: '#1A1A1A', borderColor: '#333' }}
     >
-      <h3 className="text-base font-bold text-white">브레이니멀 유형 분포</h3>
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="w-full flex items-center justify-between"
+      >
+        <h3 className="text-base font-bold text-white">브레이니멀 유형 분포</h3>
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#9CA3AF"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={`transition-transform ${collapsed ? '' : 'rotate-180'}`}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
 
+      {!collapsed && (
       <div className="flex items-center justify-between gap-2 relative">
         {/* 도넛 */}
         <div className="relative shrink-0">
           <DonutChart
             slices={slices}
-            size={180}
+            size={140}
             onHover={setHoveredType}
           />
           {/* 호버 툴팁 */}
@@ -474,6 +495,7 @@ function BrainimalTabSection({
           ))}
         </div>
       </div>
+      )}
 
       {/* 대표 유형 카드 */}
       <div
