@@ -446,12 +446,12 @@ function BrainimalTabSection({
       </button>
 
       {!collapsed && (
-      <div className="flex items-center justify-between gap-2 relative">
+      <div className="flex items-center justify-around gap-2 relative">
         {/* 도넛 */}
         <div className="relative shrink-0">
           <DonutChart
             slices={slices}
-            size={140}
+            size={160}
             onHover={setHoveredType}
           />
           {/* 호버 툴팁 */}
@@ -1014,7 +1014,7 @@ function DonutChart({
   size: number;
   onHover?: (type: string | null) => void;
 }) {
-  const STROKE = 14;
+  const STROKE = 20;
   const R = (size - STROKE) / 2;
   const C = size / 2;
 
