@@ -425,12 +425,12 @@ function BrainimalTabSection({
     >
       <h3 className="text-base font-bold text-white">브레이니멀 유형 분포</h3>
 
-      <div className="flex items-start gap-4 relative">
+      <div className="flex items-center justify-between gap-2 relative">
         {/* 도넛 */}
-        <div className="relative">
+        <div className="relative shrink-0">
           <DonutChart
             slices={slices}
-            size={140}
+            size={180}
             onHover={setHoveredType}
           />
           {/* 호버 툴팁 */}
@@ -460,8 +460,8 @@ function BrainimalTabSection({
           )}
         </div>
 
-        {/* 범례 — % 만 표시 (이름 제거) */}
-        <div className="flex-1 grid grid-cols-2 gap-x-3 gap-y-0.5">
+        {/* 범례 — % 만 표시 (이름 제거), 우측 정렬 */}
+        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 shrink-0">
           <p className="text-[11px] text-gray-400 col-span-2 mb-1">분포 현황</p>
           {slices.map((s) => (
             <div key={s.type} className="flex items-center gap-1.5 text-[11px] py-0.5">
