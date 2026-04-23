@@ -327,15 +327,6 @@ export default function OrganizationReport() {
       {(tab === 'all' || tab === 'members') && (
         <MembersTabSection members={members} />
       )}
-
-      <div
-        className="rounded-2xl p-4 border text-[11px] leading-relaxed"
-        style={{ backgroundColor: '#0F0F0F', borderColor: '#2A2A2A', color: '#888' }}
-      >
-        <p className="font-semibold text-white mb-1">의료 면책 조항 (Disclaimer)</p>
-        본 리포트는 웰니스 및 건강 관리를 위한 참고 자료이며, 전문적인 의료적 진단이나 치료를 대신할 수 없습니다.
-        측정 결과는 환경에 따라 달라질 수 있으며, 의학적 소견이 필요한 경우 반드시 전문의와 상담하시기 바랍니다.
-      </div>
     </div>
   );
 }
@@ -695,9 +686,14 @@ function ComprehensiveTabSection({ report: _report }: { report: OrganizationInsi
       </section>
 
       {/* 면책 조항 */}
-      <section className="px-1 pt-2">
-        <p className="text-xs font-bold text-white mb-2">의료 면책 조항 (Disclaimer)</p>
-        <p className="text-[11px] leading-relaxed" style={{ color: '#888' }}>
+      <section
+        className="rounded-2xl p-4 border"
+        style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
+      >
+        <p className="text-[13px] font-bold text-white mb-2">
+          의료 면책 조항 (Disclaimer)
+        </p>
+        <p className="text-[12px] leading-relaxed" style={{ color: '#888' }}>
           본 리포트는 웰니스 및 건강 관리를 위한 참고 자료이며, 전문적인 의료적
           진단이나 치료를 대신할 수 없습니다. 측정 결과는 환경에 따라 달라질 수
           있으며, 의학적 소견이 필요한 경우 반드시 전문의와 상담하시기 바랍니다.
