@@ -242,7 +242,7 @@ export default function MultiTrendChart({ data, height = 220 }: MultiTrendChartP
       />
 
       {/* 고정 범례 — 6대 지표 색상 표시 (2행 3열, 가로/세로 가운데 정렬) */}
-      <div className="grid grid-cols-3 gap-x-6 gap-y-1 pt-2 justify-items-center items-center">
+      <div className="grid grid-cols-3 gap-x-2 gap-y-0.5 pt-2 justify-items-center items-center">
         {METRIC_ORDER.map(({ key, label, color }) => (
           <div key={key} className="flex items-center justify-center gap-1.5">
             <span
