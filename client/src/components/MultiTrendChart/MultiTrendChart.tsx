@@ -10,11 +10,11 @@ import { useEffect, useRef, useState } from 'react';
 
 const METRIC_ORDER = [
   { key: 'memory', label: '기억력', color: '#3b82f6' },
-  { key: 'comprehension', label: '이해력', color: '#a78bfa' },
-  { key: 'focus', label: '집중력', color: '#AAED10' },
-  { key: 'judgment', label: '판단력', color: '#fb923c' },
-  { key: 'endurance', label: '지구력', color: '#f472b6' },
-  { key: 'agility', label: '순발력', color: '#38bdf8' },
+  { key: 'comprehension', label: '이해력', color: '#2DD4BF' },
+  { key: 'focus', label: '집중력', color: '#F59E0B' },
+  { key: 'judgment', label: '판단력', color: '#EF4444' },
+  { key: 'endurance', label: '지구력', color: '#A78BFA' },
+  { key: 'agility', label: '순발력', color: '#84CC16' },
 ] as const;
 
 const ALL_KEYS = METRIC_ORDER.map((m) => m.key);

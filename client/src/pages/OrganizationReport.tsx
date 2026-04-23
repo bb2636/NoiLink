@@ -863,7 +863,7 @@ function HelpDot({ text }: { text: string }) {
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
         onClick={() => setOpen((v) => !v)}
-        className="w-3 h-3 rounded-full inline-flex items-center justify-center text-[8px] font-bold leading-none"
+        className="w-5 h-5 rounded-full inline-flex items-center justify-center text-[11px] font-bold leading-none"
         style={{ backgroundColor: '#FFFFFF', color: '#000000' }}
       >
         ?
