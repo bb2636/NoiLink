@@ -23,7 +23,12 @@ function gradientSvg(c1: string, c2: string, label: string): string {
     <rect width='400' height='250' fill='url(#g)'/>
     <text x='50%' y='50%' fill='rgba(255,255,255,0.65)' font-family='sans-serif' font-size='44' font-weight='700' text-anchor='middle' dominant-baseline='middle'>${label}</text>
   </svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  // CSS url() 무인용 컨텍스트에서도 안전하도록 작은따옴표/괄호까지 추가 인코딩
+  const encoded = encodeURIComponent(svg)
+    .replace(/'/g, '%27')
+    .replace(/\(/g, '%28')
+    .replace(/\)/g, '%29');
+  return `data:image/svg+xml;utf8,${encoded}`;
 }
 
 const IMAGES: Record<TrainingCatalogId, string> = {
