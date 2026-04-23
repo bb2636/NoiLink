@@ -36,7 +36,23 @@ export default function OrganizationMembers() {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    const cacheKey = `org-members-cache:${user.organizationId ?? user.id}`;
+    // 1) 캐시가 있으면 즉시 표시(로딩 스피너 없이) — stale-while-revalidate
+    let hasCache = false;
+    try {
+      const raw = sessionStorage.getItem(cacheKey);
+      if (raw) {
+        const cached = JSON.parse(raw) as User[];
+        if (Array.isArray(cached) && cached.length > 0) {
+          setMembers(cached);
+          setLoading(false);
+          hasCache = true;
+        }
+      }
+    } catch {
+      /* ignore cache parse error */
+    }
+    if (!hasCache) setLoading(true);
     try {
       const [pendingRes, approvedRes] = await Promise.all([
         api.getPendingOrganizationMembers(),
@@ -50,6 +66,11 @@ export default function OrganizationMembers() {
       const seen = new Set(pending.map((p) => p.id));
       const merged = [...pending, ...approved.filter((a) => !seen.has(a.id))];
       setMembers(merged);
+      try {
+        sessionStorage.setItem(cacheKey, JSON.stringify(merged));
+      } catch {
+        /* quota exceeded 등 무시 */
+      }
     } finally {
       setLoading(false);
     }
@@ -70,6 +91,16 @@ export default function OrganizationMembers() {
     );
   }, [members, keyword]);
 
+  const cacheKey = user ? `org-members-cache:${user.organizationId ?? user.id}` : null;
+  const writeCache = (next: User[]) => {
+    if (!cacheKey) return;
+    try {
+      sessionStorage.setItem(cacheKey, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
+
   const approve = async (m: User) => {
     setWorking(m.id);
     try {
@@ -80,7 +111,11 @@ export default function OrganizationMembers() {
           pendingOrganizationId: undefined,
           organizationId: user?.organizationId,
         };
-        setMembers((prev) => prev.map((x) => (x.id === m.id ? approved : x)));
+        setMembers((prev) => {
+          const next = prev.map((x) => (x.id === m.id ? approved : x));
+          writeCache(next);
+          return next;
+        });
         setExpandedId(null);
         setResultModal({
           open: true,
@@ -100,7 +135,11 @@ export default function OrganizationMembers() {
     try {
       const res = await api.rejectOrganizationMember(m.id);
       if (res.success) {
-        setMembers((prev) => prev.filter((x) => x.id !== m.id));
+        setMembers((prev) => {
+          const next = prev.filter((x) => x.id !== m.id);
+          writeCache(next);
+          return next;
+        });
         setExpandedId(null);
         setResultModal({
           open: true,
