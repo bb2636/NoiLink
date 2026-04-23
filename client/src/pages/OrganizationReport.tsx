@@ -16,6 +16,7 @@ import RadarChart from '../components/RadarChart';
 import MultiTrendChart, { type TrendPoint } from '../components/MultiTrendChart/MultiTrendChart';
 import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
 import type { BrainimalType, OrganizationInsightReport, User } from '@noilink/shared';
+import { MOCK_MEMBERS as SHARED_MOCK_MEMBERS } from '../utils/mockMembers';
 
 // =============================================================================
 // 데모용 하드코딩 데이터 (이미지 시안 그대로)
@@ -80,25 +81,7 @@ const MOCK_TREND: TrendPoint[] = (() => {
   });
 })();
 
-const MOCK_MEMBERS: User[] = [
-  { id: 'm1',  username: 'kim01',  name: '김순자', userType: 'ORGANIZATION', age: 78, brainAge: 76, brainimalType: 'FOX_BALANCED',     streak: 5, createdAt: '', lastTrainingDate: daysAgo(0)  },
-  { id: 'm2',  username: 'lee02',  name: '이영희', userType: 'ORGANIZATION', age: 82, brainAge: 84, brainimalType: 'BEAR_ENDURANCE',   streak: 3, createdAt: '', lastTrainingDate: daysAgo(1)  },
-  { id: 'm3',  username: 'park03', name: '박정수', userType: 'ORGANIZATION', age: 75, brainAge: 71, brainimalType: 'OWL_FOCUS',        streak: 8, createdAt: '', lastTrainingDate: daysAgo(0)  },
-  { id: 'm4',  username: 'choi04', name: '최말순', userType: 'ORGANIZATION', age: 80, brainAge: 81, brainimalType: 'KOALA_CALM',       streak: 2, createdAt: '', lastTrainingDate: daysAgo(2)  },
-  { id: 'm5',  username: 'jung05', name: '정복례', userType: 'ORGANIZATION', age: 77, brainAge: 75, brainimalType: 'FOX_BALANCED',     streak: 6, createdAt: '', lastTrainingDate: daysAgo(1)  },
-  { id: 'm6',  username: 'kang06', name: '강만수', userType: 'ORGANIZATION', age: 84, brainAge: 87, brainimalType: 'CHEETAH_JUDGMENT', streak: 1, createdAt: '', lastTrainingDate: daysAgo(4)  },
-  { id: 'm7',  username: 'shin07', name: '신옥자', userType: 'ORGANIZATION', age: 79, brainAge: 78, brainimalType: 'DOLPHIN_BRILLIANT',streak: 4, createdAt: '', lastTrainingDate: daysAgo(0)  },
-  { id: 'm8',  username: 'song08', name: '송상철', userType: 'ORGANIZATION', age: 76, brainAge: 73, brainimalType: 'TIGER_STRATEGIC',  streak: 7, createdAt: '', lastTrainingDate: daysAgo(1)  },
-  { id: 'm9',  username: 'oh09',   name: '오금자', userType: 'ORGANIZATION', age: 81, brainAge: 82, brainimalType: 'CAT_DELICATE',     streak: 2, createdAt: '', lastTrainingDate: daysAgo(3)  },
-  { id: 'm10', username: 'yoon10', name: '윤덕수', userType: 'ORGANIZATION', age: 78, brainAge: 76, brainimalType: 'EAGLE_INSIGHT',    streak: 5, createdAt: '', lastTrainingDate: daysAgo(0)  },
-  { id: 'm11', username: 'lim11',  name: '임순녀', userType: 'ORGANIZATION', age: 83, brainAge: 86, brainimalType: 'LION_BOLD',        streak: 1, createdAt: '', lastTrainingDate: daysAgo(5)  },
-  { id: 'm12', username: 'han12',  name: '한봉수', userType: 'ORGANIZATION', age: 75, brainAge: 72, brainimalType: 'DOG_SOCIAL',       streak: 9, createdAt: '', lastTrainingDate: daysAgo(0)  },
-];
-function daysAgo(d: number): string {
-  const x = new Date();
-  x.setDate(x.getDate() - d);
-  return x.toISOString();
-}
+const MOCK_MEMBERS: User[] = SHARED_MOCK_MEMBERS;
 void ({} as BrainimalType); // keep import alive
 
 // 도넛 색상 팔레트 (브레이니멀 분포용)

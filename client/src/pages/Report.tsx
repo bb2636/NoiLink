@@ -7,6 +7,7 @@ import MultiTrendChart, { type TrendPoint } from '../components/MultiTrendChart/
 import { calculateBrainAge, calculateBrainAgeChange } from '../utils/brainAge';
 import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
 import { DEMO_PROFILE, DEMO_METRICS } from '../utils/demoProfile';
+import { getMockMember, buildMockMemberReport, buildMockMemberTrend } from '../utils/mockMembers';
 import type { Report, MetricsScore, Session } from '@noilink/shared';
 
 // TODO: 실제 API 데이터로 교체 — 홈/랭킹과 동일한 단일 데모 프로필 사용
@@ -158,6 +159,17 @@ export default function Report() {
     try {
       if (!hasCache) setLoading(true);
 
+      // 소속 인원 현황에서 클릭한 더미 회원이면 합성 데이터 사용 (API 호출 안 함)
+      const mockMember = getMockMember(reportId);
+      if (mockMember) {
+        const synth = buildMockMemberReport(mockMember);
+        const synthTrend = buildMockMemberTrend(mockMember);
+        setReport(synth);
+        setTrendPoints(synthTrend);
+        reportCache.set(key, { report: synth, trendPoints: synthTrend });
+        return;
+      }
+
       let nextReport: Report | null = null;
       if (reportId) {
         const reportRes = await api.get<Report>(`/reports/${reportId}`);
@@ -296,20 +308,35 @@ export default function Report() {
     );
   }
 
+  // 소속 인원 현황에서 진입한 경우 → 해당 멤버 정보로 프로필 표기 오버라이드
+  const viewingMember = getMockMember(reportId);
+
   // TODO: 실제 리포트 생성 시 목업 제거 — 데모 환경에서 빈 화면 방지
   const effectiveReport: Report = report ?? { ...MOCK_PERSONAL_REPORT, userId: user.id };
   const effectiveTrendPoints: TrendPoint[] =
     trendPoints.length > 0 ? trendPoints : MOCK_TREND_POINTS;
+
+  // 표시용 사용자 정보 — 멤버 보기일 땐 멤버 데이터 사용
+  const displayUser = {
+    name: viewingMember?.name ?? user.name,
+    age: viewingMember?.age ?? user.age,
+    brainAge: viewingMember?.brainAge ?? user.brainAge,
+    previousBrainAge: viewingMember ? undefined : user.previousBrainAge,
+    organizationName: viewingMember
+      ? user.organizationName ?? '소속 기관'
+      : user.organizationName,
+    organizationId: viewingMember ? user.organizationId : user.organizationId,
+  };
 
   const brainimalInfo = effectiveReport.brainimalType
     ? getBrainimalIcon(effectiveReport.brainimalType)
     : DEFAULT_BRAINIMAL;
 
   const displayBrainAge =
-    user.brainAge ?? calculateBrainAge(effectiveReport.metricsScore, user.age);
+    displayUser.brainAge ?? calculateBrainAge(effectiveReport.metricsScore, displayUser.age);
   const brainAgeChange = calculateBrainAgeChange(
     displayBrainAge,
-    user.previousBrainAge
+    displayUser.previousBrainAge
   );
 
   const strengthText =
@@ -331,7 +358,7 @@ export default function Report() {
       description: brainimalInfo.description,
     };
 
-  const orgLabel = user.organizationName || (user.organizationId ? '소속 기관' : null);
+  const orgLabel = displayUser.organizationName || (displayUser.organizationId ? '소속 기관' : null);
 
   return (
     <div
@@ -360,12 +387,12 @@ export default function Report() {
                   />
                 ) : (
                   <span className="text-xl font-bold" style={{ color: '#AAED10' }}>
-                    {user.name.charAt(0)}
+                    {displayUser.name.charAt(0)}
                   </span>
                 )}
               </div>
               <span className="text-white font-semibold text-[15px]">
-                {user.name} 님
+                {displayUser.name} 님
               </span>
             </div>
             {orgLabel && (
@@ -383,7 +410,7 @@ export default function Report() {
             <div className="flex items-center gap-3">
               <span className="text-xs" style={{ color: '#888' }}>나이</span>
               <span className="text-white font-semibold text-sm">
-                {user.age != null ? `${user.age}세` : '-'}
+                {displayUser.age != null ? `${displayUser.age}세` : '-'}
               </span>
             </div>
             <div className="flex items-center gap-2">
