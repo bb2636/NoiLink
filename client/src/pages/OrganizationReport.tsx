@@ -347,10 +347,7 @@ function MetricsTabSection({
   showTitle: boolean;
 }) {
   return (
-    <section
-      className="rounded-2xl p-4 border space-y-5"
-      style={{ backgroundColor: '#1A1A1A', borderColor: '#333' }}
-    >
+    <section className="space-y-5">
       {showTitle && <h3 className="text-base font-bold text-white">6대 지표 그래프</h3>}
 
       <div>
@@ -421,10 +418,7 @@ function BrainimalTabSection({
   const hoveredInfo = hoveredSlice ? getBrainimalIcon(hoveredSlice.type) : null;
 
   return (
-    <section
-      className="rounded-2xl p-4 border space-y-3"
-      style={{ backgroundColor: '#1A1A1A', borderColor: '#333' }}
-    >
+    <section className="space-y-3">
       <button
         type="button"
         onClick={() => setCollapsed((c) => !c)}
@@ -574,22 +568,19 @@ function ComprehensiveTabSection({ report: _report }: { report: OrganizationInsi
         </p>
       </section>
 
-      {/* 뇌지컬 종합 평가 — 접이식 */}
-      <section
-        className="rounded-2xl border"
-        style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
-      >
+      {/* 뇌지컬 종합 평가 — 외곽 카드 테두리 제거(내부 상세분석 카드는 유지) */}
+      <section>
         <button
           type="button"
           onClick={() => setEvalOpen((v) => !v)}
-          className="w-full flex items-center justify-between p-4"
+          className="w-full flex items-center justify-between"
         >
           <span className="text-base font-bold text-white">뇌지컬 종합 평가</span>
           <span className="text-gray-400">{evalOpen ? '⌃' : '⌄'}</span>
         </button>
 
         {evalOpen && (
-          <div className="px-4 pb-4 space-y-5">
+          <div className="pt-4 space-y-5">
             {/* 상세 분석 — 외곽 카드로 감싼 영역 */}
             <div>
               <h4

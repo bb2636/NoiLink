@@ -423,28 +423,20 @@ export default function Report() {
         </div>
       </section>
 
-      {/* 6대 지표 그래프 */}
+      {/* 6대 지표 그래프 — 카드 테두리 제거 */}
       <section>
         <h3 className="text-base font-bold text-white mb-2">6대 지표 그래프</h3>
-        <div
-          className="rounded-2xl p-4 border"
-          style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
-        >
-          <p className="text-sm font-semibold text-white mb-3">핵심 두뇌 능력 결과</p>
-          <div className="flex justify-center">
-            <RadarChart data={effectiveReport.metricsScore} size={280} />
-          </div>
-          <p className="text-[11px] mt-3" style={{ color: '#666' }}>
-            그래프 끝(꼭짓점)을 누르면 해당 항목의 점수가 표시됩니다.
-          </p>
+        <p className="text-sm font-semibold text-white mb-3">핵심 두뇌 능력 결과</p>
+        <div className="flex justify-center">
+          <RadarChart data={effectiveReport.metricsScore} size={280} />
         </div>
+        <p className="text-[11px] mt-3" style={{ color: '#666' }}>
+          그래프 끝(꼭짓점)을 누르면 해당 항목의 점수가 표시됩니다.
+        </p>
       </section>
 
-      {/* 변화추이 */}
-      <section
-        className="rounded-2xl p-4 border"
-        style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
-      >
+      {/* 변화추이 — 카드 테두리 제거 */}
+      <section>
         <div className="flex items-center justify-between mb-3">
           <HelpTooltip
             text={`최근 ${orgLabel ? `‘${orgLabel}’` : '세션'}을 기준으로 표시된 변화추이 입니다`}
@@ -455,11 +447,8 @@ export default function Report() {
         <MultiTrendChart data={effectiveTrendPoints} height={220} />
       </section>
 
-      {/* 뇌지컬 종합 평가 */}
-      <section
-        className="rounded-2xl p-4 border space-y-5"
-        style={{ backgroundColor: '#1A1A1A', borderColor: '#333' }}
-      >
+      {/* 뇌지컬 종합 평가 — 외곽 카드 테두리 제거(내부 항목별 카드는 유지) */}
+      <section className="space-y-5">
         <h3 className="text-lg font-bold text-white">뇌지컬 종합 평가</h3>
 
         <div>
