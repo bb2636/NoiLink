@@ -364,9 +364,10 @@ function MetricsTabSection({
       </div>
 
       <div>
-        <div className="flex items-center gap-1.5 mb-2">
-          <h4 className="text-sm font-semibold text-white">변화 추이</h4>
-          <HelpDot text={`최근 '${report.organizationName}'를 기준으로 표시된 변화추이 입니다`} />
+        <div className="mb-2">
+          <HelpDot text={`최근 '${report.organizationName}'를 기준으로 표시된 변화추이 입니다`}>
+            <h4 className="text-sm font-semibold text-white">변화 추이</h4>
+          </HelpDot>
         </div>
         {trendPoints.length > 0 ? (
           <MultiTrendChart data={trendPoints} height={200} />
@@ -930,28 +931,34 @@ function MemberRow({ member }: { member: User }) {
 // 공용 컴포넌트
 // =============================================================================
 // 헤더 옆 작은 도움말 점(?) — 폰트 크기와 비슷한 크기로 유지
-function HelpDot({ text }: { text: string }) {
+// 제목 + "?" + 안내 말풍선(타이틀 줄 아래에 좌측 정렬로 표시) — 첨부 이미지와 동일
+function HelpDot({
+  text,
+  children,
+}: {
+  text: string;
+  children: React.ReactNode;
+}) {
   const [open, setOpen] = useState(true);
   return (
-    <span className="relative inline-flex">
-      <button
-        type="button"
-        aria-label="도움말"
-        onClick={() => setOpen((v) => !v)}
-        className="w-[18px] h-[18px] rounded-full inline-flex items-center justify-center text-[11px] font-bold leading-none"
-        style={{ backgroundColor: '#3A3A3A', color: '#FFFFFF' }}
-      >
-        ?
-      </button>
+    <div className="relative inline-block">
+      <div className="flex items-center gap-1.5">
+        {children}
+        <button
+          type="button"
+          aria-label="도움말"
+          onClick={() => setOpen((v) => !v)}
+          className="w-[18px] h-[18px] rounded-full inline-flex items-center justify-center text-[11px] font-bold leading-none"
+          style={{ backgroundColor: '#3A3A3A', color: '#FFFFFF' }}
+        >
+          ?
+        </button>
+      </div>
       {open && (
-        <span
-          className="absolute left-0 top-[26px] z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-[12px]"
+        <div
+          className="absolute left-0 top-full mt-2 z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-[12px]"
           style={{ backgroundColor: '#2A2A2A', color: '#E5E5E5' }}
         >
-          <span
-            className="absolute -top-1 left-2 w-2 h-2 rotate-45"
-            style={{ backgroundColor: '#2A2A2A' }}
-          />
           <span>{text}</span>
           <button
             type="button"
@@ -965,9 +972,9 @@ function HelpDot({ text }: { text: string }) {
           >
             ✕
           </button>
-        </span>
+        </div>
       )}
-    </span>
+    </div>
   );
 }
 
