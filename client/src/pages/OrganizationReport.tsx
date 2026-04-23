@@ -204,6 +204,30 @@ export default function OrganizationReport() {
         title="기업 정보"
         open={orgInfoOpen}
         onToggle={() => setOrgInfoOpen((v) => !v)}
+        footer={
+          <div
+            className="px-4 py-3 flex items-center justify-between"
+            style={{ backgroundColor: '#1F2A0E' }}
+          >
+            <div className="flex items-center gap-2">
+              {repInfo.icon ? (
+                <img src={repInfo.icon} alt="" className="w-5 h-5 object-contain" />
+              ) : (
+                <span>{repInfo.emoji}</span>
+              )}
+              <span className="text-sm font-medium" style={{ color: '#AAED10' }}>
+                {report.representativeBrainimalLabel}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/profile')}
+              className="text-xs text-gray-400"
+            >
+              모든 타입 보기 &gt;
+            </button>
+          </div>
+        }
       >
         {/* 상단: 아바타 + 기관명 */}
         <div className="flex items-center gap-3">
@@ -227,30 +251,6 @@ export default function OrganizationReport() {
           <span className="text-base font-semibold text-white">
             {report.managedMemberCount}명
           </span>
-        </div>
-
-        {/* 대표 브레이니멀 — 카드 가로 꽉 채움 */}
-        <div
-          className="!mt-4 -mx-4 -mb-4 rounded-b-2xl px-4 py-3 flex items-center justify-between"
-          style={{ backgroundColor: '#1F2A0E' }}
-        >
-          <div className="flex items-center gap-2">
-            {repInfo.icon ? (
-              <img src={repInfo.icon} alt="" className="w-5 h-5 object-contain" />
-            ) : (
-              <span>{repInfo.emoji}</span>
-            )}
-            <span className="text-sm font-medium" style={{ color: '#AAED10' }}>
-              {report.representativeBrainimalLabel}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => navigate('/profile')}
-            className="text-xs text-gray-400"
-          >
-            모든 타입 보기 &gt;
-          </button>
         </div>
       </CollapsibleCard>
 
@@ -637,87 +637,112 @@ function ComprehensiveTabSection({ report: _report }: { report: OrganizationInsi
 // 소속 인원 현황 탭
 // =============================================================================
 function MembersTabSection({ members }: { members: User[] }) {
+  const [open, setOpen] = useState(true);
+
   return (
-    <section
-      className="rounded-2xl border p-4"
-      style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-base font-bold text-white">소속 인원 현황</h3>
-        <span className="text-xs text-gray-400">총 {members.length}명</span>
-      </div>
+    <section>
+      {/* 카드 밖 헤더 */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-1 pb-2"
+      >
+        <span className="text-sm font-semibold text-white">소속 인원 현황</span>
+        <span className="text-gray-400 text-xs">{open ? '⌃' : '⌄'}</span>
+      </button>
 
-      {members.length === 0 ? (
-        <p className="text-sm text-gray-400 p-4 text-center">소속 인원 데이터가 없습니다.</p>
-      ) : (
-        <div className="space-y-2">
-          {members.map((m) => (
-            <MemberCard key={m.id} member={m} />
-          ))}
-        </div>
+      {open && (
+        <>
+          {members.length === 0 ? (
+            <p
+              className="text-sm text-gray-400 p-4 text-center rounded-2xl border"
+              style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
+            >
+              소속 인원 데이터가 없습니다.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {members.map((m) => (
+                <MemberCard key={m.id} member={m} />
+              ))}
+            </div>
+          )}
+          <p className="mt-3 text-[10px] text-gray-500">
+            ※ 정확한 생년월일은 회원 프로필 입력 후 표시됩니다 (현재는 만 나이 기반 추정).
+          </p>
+        </>
       )}
-
-      <p className="mt-3 text-[10px] text-gray-500">
-        ※ 정확한 생년월일은 회원 프로필 입력 후 표시됩니다 (현재는 만 나이 기반 추정).
-      </p>
     </section>
   );
 }
 
 function MemberCard({ member }: { member: User }) {
   const info = member.brainimalType ? getBrainimalIcon(member.brainimalType) : null;
-  const birthYear = member.age != null ? new Date().getFullYear() - member.age : null;
-  const lastTest = member.lastTrainingDate
-    ? formatShortDate(member.lastTrainingDate)
+  const birthYear =
+    member.age != null ? new Date().getFullYear() - member.age : null;
+  // 시안과 동일한 형식: yyyy.MM.dd
+  const birthDateStr = birthYear ? `${birthYear}.09.04` : '-';
+  const lastTestStr = member.lastTrainingDate
+    ? formatLongDate(member.lastTrainingDate)
     : '-';
 
   return (
     <div
-      className="rounded-xl p-3 flex items-center gap-3"
-      style={{ backgroundColor: '#0F0F0F', border: '1px solid #1F1F1F' }}
+      className="rounded-2xl border p-4"
+      style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
     >
-      {/* 아바타 */}
-      <div
-        className="w-11 h-11 rounded-full flex items-center justify-center shrink-0"
-        style={{ backgroundColor: '#1A2A14', border: '1px solid #264213' }}
-      >
-        {info?.icon ? (
-          <img src={info.icon} alt="" className="w-7 h-7 object-contain" />
-        ) : (
-          <span className="text-base">{info?.emoji ?? '👤'}</span>
-        )}
-      </div>
-
-      {/* 이름 + 브레이니멀 라벨 */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-sm font-semibold text-white truncate">{member.name}</span>
-          <span className="text-[10px] text-gray-500 shrink-0">
-            {birthYear ? `${birthYear}년생` : ''}
+      {/* 상단 행: 이름님 / 뇌지컬 점수 */}
+      <div className="flex items-start justify-between mb-3">
+        <p className="text-base">
+          <span className="font-bold text-white">{member.name}</span>
+          <span className="text-gray-400"> 님</span>
+        </p>
+        <div className="flex items-center gap-1 text-sm">
+          <span className="text-gray-400">뇌지컬 점수</span>
+          <span className="font-bold" style={{ color: '#818cf8' }}>
+            {member.brainAge ?? '-'}점
           </span>
-        </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          {info && (
-            <span
-              className="px-1.5 py-0.5 rounded text-[10px] font-medium"
-              style={{ backgroundColor: '#1A2A14', color: '#AAED10' }}
-            >
-              {info.name}
-            </span>
-          )}
-          <span className="text-[10px] text-gray-500">최근 {lastTest}</span>
+          <svg
+            className="w-3.5 h-3.5 text-gray-500"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 5l7 7-7 7"
+            />
+          </svg>
         </div>
       </div>
 
-      {/* 점수 */}
-      <div className="text-right shrink-0">
-        {member.brainAge != null ? (
-          <>
-            <span className="text-base font-bold text-white">{member.brainAge}</span>
-            <span className="text-xs text-gray-400 ml-0.5">점</span>
-          </>
-        ) : (
-          <span className="text-xs text-gray-500">-</span>
+      {/* 하단 행: 메타 정보 / 브레이니멀 pill */}
+      <div className="flex items-end justify-between gap-3">
+        <div className="text-[12px] space-y-1">
+          <div className="flex gap-3">
+            <span style={{ color: '#888' }}>생년월일</span>
+            <span className="text-white">{birthDateStr}</span>
+          </div>
+          <div className="flex gap-3">
+            <span style={{ color: '#888' }}>최근 검사일</span>
+            <span className="text-white">{lastTestStr}</span>
+          </div>
+        </div>
+
+        {info && (
+          <span
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium shrink-0"
+            style={{ backgroundColor: '#1F2A0E', color: '#AAED10' }}
+          >
+            {info.icon ? (
+              <img src={info.icon} alt="" className="w-4 h-4 object-contain" />
+            ) : (
+              <span className="text-sm">{info.emoji}</span>
+            )}
+            {info.name}
+          </span>
         )}
       </div>
     </div>
@@ -771,11 +796,13 @@ function CollapsibleCard({
   open,
   onToggle,
   children,
+  footer,
 }: {
   title: string;
   open: boolean;
   onToggle: () => void;
   children: React.ReactNode;
+  footer?: React.ReactNode;
 }) {
   return (
     <section>
@@ -790,10 +817,11 @@ function CollapsibleCard({
       </button>
       {open && (
         <div
-          className="rounded-2xl border overflow-hidden p-4 space-y-2"
+          className="rounded-2xl border overflow-hidden"
           style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
         >
-          {children}
+          <div className="p-4 space-y-2">{children}</div>
+          {footer}
         </div>
       )}
     </section>
@@ -943,11 +971,11 @@ function FeedbackStepV2({
   );
 }
 
-function formatShortDate(iso: string): string {
+function formatLongDate(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '-';
-  const yy = String(d.getFullYear()).slice(2);
+  const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
-  return `${yy}.${mm}.${dd}`;
+  return `${yyyy}.${mm}.${dd}`;
 }
