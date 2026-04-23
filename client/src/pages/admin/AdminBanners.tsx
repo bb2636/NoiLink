@@ -7,6 +7,7 @@ import Pagination from '../../components/Admin/Pagination';
 import Modal from '../../components/Admin/Modal';
 import ConfirmModal from '../../components/ConfirmModal/ConfirmModal';
 import SuccessBanner from '../../components/SuccessBanner/SuccessBanner';
+import { placeholderImage, fallbackImg } from '../../utils/imagePlaceholder';
 
 interface Banner {
   id: string;
@@ -473,12 +474,10 @@ export default function AdminBanners() {
                         {/* 썸네일 */}
                         <td className="px-4 py-4 text-center">
                           <img
-                            src={banner.imageUrl || banner.thumbnailUrl || ''}
+                            src={banner.imageUrl || banner.thumbnailUrl || placeholderImage(banner.id || banner.title, banner.title)}
+                            onError={fallbackImg(banner.id || banner.title, banner.title)}
                             alt={banner.title}
                             className="w-12 h-12 rounded object-cover mx-auto"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="48" height="48"%3E%3Crect width="48" height="48" fill="%23E5E5E5"/%3E%3C/svg%3E';
-                            }}
                           />
                         </td>
                         {/* 등록일 */}
@@ -671,13 +670,11 @@ export default function AdminBanners() {
                   이미지
                 </label>
                 <img
-                  src={selectedBanner.imageUrl || selectedBanner.thumbnailUrl || ''}
+                  src={selectedBanner.imageUrl || selectedBanner.thumbnailUrl || placeholderImage(selectedBanner.id || selectedBanner.title, selectedBanner.title)}
+                  onError={fallbackImg(selectedBanner.id || selectedBanner.title, selectedBanner.title)}
                   alt={selectedBanner.title}
                   className="w-full rounded-lg object-cover"
                   style={{ maxHeight: '400px' }}
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="600" height="400"%3E%3Crect width="600" height="400" fill="%23E5E5E5"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23999" font-size="16"%3E이미지를 불러올 수 없습니다%3C/text%3E%3C/svg%3E';
-                  }}
                 />
               </div>
               <div>

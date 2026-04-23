@@ -5,6 +5,7 @@ import { useHome } from '../hooks/useHome';
 import { useNavigate } from 'react-router-dom';
 import Logo from '../components/Logo';
 import { getBrainimalIcon, BRAINIMAL_INFO } from '../utils/brainimalIcons';
+import { placeholderImage, fallbackImg } from '../utils/imagePlaceholder';
 import { DEMO_PROFILE } from '../utils/demoProfile';
 import { api } from '../utils/api';
 import type { User } from '@noilink/shared';
@@ -200,7 +201,12 @@ function StandardHome({ variant, home, user }: StandardProps) {
                 transition={{ duration: 0.3 }}
                 className="relative w-full h-full"
               >
-                <img src={currentBanner.imageUrl} alt={currentBanner.title} className="w-full h-full object-cover" />
+                <img
+                  src={currentBanner.imageUrl || placeholderImage(currentBanner.id, currentBanner.title)}
+                  alt={currentBanner.title}
+                  onError={fallbackImg(currentBanner.id, currentBanner.title)}
+                  className="w-full h-full object-cover"
+                />
               </motion.div>
             ) : (
               <div className="w-full h-full flex items-center justify-center text-7xl opacity-30" style={{ color: '#AAED10' }}>
@@ -542,8 +548,9 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
             {currentBanner ? (
               <motion.img
                 key={currentBanner.id}
-                src={currentBanner.imageUrl}
+                src={currentBanner.imageUrl || placeholderImage(currentBanner.id, currentBanner.title)}
                 alt={currentBanner.title}
+                onError={fallbackImg(currentBanner.id, currentBanner.title)}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
