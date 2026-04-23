@@ -569,30 +569,47 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.05 }}
-          className="rounded-2xl p-4 mb-4"
-          style={{ backgroundColor: '#1A1A1A' }}
+          className="rounded-2xl mb-4 overflow-hidden border"
+          style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
         >
-          <div className="flex items-center gap-2 mb-3">
-            <div
-              className="w-7 h-7 rounded-full flex items-center justify-center"
-              style={{ backgroundColor: '#AAED10' }}
-            >
-              <span className="text-black text-sm">🏢</span>
+          <div className="p-4">
+            {/* 상단: 아바타 + 기관명 */}
+            <div className="flex items-center gap-3">
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center"
+                style={{ backgroundColor: '#264213' }}
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#AAED10" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 12h.01M9 15h.01M13 9h.01M13 12h.01M13 15h.01" />
+                </svg>
+              </div>
+              <p className="text-base font-semibold text-white">{orgName}</p>
             </div>
-            <span className="text-white text-base font-semibold flex-1">{orgName}</span>
+
+            {/* 구분선 */}
+            <div className="h-px my-4" style={{ backgroundColor: '#262626' }} />
+
+            {/* 총 관리 인원 */}
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-400">총 관리 인원</span>
+              <span className="text-base font-semibold text-white">
+                {membersLoading ? '...' : `${totalCount}명`}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center justify-between text-xs mb-3">
-            <span className="text-gray-400">총 관리 인원</span>
-            <span className="text-white font-semibold">
-              {membersLoading ? '...' : `${totalCount}명`}
-            </span>
-          </div>
-          <div className="flex items-center justify-between rounded-xl px-3 py-2.5" style={{ backgroundColor: '#0F1A0F' }}>
+
+          {/* 푸터: 대표 브레이니멀 + 모든 타입 보기 */}
+          <div
+            className="px-4 py-3 flex items-center justify-between"
+            style={{ backgroundColor: '#1F2A0E' }}
+          >
             <div className="flex items-center gap-2">
               {dominantBrainimal ? (
                 <>
-                  <img src={dominantBrainimal.icon} alt="" className="w-5 h-5 rounded-full object-cover" />
-                  <span className="text-white text-sm">{dominantBrainimal.name}</span>
+                  <img src={dominantBrainimal.icon} alt="" className="w-5 h-5 object-contain" />
+                  <span className="text-sm font-medium" style={{ color: '#AAED10' }}>
+                    {dominantBrainimal.name}
+                  </span>
                 </>
               ) : (
                 <span className="text-gray-500 text-sm">데이터 부족</span>
@@ -600,8 +617,7 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
             </div>
             <button
               onClick={() => navigate('/organization-report')}
-              className="text-xs"
-              style={{ color: '#AAED10' }}
+              className="text-xs text-gray-400"
             >
               모든 타입 보기 &gt;
             </button>
