@@ -75,33 +75,37 @@ const MOCK_TREND_POINTS: TrendPoint[] = Array.from({ length: 8 }).map((_, i) => 
  */
 // 흰 원 + 검은 물음표 — 호버/클릭 시 안내 말풍선 표시
 function HelpTooltip({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   return (
     <span className="relative inline-flex">
       <button
         type="button"
         aria-label="도움말"
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
         onClick={() => setOpen((v) => !v)}
-        className="w-5 h-5 rounded-full inline-flex items-center justify-center text-[11px] font-bold leading-none"
-        style={{ backgroundColor: '#FFFFFF', color: '#000000' }}
+        className="w-[18px] h-[18px] rounded-full inline-flex items-center justify-center text-[11px] font-bold leading-none"
+        style={{ backgroundColor: '#3A3A3A', color: '#FFFFFF' }}
       >
         ?
       </button>
       {open && (
         <span
-          className="absolute left-5 top-1/2 -translate-y-1/2 z-20 inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[10px]"
-          style={{ backgroundColor: '#2A2A2A', color: '#E5E5E5', border: '1px solid #3A3A3A' }}
+          className="absolute left-0 top-[26px] z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-[12px]"
+          style={{ backgroundColor: '#2A2A2A', color: '#E5E5E5' }}
         >
-          {text}
+          {/* 위쪽 화살표 */}
+          <span
+            className="absolute -top-1 left-2 w-2 h-2 rotate-45"
+            style={{ backgroundColor: '#2A2A2A' }}
+          />
+          <span>{text}</span>
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);
             }}
-            className="text-[10px]"
+            aria-label="닫기"
+            className="text-[12px] leading-none"
             style={{ color: '#888' }}
           >
             ✕
