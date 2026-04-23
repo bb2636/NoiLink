@@ -1,0 +1,56 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "aO39r1YpUkaLKUSRCkEjG"
+uri = "file://attached_assets/stock_images/composite_training.jpg"
+type = "image"
+title = "group of diverse people doing yoga and stretching together in modern fitness studio dark background"
+
+[[outputs]]
+id = "c9_NnGM_RVdG_stwPk3oF"
+uri = "file://attached_assets/stock_images/memory_training.jpg"
+type = "image"
+title = "close up of athlete training hands lifting barbell weights in dark gym dramatic lighting"
+
+[[outputs]]
+id = "90lsw0mgWageJMF-x55id"
+uri = "file://attached_assets/stock_images/comprehension_training.jpg"
+type = "image"
+title = "fit woman doing functional fitness training in modern gym warm light"
+
+[[outputs]]
+id = "u2tKpcw1Hyyt9AJYe4xKd"
+uri = "file://attached_assets/stock_images/focus_training.jpg"
+type = "image"
+title = "group fitness class women doing aerobics in studio bright energetic"
+
+[[outputs]]
+id = "mQ22dgDz-JiiNO9izBIJS"
+uri = "file://attached_assets/stock_images/judgment_training.jpg"
+type = "image"
+title = "athletic man doing strength training crunch core workout dramatic gym lighting"
+
+[[outputs]]
+id = "OR2KTyVZLlas28vy0UEkE"
+uri = "file://attached_assets/stock_images/agility_training.jpg"
+type = "image"
+title = "man jumping rope skipping fast cardio workout in dark gym motion"
+
+[[outputs]]
+id = "-oB4FPs89uFFhcfzWWCd-"
+uri = "file://attached_assets/stock_images/endurance_training.jpg"
+type = "image"
+title = "runner woman jogging on treadmill long distance endurance cardio gym"
+
+[[outputs]]
+id = "nuO5bz3FiDz_ultCJ5GDC"
+uri = "file://attached_assets/stock_images/random_training.jpg"
+type = "image"
+title = "multiple athletes doing different exercises in gym crossfit collage variety"
+
+[[outputs]]
+id = "HR4HFGTxMIewEoq8T-r6A"
+uri = "file://attached_assets/stock_images/free_training.jpg"
+type = "image"
+title = "person stretching freely in open gym space minimalist mood lighting"
