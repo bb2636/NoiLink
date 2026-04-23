@@ -163,7 +163,21 @@ export default function OrganizationReport() {
       {/* 제목 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-base">📊</span>
+          <svg
+            className="w-5 h-5 text-white"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            viewBox="0 0 24 24"
+          >
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <path d="M14 2v6h6" />
+            <path d="M9 18v-3" />
+            <path d="M12 18v-6" />
+            <path d="M15 18v-2" />
+          </svg>
           <h1 className="text-lg font-bold">{report.organizationName} 리포트</h1>
         </div>
         <button
@@ -242,10 +256,7 @@ export default function OrganizationReport() {
 
       {/* 조직 평균 생체 나이 */}
       <CollapsibleCard title="조직 평균 생체 나이" open onToggle={() => {}}>
-        <div
-          className="rounded-xl p-4 flex items-center justify-between"
-          style={{ backgroundColor: '#0F0F0F' }}
-        >
+        <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-3">
             <span className="text-xl">🧠</span>
             <span className="text-sm text-white">평균 뇌지컬 나이</span>
@@ -768,7 +779,7 @@ function CollapsibleCard({
 }) {
   return (
     <section
-      className="rounded-2xl border"
+      className="rounded-2xl border overflow-hidden"
       style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
     >
       <button
