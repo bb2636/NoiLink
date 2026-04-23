@@ -461,10 +461,10 @@ function BrainimalTabSection({
         </div>
 
         {/* 범례 — % 만 표시 (이름 제거) */}
-        <div className="flex-1 grid grid-cols-2 gap-x-3 gap-y-1.5">
-          <p className="text-[11px] text-gray-400 col-span-2 mb-0.5">분포 현황</p>
+        <div className="flex-1 grid grid-cols-2 gap-x-3 gap-y-0.5">
+          <p className="text-[11px] text-gray-400 col-span-2 mb-1">분포 현황</p>
           {slices.map((s) => (
-            <div key={s.type} className="flex items-center gap-1.5 text-[11px]">
+            <div key={s.type} className="flex items-center gap-1.5 text-[11px] py-0.5">
               <span
                 className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
                 style={{ backgroundColor: s.color }}
