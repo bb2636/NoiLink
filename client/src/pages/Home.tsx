@@ -78,7 +78,6 @@ function FirstTimeHome() {
       {/* 상단 로고 */}
       <div
         className="px-4 pt-6"
-        style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))' }}
       >
         <div className="max-w-md mx-auto">
           <Logo size="md" white />
@@ -163,10 +162,10 @@ function StandardHome({ variant, home, user }: StandardProps) {
 
   return (
     <div style={{ backgroundColor: '#0A0A0A', minHeight: '100vh' }}>
-      {/* 헤더 */}
+      {/* 헤더 — sticky로 변경하여 부모 safe-area 패딩과 자연스럽게 정합 */}
       <div
-        className="fixed top-0 left-0 right-0 z-40"
-        style={{ backgroundColor: '#0A0A0A', paddingTop: 'env(safe-area-inset-top)' }}
+        className="sticky top-0 left-0 right-0 z-40"
+        style={{ backgroundColor: '#0A0A0A' }}
       >
         <div className="max-w-md mx-auto px-4 py-4 flex items-center justify-between">
           <Logo size="md" white />
@@ -179,7 +178,7 @@ function StandardHome({ variant, home, user }: StandardProps) {
       <div
         className="max-w-md mx-auto px-4"
         style={{
-          paddingTop: 'calc(80px + env(safe-area-inset-top))',
+          paddingTop: '16px',
           paddingBottom: 'calc(120px + env(safe-area-inset-bottom))',
         }}
       >
@@ -511,10 +510,10 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
 
   return (
     <div style={{ backgroundColor: '#0A0A0A', minHeight: '100vh' }}>
-      {/* 헤더 */}
+      {/* 헤더 — sticky로 변경하여 부모 safe-area 패딩과 자연스럽게 정합 */}
       <div
-        className="fixed top-0 left-0 right-0 z-40"
-        style={{ backgroundColor: '#0A0A0A', paddingTop: 'env(safe-area-inset-top)' }}
+        className="sticky top-0 left-0 right-0 z-40"
+        style={{ backgroundColor: '#0A0A0A' }}
       >
         <div className="max-w-md mx-auto px-4 py-4 flex items-center justify-between">
           <Logo size="md" white />
@@ -527,7 +526,7 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
       <div
         className="max-w-md mx-auto px-4"
         style={{
-          paddingTop: 'calc(80px + env(safe-area-inset-top))',
+          paddingTop: '16px',
           paddingBottom: 'calc(120px + env(safe-area-inset-bottom))',
         }}
       >

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
 import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
@@ -100,14 +99,11 @@ export default function OrganizationMembers() {
   }
 
   return (
-    <MobileLayout>
+    <>
       {/* 상단 고정 헤더 — 노치/상단바 안전영역 자체 보정 */}
       <header
-        className="sticky z-40"
+        className="sticky top-0 z-40"
         style={{
-          top: 'calc(-1 * env(safe-area-inset-top))',
-          paddingTop: 'env(safe-area-inset-top)',
-          marginTop: 'calc(-1 * env(safe-area-inset-top))',
           backgroundColor: '#0A0A0A',
           borderBottom: '1px solid #1A1A1A',
         }}
@@ -297,6 +293,6 @@ export default function OrganizationMembers() {
           </div>
         </div>
       )}
-    </MobileLayout>
+    </>
   );
 }

@@ -108,7 +108,6 @@ export default function Profile() {
         overscrollBehavior: 'none',
         position: 'relative',
         overflow: 'hidden',
-        paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
     >
@@ -152,8 +151,8 @@ export default function Profile() {
         style={{
           paddingBottom: 'calc(96px + env(safe-area-inset-bottom))',
           overflowY: 'auto',
-          height: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 44px)',
-          maxHeight: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 44px)',
+          height: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 44px - 64px - 12px)',
+          maxHeight: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 44px - 64px - 12px)',
           WebkitOverflowScrolling: 'touch',
         }}
       >

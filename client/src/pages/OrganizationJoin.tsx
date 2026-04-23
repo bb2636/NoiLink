@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
@@ -71,7 +70,7 @@ export default function OrganizationJoin() {
   }
 
   return (
-    <MobileLayout>
+    <>
       <SuccessBanner
         isOpen={banner.open}
         message={banner.message}
@@ -82,11 +81,8 @@ export default function OrganizationJoin() {
 
       {/* 상단 고정 헤더 — 노치/상단바 안전영역 자체 보정 */}
       <header
-        className="sticky z-40"
+        className="sticky top-0 z-40"
         style={{
-          top: 'calc(-1 * env(safe-area-inset-top))',
-          paddingTop: 'env(safe-area-inset-top)',
-          marginTop: 'calc(-1 * env(safe-area-inset-top))',
           backgroundColor: '#0A0A0A',
           borderBottom: '1px solid #1A1A1A',
         }}
@@ -182,6 +178,6 @@ export default function OrganizationJoin() {
           </ul>
         )}
       </div>
-    </MobileLayout>
+    </>
   );
 }

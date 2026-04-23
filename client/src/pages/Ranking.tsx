@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
 import { DEMO_PROFILE } from '../utils/demoProfile';
 
@@ -198,16 +197,13 @@ export default function Ranking() {
   const liveComposite = user?.brainAge ?? myStats.composite;
 
   return (
-    <MobileLayout>
-      {/* 상단 고정 헤더 — 노치/상단바 안전영역 자체 보정 + 완전 불투명 */}
+    <>
+      {/* 상단 고정 헤더 — 외곽 MobileLayout이 safe-area 패딩을 이미 처리하므로 단순 sticky top:0 사용 */}
       <header
-        className="sticky z-40"
+        className="sticky top-0 z-40"
         style={{
-          top: 'calc(-1 * env(safe-area-inset-top))',
-          paddingTop: 'env(safe-area-inset-top)',
           backgroundColor: '#0A0A0A',
           borderBottom: '1px solid #1A1A1A',
-          marginTop: 'calc(-1 * env(safe-area-inset-top))',
         }}
       >
         <div className="max-w-md mx-auto px-4 py-3 flex items-center gap-2">
@@ -317,7 +313,7 @@ export default function Ranking() {
           )}
         </motion.div>
       </div>
-    </MobileLayout>
+    </>
   );
 }
 
