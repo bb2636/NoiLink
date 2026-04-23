@@ -195,9 +195,10 @@ export default function Report() {
         }
       }
 
+      // 변화 추이는 종합/단일 트레이닝 모두 포함하여 최근 10회를 사용
+      // (isComposite 필터를 걸면 단일 지표 트레이닝 기록이 빠져 추이가 비어보임)
       const sessionsRes = await api.getUserSessions(user.id, {
         limit: 10,
-        isComposite: true,
       });
 
       if (sessionsRes.success && sessionsRes.data) {
