@@ -78,48 +78,23 @@ const MOCK_PERSONAL_REPORT: Report = {
   createdAt: new Date().toISOString(),
 };
 
-// TODO: 실제 API 데이터로 교체 — 데모용 변화 추이 (최근 10회 트레이닝)
-// 마지막 5회 = 최근 연속 5일 트레이닝(DEMO_PROFILE.streakDays = 5),
-// DEMO_METRICS 값으로 자연스럽게 수렴하도록 설계.
-// 처음 5회 = 그 이전 약 3주간 비연속 트레이닝(낮은 점수 → 점진적 상승).
-const MOCK_TREND_POINTS: TrendPoint[] = (() => {
-  const today = new Date();
-  // 최신이 마지막 인덱스(9), 마지막 5개는 연속 5일(오늘~4일 전)
-  const offsetDays = [22, 18, 14, 10, 7, 4, 3, 2, 1, 0];
-  const series: Array<{
-    memory: number;
-    comprehension: number;
-    focus: number;
-    judgment: number;
-    agility: number;
-    endurance: number;
-  }> = [
-    // 이전 5회 (비연속, 점진적 상승)
-    { memory: 60, comprehension: 64, focus: 68, judgment: 58, agility: 72, endurance: 55 },
-    { memory: 63, comprehension: 67, focus: 72, judgment: 60, agility: 76, endurance: 57 },
-    { memory: 66, comprehension: 70, focus: 75, judgment: 63, agility: 80, endurance: 60 },
-    { memory: 68, comprehension: 72, focus: 78, judgment: 65, agility: 82, endurance: 61 },
-    { memory: 70, comprehension: 74, focus: 80, judgment: 67, agility: 84, endurance: 63 },
-    // 최근 연속 5회 — DEMO_METRICS로 수렴
-    { memory: 72, comprehension: 76, focus: 82, judgment: 69, agility: 86, endurance: 64 },
-    { memory: 74, comprehension: 78, focus: 84, judgment: 70, agility: 88, endurance: 66 },
-    { memory: 75, comprehension: 79, focus: 85, judgment: 71, agility: 89, endurance: 67 },
-    { memory: 77, comprehension: 81, focus: 87, judgment: 73, agility: 90, endurance: 68 },
-    {
-      memory: DEMO_METRICS.memory,
-      comprehension: DEMO_METRICS.comprehension,
-      focus: DEMO_METRICS.focus,
-      judgment: DEMO_METRICS.judgment,
-      agility: DEMO_METRICS.agility,
-      endurance: DEMO_METRICS.endurance,
-    },
-  ];
-  return series.map((m, i) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - offsetDays[i]);
-    return { date: d.toISOString(), ...m };
-  });
-})();
+// TODO: 실제 API 데이터로 교체 — 데모용 변화 추이 (최근 10회)
+const MOCK_TREND_POINTS: TrendPoint[] = Array.from({ length: 10 }).map(
+  (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (9 - i) * 3);
+    const base = 65 + i * 2;
+    return {
+      date: d.toISOString(),
+      memory: base + Math.round(Math.sin(i) * 4) + 6,
+      comprehension: base + Math.round(Math.cos(i) * 3) + 8,
+      focus: base + 10 + Math.round(Math.sin(i + 1) * 3),
+      judgment: base + 2 + Math.round(Math.cos(i + 1) * 4),
+      agility: base + 14 + Math.round(Math.sin(i + 2) * 2),
+      endurance: base - 4 + Math.round(Math.cos(i + 2) * 3),
+    };
+  },
+);
 
 /**
  * 개인 리포트 — 명세: 프로필 요약, 6대 지표(꼭짓점 툴팁), 변화추이, 종합 평가, 롤모델, 면책
@@ -428,8 +403,19 @@ export default function Report() {
     ...MOCK_PERSONAL_REPORT,
     userId: user.id,
   };
+  // 세션은 있지만 모든 포인트의 6대 지표가 비어있는 경우(점수 미산출)에는
+  // 빈 그래프 대신 MOCK 데이터로 폴백한다.
+  const hasAnyMetric = trendPoints.some(
+    (p) =>
+      typeof p.memory === 'number' ||
+      typeof p.comprehension === 'number' ||
+      typeof p.focus === 'number' ||
+      typeof p.judgment === 'number' ||
+      typeof p.agility === 'number' ||
+      typeof p.endurance === 'number',
+  );
   const effectiveTrendPoints: TrendPoint[] =
-    trendPoints.length > 0 ? trendPoints : MOCK_TREND_POINTS;
+    hasAnyMetric ? trendPoints : MOCK_TREND_POINTS;
 
   // 표시용 사용자 정보 — 멤버 보기일 땐 멤버 데이터 사용
   const displayUser = {
