@@ -361,17 +361,27 @@ function MetricsTabSection({
       </div>
 
       <div>
-        <div className="mb-2">
-          <HelpDot text={`최근 '${report.organizationName}'를 기준으로 표시된 변화추이 입니다`}>
-            <h4 className="text-sm font-semibold text-white">변화 추이</h4>
-          </HelpDot>
-        </div>
         {trendPoints.length > 0 ? (
-          <MultiTrendChart data={trendPoints} height={200} />
+          <MultiTrendChart
+            data={trendPoints}
+            height={200}
+            headerLeft={
+              <HelpDot text={`최근 '${report.organizationName}'를 기준으로 표시된 변화추이 입니다`}>
+                <h4 className="text-sm font-semibold text-white">변화 추이</h4>
+              </HelpDot>
+            }
+          />
         ) : (
-          <p className="text-sm text-gray-400 py-4 text-center">
-            팀 추이를 그릴 만큼의 최근 세션이 아직 없습니다.
-          </p>
+          <>
+            <div className="mb-2">
+              <HelpDot text={`최근 '${report.organizationName}'를 기준으로 표시된 변화추이 입니다`}>
+                <h4 className="text-sm font-semibold text-white">변화 추이</h4>
+              </HelpDot>
+            </div>
+            <p className="text-sm text-gray-400 py-4 text-center">
+              팀 추이를 그릴 만큼의 최근 세션이 아직 없습니다.
+            </p>
+          </>
         )}
       </div>
     </section>

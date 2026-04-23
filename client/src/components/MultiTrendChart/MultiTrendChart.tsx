@@ -5,8 +5,10 @@
  *      - 전체: 모두 선택 (6개)
  *      - 단일: 그 항목 이름 (예: "순발력")
  *      - 2개 이상 (전체 미만): "일부 선택"
+ *  - X축: 최근 10회 트레이닝 시도("1회","2회",...,"10회")
+ *  - Y축: 0~100, 20단위 격자
  */
-import { useEffect, useRef, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 
 const METRIC_ORDER = [
   { key: 'memory', label: '기억력', color: '#3b82f6' },
@@ -19,6 +21,11 @@ const METRIC_ORDER = [
 
 const ALL_KEYS = METRIC_ORDER.map((m) => m.key);
 type MetricKey = (typeof ALL_KEYS)[number];
+
+const Y_MIN = 0;
+const Y_MAX = 100;
+const Y_STEP = 20;
+const MAX_POINTS = 10;
 
 export type TrendPoint = {
   date: string;
@@ -33,12 +40,16 @@ export type TrendPoint = {
 interface MultiTrendChartProps {
   data: TrendPoint[];
   height?: number;
+  headerLeft?: ReactNode;
 }
 
-export default function MultiTrendChart({ data, height = 220 }: MultiTrendChartProps) {
+export default function MultiTrendChart({ data, height = 220, headerLeft }: MultiTrendChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [selected, setSelected] = useState<Set<MetricKey>>(new Set(ALL_KEYS));
   const [open, setOpen] = useState(false);
+
+  // 최근 10회만 사용(시간순 가정)
+  const recent = data.slice(-MAX_POINTS);
 
   const allOn = selected.size === ALL_KEYS.length;
   const triggerLabel = (() => {
@@ -79,54 +90,27 @@ export default function MultiTrendChart({ data, height = 220 }: MultiTrendChartP
     ctx.fillStyle = '#0A0A0A';
     ctx.fillRect(0, 0, width, height);
 
-    if (data.length === 0 || selected.size === 0) {
-      // 빈 격자만
-      ctx.strokeStyle = '#222';
-      for (let i = 0; i <= 4; i++) {
-        const y = padding + (chartH * i) / 4;
-        ctx.beginPath();
-        ctx.moveTo(padding, y);
-        ctx.lineTo(width - padding, y);
-        ctx.stroke();
-      }
-      return;
-    }
+    const ySteps = (Y_MAX - Y_MIN) / Y_STEP; // 5
 
-    const activeKeys: MetricKey[] = METRIC_ORDER.filter((m) => selected.has(m.key)).map((m) => m.key);
-    const vals: number[] = [];
-    data.forEach((p) => {
-      activeKeys.forEach((k) => {
-        const v = p[k];
-        if (typeof v === 'number') vals.push(v);
-      });
-    });
-    let minV = 0;
-    let maxV = 100;
-    if (vals.length > 0) {
-      minV = Math.min(...vals, 0);
-      maxV = Math.max(...vals, 100);
-    }
-    const range = maxV - minV || 1;
-
-    // 격자
+    // 격자 + y축 라벨 (0~100, 20단위)
     ctx.strokeStyle = '#222';
     ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-      const y = padding + (chartH * i) / 4;
+    ctx.fillStyle = '#666';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'right';
+    for (let i = 0; i <= ySteps; i++) {
+      const y = padding + (chartH * i) / ySteps;
       ctx.beginPath();
       ctx.moveTo(padding, y);
       ctx.lineTo(width - padding, y);
       ctx.stroke();
-    }
-    // y축 라벨
-    ctx.fillStyle = '#666';
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'right';
-    for (let i = 0; i <= 4; i++) {
-      const y = padding + (chartH * i) / 4;
-      const v = Math.round(maxV - (range * i) / 4);
+      const v = Y_MAX - Y_STEP * i;
       ctx.fillText(String(v), padding - 6, y + 3);
     }
+
+    if (recent.length === 0 || selected.size === 0) return;
+
+    const range = Y_MAX - Y_MIN;
 
     // 라인 + 그라데이션 영역
     METRIC_ORDER.forEach(({ key, color }) => {
@@ -134,11 +118,11 @@ export default function MultiTrendChart({ data, height = 220 }: MultiTrendChartP
 
       // 좌표 수집
       const pts: { x: number; y: number }[] = [];
-      data.forEach((point, index) => {
+      recent.forEach((point, index) => {
         const v = point[key];
         if (typeof v !== 'number') return;
-        const x = padding + (chartW * index) / Math.max(data.length - 1, 1);
-        const y = padding + chartH - (chartH * (v - minV)) / range;
+        const x = padding + (chartW * index) / Math.max(recent.length - 1, 1);
+        const y = padding + chartH - (chartH * (v - Y_MIN)) / range;
         pts.push({ x, y });
       });
       if (pts.length === 0) return;
@@ -166,29 +150,29 @@ export default function MultiTrendChart({ data, height = 220 }: MultiTrendChartP
       ctx.stroke();
     });
 
-    // x축 날짜
+    // x축: 시도 횟수 ("1회" ~ "n회")
     ctx.fillStyle = '#888';
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
-    data.forEach((point, index) => {
-      if (index % Math.ceil(data.length / 5) !== 0 && index !== data.length - 1) return;
-      const x = padding + (chartW * index) / Math.max(data.length - 1, 1);
-      const d = new Date(point.date);
-      ctx.fillText(`${d.getMonth() + 1}/${d.getDate()}`, x, height - 10);
+    const labelEvery = recent.length > 6 ? 2 : 1;
+    recent.forEach((_, index) => {
+      if (index % labelEvery !== 0 && index !== recent.length - 1) return;
+      const x = padding + (chartW * index) / Math.max(recent.length - 1, 1);
+      ctx.fillText(`${index + 1}회`, x, height - 10);
     });
-  }, [data, height, selected]);
+  }, [recent, height, selected]);
 
   return (
     <div className="space-y-3">
-      {/* 표시 기준 드롭다운 */}
+      {/* 상단: 좌측 슬롯(타이틀 등) + 우측 전체 드롭다운 */}
       <div className="flex items-center justify-between">
-        <span className="text-xs text-gray-400">표시 기준</span>
+        <div className="min-w-0">{headerLeft}</div>
 
         <div className="relative">
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
-            className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium border"
+            className="flex items-center gap-2 px-4 py-1 rounded-full text-sm font-medium border"
             style={{
               backgroundColor: '#FFFFFF',
               borderColor: '#FFFFFF',

@@ -435,16 +435,19 @@ export default function Report() {
         </p>
       </section>
 
-      {/* 변화추이 — 카드 테두리 제거 */}
+      {/* 변화추이 — 카드 테두리 제거. 타이틀과 "전체" 드롭다운을 한 줄로 */}
       <section>
-        <div className="flex items-center justify-between mb-3">
-          <HelpTooltip
-            text={`최근 ${orgLabel ? `‘${orgLabel}’` : '세션'}을 기준으로 표시된 변화추이 입니다`}
-          >
-            <h3 className="text-lg font-bold text-white">변화 추이</h3>
-          </HelpTooltip>
-        </div>
-        <MultiTrendChart data={effectiveTrendPoints} height={220} />
+        <MultiTrendChart
+          data={effectiveTrendPoints}
+          height={220}
+          headerLeft={
+            <HelpTooltip
+              text={`최근 ${orgLabel ? `‘${orgLabel}’` : '세션'}을 기준으로 표시된 변화추이 입니다`}
+            >
+              <h3 className="text-lg font-bold text-white">변화 추이</h3>
+            </HelpTooltip>
+          }
+        />
       </section>
 
       {/* 뇌지컬 종합 평가 — 외곽 카드 테두리 제거(내부 항목별 카드는 유지) */}
