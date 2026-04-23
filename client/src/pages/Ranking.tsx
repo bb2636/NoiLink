@@ -199,7 +199,11 @@ export default function Ranking() {
             out[k] = list.map((e) => ({
               rank: e.rank,
               nickname: e.username || '익명',
-              value: Math.round(e.score),
+              // TOTAL_TIME은 서버가 초 단위로 반환 → 화면 단위(시간)로 변환
+              value:
+                k === 'time'
+                  ? Math.max(1, Math.round(e.score / 3600))
+                  : Math.round(e.score),
             }));
           });
           // 어느 탭에라도 데이터가 있으면 서버값 사용

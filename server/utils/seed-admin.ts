@@ -1,7 +1,9 @@
 import { db } from '../db.js';
 import { hashPassword } from './password.js';
 import { withKeyLock } from './key-mutex.js';
-import type { User } from '@noilink/shared';
+import type { MetricsScore, Session, User } from '@noilink/shared';
+
+const MS_DAY = 24 * 60 * 60 * 1000;
 
 // 라우트와 동일한 lock 키 사용 (lock ordering 일관성)
 const KV_LOCK = {
@@ -407,6 +409,109 @@ async function renameDemoOrganization(): Promise<void> {
   });
 }
 
+/**
+ * test@test.com 계정에 10일치 트레이닝 데이터 시드.
+ *  - 합계 시간 = 정확히 4시간(= 24분 × 10세션, 240분)
+ *  - 최근 5일 연속 + 그 이전 5회 비연속 → 14일 창 안에서 streak=5 유지
+ *  - 마지막 세션 메트릭 = DEMO_METRICS(78/82/88/74/91/69)
+ *  - sessions + metricsScores 동시 시드 → 변화 추이/랭킹/리포트 모두 자동 반영
+ *  - 멱등: meta.seed='test-10d' 마커로 재시드 방지
+ */
+const TEST_USER_TRAINING: Array<{
+  daysAgo: number;
+  durationMin: number;
+  score: number;
+  metrics: { memory: number; comprehension: number; focus: number; judgment: number; agility: number; endurance: number };
+}> = [
+  { daysAgo: 13, durationMin: 24, score: 63, metrics: { memory: 60, comprehension: 64, focus: 68, judgment: 58, agility: 72, endurance: 55 } },
+  { daysAgo: 12, durationMin: 24, score: 67, metrics: { memory: 63, comprehension: 67, focus: 72, judgment: 60, agility: 76, endurance: 57 } },
+  { daysAgo: 11, durationMin: 24, score: 70, metrics: { memory: 66, comprehension: 70, focus: 75, judgment: 63, agility: 80, endurance: 60 } },
+  { daysAgo: 10, durationMin: 24, score: 72, metrics: { memory: 68, comprehension: 72, focus: 78, judgment: 65, agility: 82, endurance: 61 } },
+  { daysAgo:  7, durationMin: 24, score: 74, metrics: { memory: 70, comprehension: 74, focus: 80, judgment: 67, agility: 84, endurance: 63 } },
+  { daysAgo:  4, durationMin: 24, score: 76, metrics: { memory: 72, comprehension: 76, focus: 82, judgment: 69, agility: 86, endurance: 64 } },
+  { daysAgo:  3, durationMin: 24, score: 78, metrics: { memory: 74, comprehension: 78, focus: 84, judgment: 70, agility: 88, endurance: 66 } },
+  { daysAgo:  2, durationMin: 24, score: 79, metrics: { memory: 75, comprehension: 79, focus: 85, judgment: 71, agility: 89, endurance: 67 } },
+  { daysAgo:  1, durationMin: 24, score: 80, metrics: { memory: 77, comprehension: 81, focus: 87, judgment: 73, agility: 90, endurance: 68 } },
+  { daysAgo:  0, durationMin: 24, score: 80, metrics: { memory: 78, comprehension: 82, focus: 88, judgment: 74, agility: 91, endurance: 69 } },
+];
+
+async function seedTestUserTrainings(): Promise<void> {
+  await withKeyLock(KV_LOCK.USERS, async () => {
+    const users: User[] = (await db.get('users')) || [];
+    const test = users.find((u: any) => u.email === TEST_EMAIL) as User | undefined;
+    if (!test) return;
+
+    const sessions: Session[] = (await db.get('sessions')) || [];
+    const metricsScores: MetricsScore[] = (await db.get('metricsScores')) || [];
+
+    const seedMarker = 'test-10d-v1';
+    const alreadySeeded = sessions.some(
+      (s: any) => s.userId === test.id && s.meta?.seed === seedMarker,
+    );
+    if (alreadySeeded) {
+      console.log('✅ test 사용자 10일치 트레이닝 시드 이미 존재');
+      return;
+    }
+
+    const now = Date.now();
+    let added = 0;
+    for (const t of TEST_USER_TRAINING) {
+      const createdAt = new Date(now - t.daysAgo * MS_DAY).toISOString();
+      const id = `seed_test_${t.daysAgo}_${now}_${Math.random().toString(36).slice(2, 6)}`;
+      sessions.push({
+        id,
+        userId: test.id,
+        mode: 'COMPOSITE',
+        bpm: 92,
+        level: 3,
+        duration: t.durationMin * 60 * 1000,
+        score: t.score,
+        isComposite: true,
+        isValid: true,
+        phases: [],
+        meta: { seed: seedMarker },
+        createdAt,
+      });
+      metricsScores.push({
+        sessionId: id,
+        userId: test.id,
+        memory: t.metrics.memory,
+        comprehension: t.metrics.comprehension,
+        focus: t.metrics.focus,
+        judgment: t.metrics.judgment,
+        agility: t.metrics.agility,
+        endurance: t.metrics.endurance,
+        rhythm: t.score,
+        createdAt,
+      });
+      added += 1;
+    }
+
+    await db.set('sessions', sessions);
+    await db.set('metricsScores', metricsScores);
+
+    // streak/lastTrainingDate/brainAge 등 사용자 필드 동기화
+    const idx = users.findIndex((u: any) => u.id === test.id);
+    if (idx >= 0) {
+      users[idx] = {
+        ...users[idx],
+        streak: 5,
+        bestStreak: Math.max((users[idx] as any).bestStreak ?? 0, 5),
+        lastTrainingDate: new Date(now).toISOString(),
+        age: (users[idx] as any).age ?? 35,
+        brainAge: (users[idx] as any).brainAge ?? 32,
+        previousBrainAge: (users[idx] as any).previousBrainAge ?? 35,
+        brainimalType: (users[idx] as any).brainimalType ?? 'FOX_BALANCED',
+        brainimalConfidence: (users[idx] as any).brainimalConfidence ?? 0.86,
+        updatedAt: new Date().toISOString(),
+      };
+      await db.set('users', users);
+    }
+
+    console.log(`✅ test 사용자 ${added}건 트레이닝 시드 완료 (합계 ${added * 24}분 = 4시간)`);
+  });
+}
+
 async function backfillMustChangeFlag(): Promise<void> {
   // users는 read-only이므로 락 불필요. passwords는 RMW이므로 PASSWORDS 락으로 보호.
   await withKeyLock(KV_LOCK.PASSWORDS, async () => {
@@ -468,6 +573,7 @@ export async function seedAdminAccount(): Promise<void> {
       });
       await seedDemoOrgMembers();
       await seedDemoOrgPersonalMember();
+      await seedTestUserTrainings();
       // 기업명이 변경된 경우 기존 organization/users 레코드의 organizationName 도 동기화
       await renameDemoOrganization();
       // 기존에 시드된 기업 관리자에게 본인용 목업 데이터(브레이니멀/뇌나이/연속) 보강
