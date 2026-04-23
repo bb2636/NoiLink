@@ -291,7 +291,8 @@ export default function OrganizationReport() {
               onClick={() => setTab(t.key)}
               className="relative py-3 px-1 text-[11px] font-medium leading-tight whitespace-pre-line text-center transition-colors"
               style={{
-                color: active ? '#AAED10' : '#888',
+                color: active ? '#FFFFFF' : '#888',
+                fontWeight: active ? 700 : 500,
               }}
             >
               {t.label}
@@ -527,27 +528,77 @@ function ComprehensiveTabSection({ report: _report }: { report: OrganizationInsi
 
         {evalOpen && (
           <div className="px-4 pb-4 space-y-5">
-            {/* 상세 분석 */}
+            {/* 상세 분석 — 외곽 카드로 감싼 영역 */}
             <div>
-              <h4 className="text-xs text-gray-400 mb-2 pl-2 border-l-2" style={{ borderColor: '#AAED10' }}>
+              <h4
+                className="text-xs text-gray-300 mb-2 pl-2 border-l-2"
+                style={{ borderColor: '#AAED10' }}
+              >
                 상세 분석
               </h4>
-              <div className="space-y-2">
-                <EvalRowV2 icon="📈" title="쉽게 포기하지 않는 꾸준형" />
-                <EvalRowV2 icon="🛡️" title="화려한 말뱉보다는 행동으로 보여주는 신뢰형" />
-                <EvalRowV2 icon="🚩" title="한번 시작한 일은 끝을 보고야 마는 완주형" />
+              <div
+                className="rounded-2xl p-3 space-y-2"
+                style={{ backgroundColor: '#202024', border: '1px solid #2A2A2A' }}
+              >
+                <EvalRowV2
+                  iconType="trend"
+                  iconColor="#AAED10"
+                  title="쉽게 포기하지 않는 꾸준형"
+                />
+                <EvalRowV2
+                  iconType="shield"
+                  iconColor="#5EEAD4"
+                  title="화려한 말뿐보다는 행동으로 보여주는 신뢰형"
+                />
+                <EvalRowV2
+                  iconType="flag"
+                  iconColor="#A78BFA"
+                  title="한번 시작한 일은 끝을 보고야 마는 완주형"
+                />
               </div>
             </div>
 
             {/* 강점 분석 */}
             <div>
-              <h4 className="text-xs text-gray-400 mb-3 pl-2 border-l-2" style={{ borderColor: '#AAED10' }}>
+              <h4
+                className="text-xs text-gray-300 mb-3 pl-2 border-l-2"
+                style={{ borderColor: '#AAED10' }}
+              >
                 강점 분석
               </h4>
               <div className="grid grid-cols-3 gap-2">
-                <StrengthGauge value={92} status="탁월함" label="강인한 인내심" />
-                <StrengthGauge value={78} status="안정적" label="집중력 유지" />
-                <StrengthGauge value={55} status="성장 중" label="정보 처리 속도" />
+                <StrengthGauge
+                  value={92}
+                  status="탁월함"
+                  label="강인한 인내심"
+                  color="#AAED10"
+                />
+                <StrengthGauge
+                  value={78}
+                  status="안정적"
+                  label="집중력 유지"
+                  color="#5EEAD4"
+                />
+                <StrengthGauge
+                  value={55}
+                  status="성장 중"
+                  label="정보 처리 속도"
+                  color="#D9F779"
+                />
+              </div>
+            </div>
+
+            {/* 약점 분석 */}
+            <div>
+              <h4
+                className="text-xs text-gray-300 mb-3 pl-2 border-l-2"
+                style={{ borderColor: '#AAED10' }}
+              >
+                약점 분석
+              </h4>
+              <div className="space-y-2">
+                <WeaknessRow label="변화 감지 민감도" value={35} />
+                <WeaknessRow label="공동성" value={28} />
               </div>
             </div>
           </div>
@@ -582,30 +633,41 @@ function ComprehensiveTabSection({ report: _report }: { report: OrganizationInsi
 
       {/* 롤모델 */}
       <section
-        className="rounded-2xl p-5 border text-center"
+        className="rounded-2xl p-6 border"
         style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
       >
-        <p className="text-xs text-gray-400">{userName}님의 롤모델</p>
-        <h4 className="text-2xl font-extrabold text-white mt-2">워런 버핏</h4>
-        <p className="text-sm mt-3" style={{ color: '#AAED10' }}>
-          "원칙이 있으면 흔들리지 않는다!"
-        </p>
+        <div className="text-center">
+          <p className="text-xs" style={{ color: '#888' }}>
+            {user?.organizationName ?? '송산치매안심센터'}님의 롤모델
+          </p>
+          <h4 className="text-3xl font-extrabold text-white mt-2">워런 버핏</h4>
+          <p className="text-sm mt-4" style={{ color: '#AAED10' }}>
+            "원칙이 있으면 흔들리지 않는다!"
+          </p>
+        </div>
 
-        <div className="text-left mt-5 space-y-4">
+        <div
+          className="my-5 h-px"
+          style={{ backgroundColor: '#2A2A2A' }}
+        />
+
+        <div className="space-y-5">
           <div>
-            <p className="text-xs text-gray-400 mb-2">
-              <span className="font-bold mr-1" style={{ color: '#AAED10' }}>01</span>
-              핵심특성
+            <p className="text-[13px] mb-2.5">
+              <span className="font-semibold mr-2" style={{ color: '#AAED10' }}>
+                01
+              </span>
+              <span className="text-white font-medium">핵심특성</span>
             </p>
             <div className="flex flex-wrap gap-2">
               {['꾸준함', '장기 사고', '원칙 고수'].map((t) => (
                 <span
                   key={t}
-                  className="px-3 py-1 rounded-full text-xs"
+                  className="px-3.5 py-1.5 rounded-full text-xs font-medium"
                   style={{
-                    backgroundColor: '#0F0F0F',
+                    backgroundColor: '#1F2A0E',
                     color: '#AAED10',
-                    border: '1px solid #2A4A14',
+                    border: '1px solid #3A5C1A',
                   }}
                 >
                   {t}
@@ -615,19 +677,33 @@ function ComprehensiveTabSection({ report: _report }: { report: OrganizationInsi
           </div>
 
           <div>
-            <p className="text-xs text-gray-400 mb-2">
-              <span className="font-bold mr-1" style={{ color: '#AAED10' }}>02</span>
-              뇌지컬 연결성
+            <p className="text-[13px] mb-2.5">
+              <span className="font-semibold mr-2" style={{ color: '#AAED10' }}>
+                02
+              </span>
+              <span className="text-white font-medium">뇌지컬 연결성</span>
             </p>
             <p className="text-sm font-semibold text-white leading-relaxed">
               흔들리지 않는 원칙, 복리의 마법으로 돌아옵니다.
             </p>
-            <p className="text-xs mt-2 leading-relaxed" style={{ color: '#B6B6B9' }}>
+            <p className="text-xs mt-2 leading-relaxed" style={{ color: '#888' }}>
               단기 변동에 일희일비하지 않는 우직함이 버핏을 만들었습니다.
               당신의 꾸준함도 곧 거대한 성과가 될 거예요.
             </p>
           </div>
         </div>
+      </section>
+
+      {/* 면책 조항 */}
+      <section className="px-1 pt-2">
+        <p className="text-xs font-bold text-white mb-2">의료 면책 조항 (Disclaimer)</p>
+        <p className="text-[11px] leading-relaxed" style={{ color: '#888' }}>
+          본 리포트는 웰니스 및 건강 관리를 위한 참고 자료이며, 전문적인 의료적
+          진단이나 치료를 대신할 수 없습니다. 측정 결과는 환경에 따라 달라질 수
+          있으며, 의학적 소견이 필요한 경우 반드시 전문의와 상담하시기 바랍니다.
+          (주)노이랩은 본 리포트의 해석 및 활용 결과에 대해 법적인 책임을 지지
+          않습니다.
+        </p>
       </section>
     </div>
   );
@@ -869,17 +945,52 @@ function describeArcStroke(cx: number, cy: number, r: number, startDeg: number, 
   return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y}`;
 }
 
-function EvalRowV2({ icon, title }: { icon: string; title: string }) {
+function EvalRowV2({
+  iconType,
+  iconColor,
+  title,
+}: {
+  iconType: 'trend' | 'shield' | 'flag';
+  iconColor: string;
+  title: string;
+}) {
+  const renderIcon = () => {
+    switch (iconType) {
+      case 'trend':
+        return (
+          <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke={iconColor} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 17 9 11 13 15 21 7" />
+            <polyline points="14 7 21 7 21 14" />
+          </svg>
+        );
+      case 'shield':
+        return (
+          <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke={iconColor} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3l8 3v6c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V6l8-3z" />
+          </svg>
+        );
+      case 'flag':
+        return (
+          <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke={iconColor} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 21V4" />
+            <path d="M5 4h11l-2 4 2 4H5" />
+          </svg>
+        );
+    }
+  };
   return (
     <div
-      className="rounded-xl px-3 py-3 flex items-center gap-2.5"
-      style={{ backgroundColor: '#0F0F0F', border: '1px solid #1F1F1F' }}
+      className="rounded-2xl px-3 py-3 flex items-center gap-3"
+      style={{ backgroundColor: '#2D2D33', border: '1px solid #3A3A40' }}
     >
       <span
-        className="w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0"
-        style={{ backgroundColor: '#1A2A14' }}
+        className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+        style={{
+          backgroundColor: '#1A1A1A',
+          border: `1.5px solid ${iconColor}40`,
+        }}
       >
-        {icon}
+        {renderIcon()}
       </span>
       <p className="text-[13px] text-white">{title}</p>
     </div>
@@ -890,13 +1001,15 @@ function StrengthGauge({
   value,
   status,
   label,
+  color,
 }: {
   value: number;
   status: string;
   label: string;
+  color: string;
 }) {
-  const SIZE = 78;
-  const STROKE = 6;
+  const SIZE = 88;
+  const STROKE = 7;
   const R = (SIZE - STROKE) / 2;
   const C = 2 * Math.PI * R;
   const offset = C * (1 - value / 100);
@@ -909,7 +1022,7 @@ function StrengthGauge({
             cx={SIZE / 2}
             cy={SIZE / 2}
             r={R}
-            stroke="#AAED10"
+            stroke={color}
             strokeWidth={STROKE}
             fill="none"
             strokeLinecap="round"
@@ -918,10 +1031,60 @@ function StrengthGauge({
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-[11px] font-bold text-white">{status}</span>
+          <span
+            className="px-2 py-0.5 rounded-full text-[10px] font-bold"
+            style={{ backgroundColor: `${color}26`, color }}
+          >
+            {status}
+          </span>
         </div>
       </div>
       <span className="text-[11px] text-gray-300 mt-2 text-center">{label}</span>
+    </div>
+  );
+}
+
+function WeaknessRow({ label, value }: { label: string; value: number }) {
+  const PURPLE = '#A78BFA';
+  return (
+    <div
+      className="rounded-2xl px-3 py-3"
+      style={{ backgroundColor: '#1A1A1A', border: '1px solid #2A2A2A' }}
+    >
+      <div className="flex items-center gap-2.5">
+        <span
+          className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+          style={{ backgroundColor: '#2A1F3D' }}
+        >
+          <svg
+            className="w-3.5 h-3.5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke={PURPLE}
+            strokeWidth={2.4}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </span>
+        <p className="flex-1 text-[13px] text-white">{label}</p>
+        <span className="text-sm font-bold" style={{ color: PURPLE }}>
+          {value}점
+        </span>
+      </div>
+      <div
+        className="mt-2.5 h-1.5 rounded-full overflow-hidden"
+        style={{ backgroundColor: '#2A2A2A' }}
+      >
+        <div
+          className="h-full rounded-full"
+          style={{
+            width: `${value}%`,
+            background: `linear-gradient(90deg, #6D4FB8 0%, ${PURPLE} 100%)`,
+          }}
+        />
+      </div>
     </div>
   );
 }
