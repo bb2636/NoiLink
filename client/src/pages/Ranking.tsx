@@ -207,7 +207,15 @@ export default function Ranking() {
         }}
       >
         <div className="max-w-md mx-auto px-4 py-3 flex items-center gap-2">
-          <span style={{ color: '#AAED10' }}>📊</span>
+          <svg
+            className="w-5 h-5 text-white"
+            fill="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <rect x="4" y="12" width="3.5" height="8" rx="1" />
+            <rect x="10.25" y="7" width="3.5" height="13" rx="1" />
+            <rect x="16.5" y="3" width="3.5" height="17" rx="1" />
+          </svg>
           <h1 className="text-base font-bold" style={{ color: '#fff' }}>{myCardTitle}</h1>
         </div>
       </header>
