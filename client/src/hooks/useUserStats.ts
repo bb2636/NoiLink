@@ -1,0 +1,181 @@
+import { useEffect, useState } from 'react';
+import { api } from '../utils/api';
+import type { Session, MetricsScore, TrainingMode } from '@noilink/shared';
+
+export interface DerivedUserStats {
+  hasData: boolean;
+  trendPoints: number[];
+  bpmAvg: number | null;
+  weeklyChange: number | null;
+  scoreUpDelta: number | null;
+  brainIndex: number | null;
+  topTrainings: string[];
+  checkedDays: boolean[];
+  loading: boolean;
+}
+
+const MODE_LABELS: Record<TrainingMode, string> = {
+  MEMORY: '기억력 트레이닝',
+  COMPREHENSION: '이해력 트레이닝',
+  FOCUS: '집중력 트레이닝',
+  JUDGMENT: '판단력 트레이닝',
+  AGILITY: '순발력 트레이닝',
+  ENDURANCE: '지구력 트레이닝',
+  COMPOSITE: '종합 트레이닝',
+  FREE: '프리 트레이닝',
+};
+
+// 사용자별 캐시 — 탭 전환 시 즉시 표시
+const cache = new Map<string, DerivedUserStats>();
+const inFlight = new Map<string, boolean>();
+
+function startOfWeekMon(d: Date): Date {
+  const day = d.getDay(); // 0=일, 1=월, ...
+  const diff = (day + 6) % 7; // 월=0
+  const out = new Date(d);
+  out.setHours(0, 0, 0, 0);
+  out.setDate(out.getDate() - diff);
+  return out;
+}
+
+function deriveStats(sessions: Session[], metrics: (MetricsScore | null)[]): DerivedUserStats {
+  // 시간순 정렬 (오래된→최신)
+  const indexed = sessions
+    .map((s, i) => ({ s, m: metrics[i] }))
+    .sort((a, b) => new Date(a.s.createdAt).getTime() - new Date(b.s.createdAt).getTime());
+
+  // 점수 시계열: session.score 우선, 없으면 metrics 6대 평균
+  const scoreOf = (s: Session, m: MetricsScore | null): number | null => {
+    if (typeof s.score === 'number' && s.score > 0) return Math.round(s.score);
+    if (m) {
+      const vals = [m.memory, m.comprehension, m.focus, m.judgment, m.agility, m.endurance].filter(
+        (v): v is number => typeof v === 'number',
+      );
+      if (vals.length > 0) return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+    }
+    return null;
+  };
+
+  const scored = indexed
+    .map((x) => ({ ...x, score: scoreOf(x.s, x.m) }))
+    .filter((x): x is typeof x & { score: number } => x.score !== null);
+
+  const trendPoints = scored.slice(-8).map((x) => x.score);
+
+  // BPM 평균 — 최근 7개
+  const recentBpm = indexed.slice(-7).map((x) => x.s.bpm).filter((b) => typeof b === 'number' && b > 0);
+  const bpmAvg = recentBpm.length > 0
+    ? Math.round(recentBpm.reduce((a, b) => a + b, 0) / recentBpm.length)
+    : null;
+
+  // 주간 변화: 최신 점수 - 7개 전 점수 (없으면 첫 점수)
+  let weeklyChange: number | null = null;
+  let scoreUpDelta: number | null = null;
+  if (scored.length >= 2) {
+    const last = scored[scored.length - 1].score;
+    const ref = scored[Math.max(0, scored.length - 8)].score;
+    weeklyChange = last - ref;
+    scoreUpDelta = last - scored[scored.length - 2].score;
+  }
+
+  // 브레인 인덱스 — 최근 3회 평균
+  const brainIndex = scored.length > 0
+    ? Math.round(
+        scored.slice(-3).reduce((acc, x) => acc + x.score, 0) /
+          Math.min(3, scored.length),
+      )
+    : null;
+
+  // 자주하는 트레이닝 — 모드 빈도수 상위 3개
+  const counts = new Map<TrainingMode, number>();
+  for (const x of indexed) counts.set(x.s.mode, (counts.get(x.s.mode) ?? 0) + 1);
+  const topTrainings = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([m]) => MODE_LABELS[m] ?? '트레이닝');
+
+  // 이번 주 출석(월~일)
+  const weekStart = startOfWeekMon(new Date());
+  const checkedDays = [false, false, false, false, false, false, false];
+  for (const x of indexed) {
+    const d = new Date(x.s.createdAt);
+    d.setHours(0, 0, 0, 0);
+    const diffDays = Math.floor((d.getTime() - weekStart.getTime()) / 86400000);
+    if (diffDays >= 0 && diffDays < 7) checkedDays[diffDays] = true;
+  }
+
+  return {
+    hasData: scored.length > 0,
+    trendPoints,
+    bpmAvg,
+    weeklyChange,
+    scoreUpDelta,
+    brainIndex,
+    topTrainings,
+    checkedDays,
+    loading: false,
+  };
+}
+
+const EMPTY: DerivedUserStats = {
+  hasData: false,
+  trendPoints: [],
+  bpmAvg: null,
+  weeklyChange: null,
+  scoreUpDelta: null,
+  brainIndex: null,
+  topTrainings: [],
+  checkedDays: [false, false, false, false, false, false, false],
+  loading: true,
+};
+
+export function useUserStats(userId: string | null): DerivedUserStats {
+  const cached = userId ? cache.get(userId) : undefined;
+  const [stats, setStats] = useState<DerivedUserStats>(cached ?? EMPTY);
+
+  useEffect(() => {
+    if (!userId) {
+      setStats({ ...EMPTY, loading: false });
+      return;
+    }
+    if (cached) setStats(cached);
+    if (inFlight.get(userId)) return;
+    inFlight.set(userId, true);
+
+    (async () => {
+      try {
+        const sessRes = await api.getUserSessions(userId, { limit: 30 });
+        if (!sessRes.success || !sessRes.data) {
+          const next = { ...EMPTY, loading: false };
+          cache.set(userId, next);
+          setStats(next);
+          return;
+        }
+        const sessions: Session[] = sessRes.data;
+        // 메트릭 동시 로드
+        const metricsResults = await Promise.all(
+          sessions.map((s) =>
+            api
+              .get<{ raw: unknown; score: MetricsScore | null }>(`/metrics/session/${s.id}`)
+              .catch(() => ({ success: false, data: null }) as any),
+          ),
+        );
+        const metrics: (MetricsScore | null)[] = metricsResults.map((r: any) =>
+          r?.success && r?.data?.score ? (r.data.score as MetricsScore) : null,
+        );
+        const derived = deriveStats(sessions, metrics);
+        cache.set(userId, derived);
+        setStats(derived);
+      } catch (e) {
+        console.error('useUserStats failed:', e);
+        const next = { ...EMPTY, loading: false };
+        cache.set(userId, next);
+        setStats(next);
+      } finally {
+        inFlight.set(userId, false);
+      }
+    })();
+  }, [userId]);
+
+  return stats;
+}

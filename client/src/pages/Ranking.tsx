@@ -2,8 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
 import { DEMO_PROFILE } from '../utils/demoProfile';
+import { api } from '../utils/api';
+import type { RankingEntry, RankingType } from '@noilink/shared';
 
 type TabKey = 'composite' | 'time' | 'streak';
+
+const TAB_TO_TYPE: Record<TabKey, RankingType> = {
+  composite: 'COMPOSITE_SCORE',
+  time: 'TOTAL_TIME',
+  streak: 'STREAK',
+};
 
 interface Row {
   rank: number;
@@ -183,12 +191,70 @@ export default function Ranking() {
   // 기업 관리자 계정만 기업 내 랭킹 열람 가능.
   // 기업 소속 개인은 일반 개인 랭킹(전체)만 볼 수 있음.
   const isOrgAdmin = user?.userType === 'ORGANIZATION';
-  const dataset = isOrgAdmin ? ORG_ROWS_FULL : PERSONAL_ROWS_FULL;
+  const fallbackDataset = isOrgAdmin ? ORG_ROWS_FULL : PERSONAL_ROWS_FULL;
   const myStats = isOrgAdmin ? ORG_MY_RANK : PERSONAL_MY_RANK;
+
+  // 서버 랭킹 — 실데이터 우선, 비어있으면 fallback
+  const [serverRows, setServerRows] = useState<Record<TabKey, Row[]> | null>(null);
+  const [myServerRank, setMyServerRank] = useState<Partial<Record<TabKey, number>>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const orgId = isOrgAdmin ? user?.organizationId ?? user?.id : undefined;
+        const res = await api.getRankings(undefined, 100, orgId);
+        if (!cancelled && res.success && res.data) {
+          const grouped = res.data as Record<string, RankingEntry[]>;
+          const out: Record<TabKey, Row[]> = { composite: [], time: [], streak: [] };
+          (Object.keys(TAB_TO_TYPE) as TabKey[]).forEach((k) => {
+            const list = grouped[TAB_TO_TYPE[k]] ?? [];
+            out[k] = list.map((e) => ({
+              rank: e.rank,
+              nickname: e.username || '익명',
+              value: Math.round(e.score),
+            }));
+          });
+          // 어느 탭에라도 데이터가 있으면 서버값 사용
+          const hasAny = out.composite.length || out.time.length || out.streak.length;
+          if (hasAny) setServerRows(out);
+        }
+
+        if (user?.id) {
+          const meRes = await api.get<RankingEntry[]>(`/rankings/user/${user.id}`);
+          if (!cancelled && meRes.success && meRes.data) {
+            const map: Partial<Record<TabKey, number>> = {};
+            for (const e of meRes.data) {
+              const tab = (Object.keys(TAB_TO_TYPE) as TabKey[]).find(
+                (k) => TAB_TO_TYPE[k] === e.rankingType,
+              );
+              if (tab) map[tab] = e.rank;
+            }
+            setMyServerRank(map);
+          }
+        }
+      } catch (e) {
+        console.error('랭킹 로드 실패:', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOrgAdmin, user?.id, user?.organizationId]);
+
+  const dataset: Record<TabKey, Row[]> = useMemo(() => {
+    if (!serverRows) return fallbackDataset;
+    // 탭별로 서버 데이터가 비었으면 fallback 사용
+    return {
+      composite: serverRows.composite.length > 0 ? serverRows.composite : fallbackDataset.composite,
+      time: serverRows.time.length > 0 ? serverRows.time : fallbackDataset.time,
+      streak: serverRows.streak.length > 0 ? serverRows.streak : fallbackDataset.streak,
+    };
+  }, [serverRows, fallbackDataset]);
 
   const rows = useMemo(() => dataset[tab], [dataset, tab]);
   const suffix = TABS.find((t) => t.id === tab)!.suffix;
-  const myRank = myStats.rankByTab[tab];
+  const myRank = myServerRank[tab] ?? myStats.rankByTab[tab];
   const nickname = user?.name || user?.username || '홍길동';
   const myCardTitle = isOrgAdmin ? '기업 내 나의 랭킹' : '나의 랭킹';
 

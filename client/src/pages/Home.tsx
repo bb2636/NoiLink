@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
 import { useHome } from '../hooks/useHome';
+import { useUserStats } from '../hooks/useUserStats';
 import { useNavigate } from 'react-router-dom';
 import Logo from '../components/Logo';
 import { getBrainimalIcon, BRAINIMAL_INFO } from '../utils/brainimalIcons';
@@ -123,7 +124,8 @@ interface StandardProps {
 
 function StandardHome({ variant, home, user }: StandardProps) {
   const navigate = useNavigate();
-  const { banners } = home;
+  const { banners, condition } = home;
+  const stats = useUserStats(user?.id ?? null);
 
   // 배너 캐러셀
   const [bannerIdx, setBannerIdx] = useState(0);
@@ -141,22 +143,26 @@ function StandardHome({ variant, home, user }: StandardProps) {
     };
   }, [displayBanners.length]);
 
-  // 리포트/랭킹과 동일한 단일 데모 프로필 사용
-  // 데모 사용자는 화면 간 100% 일치를 보장하기 위해 서버값(condition?.score, user.streak)을 무시하고
-  // DEMO_PROFILE 값을 사용. 실제 사용자 데이터는 추후 API 연동 시 분기.
-  const brainIndex = MOCK_HOME.brainIndex;
-  const bpmAvg = MOCK_HOME.bpmAvg;
-  const weeklyChange = MOCK_HOME.weeklyChange;
-  const streakDays = MOCK_HOME.streakDays;
+  // 실데이터 우선, 없으면 데모 프로필로 폴백
+  // - brainIndex: 컨디션 점수(서버 계산: 최근 3세션) > 파생 평균 > 데모
+  // - bpmAvg/weeklyChange/checkedDays/topTrainings/trendPoints: 세션 파생 우선
+  const brainIndex = condition?.score ?? stats.brainIndex ?? MOCK_HOME.brainIndex;
+  const bpmAvg = stats.bpmAvg ?? MOCK_HOME.bpmAvg;
+  const weeklyChange = stats.weeklyChange ?? MOCK_HOME.weeklyChange;
+  const scoreUpDelta = stats.scoreUpDelta ?? MOCK_HOME.scoreUpDelta;
+  const trendPoints = stats.trendPoints.length > 0 ? stats.trendPoints : MOCK_HOME.trendPoints;
+  const topTrainings = stats.topTrainings.length > 0 ? stats.topTrainings : MOCK_HOME.topTrainings;
+  const streakDays = user?.streak ?? MOCK_HOME.streakDays;
   const nickname = user?.nickname || user?.name || '회원';
   const brainimalInfo = getBrainimalIcon(MOCK_HOME.brainimalType);
 
   // 요일 트렌드 (월~일)
   const weekdayLabels = ['월', '화', '수', '목', '금', '토', '일'];
   const checkedDays = useMemo(() => {
+    if (stats.hasData) return stats.checkedDays;
     if (variant === 'streak-broken') return [true, true, false, false, false, false, false];
     return MOCK_HOME.checkedDays;
-  }, [variant]);
+  }, [variant, stats.hasData, stats.checkedDays]);
 
   return (
     <div style={{ backgroundColor: '#0A0A0A', minHeight: '100vh' }}>
@@ -295,7 +301,7 @@ function StandardHome({ variant, home, user }: StandardProps) {
           </div>
           <div className="text-gray-400 text-xs mb-2">자주하는 트레이닝</div>
           <div className="flex gap-2 flex-wrap">
-            {MOCK_HOME.topTrainings.map((t) => (
+            {topTrainings.map((t) => (
               <span
                 key={t}
                 className="px-3 py-1 rounded-full text-xs"
@@ -332,9 +338,9 @@ function StandardHome({ variant, home, user }: StandardProps) {
         <h2 className="text-white text-base font-semibold mt-6 mb-3">최근 트레이닝 점수 변화 트렌드</h2>
         <div className="rounded-2xl p-4" style={{ backgroundColor: '#1A1A1A' }}>
           <div className="text-sm mb-3" style={{ color: '#AAED10' }}>
-            트레이닝 점수가 {MOCK_HOME.scoreUpDelta}점 상승했네요!
+            트레이닝 점수가 {scoreUpDelta > 0 ? `+${scoreUpDelta}` : scoreUpDelta}점 변화했어요
           </div>
-          <MiniLineChart points={MOCK_HOME.trendPoints} />
+          <MiniLineChart points={trendPoints} />
         </div>
       </div>
     </div>
