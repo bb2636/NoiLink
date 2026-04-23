@@ -235,14 +235,6 @@ export default function OrganizationMembers() {
                         </button>
                       </div>
                     )}
-                    {!expanded && !pending && (
-                      <span
-                        className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium"
-                        style={{ backgroundColor: '#1F2A0E', color: '#AAED10' }}
-                      >
-                        승인됨
-                      </span>
-                    )}
                   </button>
 
                   {expanded && (
