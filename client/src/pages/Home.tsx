@@ -724,9 +724,13 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
                     </div>
                     {days >= 7 && (
                       <span
-                        className="text-[10px] px-2 py-0.5 rounded-full inline-block"
+                        className="text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1"
                         style={{ backgroundColor: '#3B1F4B', color: '#C684E8' }}
                       >
+                        <span
+                          className="inline-block w-1.5 h-1.5 rounded-full"
+                          style={{ backgroundColor: '#C684E8' }}
+                        />
                         {days >= 999 ? '미참여' : `${days}일째 미참여`}
                       </span>
                     )}
