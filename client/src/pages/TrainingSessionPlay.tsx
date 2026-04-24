@@ -15,6 +15,7 @@ import { submitCompletedTraining } from '../utils/submitTrainingRun';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
 import { bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
+import type { TrainingAbortReason } from './trainingAbortReason';
 
 export type TrainingRunState = {
   catalogId: string;
@@ -100,54 +101,78 @@ export default function TrainingSessionPlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── 앱이 백그라운드로 들어가면 즉시 세션 종료 (네이티브 셸에서만) ──
-  // 정책: 화면이 더 이상 보이지 않는 순간 LED 점등도 멈춰야 한다(배터리 보호 + 사용자 직관).
-  // 자동 재개는 하지 않고, 사용자에게 사유를 안내하기 위해 트레이닝 목록으로 돌려보낸다.
-  //   → engine.endNow()가 LED OFF + CONTROL_STOP을 보내고,
-  //     navigate('/training', { state: { abortReason: 'background' } })가
-  //     목록 화면에 1회성 안내 배너를 띄우는 트리거가 된다.
-  //   → 결과 화면(/result)으로 가지 않도록 aborted ref가 runSubmit을 차단한다.
+  // ── 비정상 종료 공통 처리 ──
+  // 다양한 사유(백그라운드 진입, BLE 연결 끊김 등)에서 트레이닝을 즉시 종료하고
+  // 목록 화면에 안내 배너를 띄운다. 정책:
+  //   - LED OFF + CONTROL_STOP을 즉시 보내고 (배터리 보호 + 사용자 직관)
+  //   - 결과 화면(/result)으로 가지 않도록 aborted ref가 runSubmit을 차단
+  //   - 사유를 navigate state로 전달해 목록 화면이 사유별 1회성 배너를 노출
   //
   // 가드:
+  //   - 이미 결과 흐름(engineMetrics 산출 완료 또는 submitting 중)이면 간섭하지 않는다.
+  //     예: 결과 저장 도중 BLE가 끊겨도 결과 흐름을 깨지 않는다.
+  //   - aborted 플래그로 idempotent 보장(같은 이벤트가 두 번 와도 한 번만 처리).
+  const aborted = useRef(false);
+  const finalizeAndAbort = useCallback((reason: TrainingAbortReason) => {
+    if (aborted.current) return;
+    if (engineMetrics || submitting) return;
+    aborted.current = true;
+    const eng = engineRef.current;
+    if (eng) {
+      // LED OFF + CONTROL_STOP + onComplete(메트릭) 발사
+      eng.endNow();
+      // engineRef는 비우지 않는다 — 이 시점부터는 endNow() 호출이 idempotent.
+    }
+    navigate('/training', { replace: true, state: { abortReason: reason } });
+  }, [engineMetrics, submitting, navigate]);
+
+  // ── 앱이 백그라운드로 들어가면 즉시 세션 종료 (네이티브 셸에서만) ──
   //   - 네이티브 셸(WebView) 안에서만 동작. 일반 웹/Replit 미리보기에서는 탭 전환만으로
   //     세션이 종료되지 않도록 핸들러를 아예 등록하지 않는다 (실 디바이스 LED가 없으므로
   //     백그라운드-즉시 종료 정책이 의미 없고, 오히려 평가/디버그를 방해한다).
-  //   - 이미 결과 흐름(engineMetrics 산출 완료 또는 submitting 중)이라면 간섭하지 않는다.
   //   - 추가 안전망으로 네이티브 측 AppState 핸들러도 STOP을 직접 송신한다
   //     (NativeBridgeDispatcher.ensureAppLifecycleHandlerBound).
-  const aborted = useRef(false);
   useEffect(() => {
     if (!state) return;
-    if (!isNoiLinkNativeShell()) return; // 웹/Replit 미리보기에서는 비활성
-    const finalizeNow = () => {
-      if (aborted.current) return;
-      if (engineMetrics || submitting) return;
-      aborted.current = true;
-      const eng = engineRef.current;
-      if (eng) {
-        // LED OFF + CONTROL_STOP + onComplete(메트릭) 발사
-        eng.endNow();
-        // engineRef는 비우지 않는다 — 이 시점부터는 endNow() 호출이 idempotent.
-      }
-      // 사용자가 "내가 뒤로 간 적이 없는데 왜 처음부터 다시 골라야 하지?" 하고
-      // 혼동하지 않도록, 중단 사유를 navigate state로 전달한다.
-      navigate('/training', {
-        replace: true,
-        state: { abortReason: 'background' as const },
-      });
-    };
+    if (!isNoiLinkNativeShell()) return;
+    const onBackground = () => finalizeAndAbort('background');
     const onVisibility = () => {
       if (typeof document !== 'undefined' && !document.hidden) return;
-      finalizeNow();
+      onBackground();
     };
     document.addEventListener('visibilitychange', onVisibility);
     // pagehide는 RN WebView 라이프사이클에서도 페이지 언로드 시 한 번 더 발사된다.
-    window.addEventListener('pagehide', finalizeNow);
+    window.addEventListener('pagehide', onBackground);
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('pagehide', finalizeNow);
+      window.removeEventListener('pagehide', onBackground);
     };
-  }, [state, engineMetrics, submitting]);
+  }, [state, finalizeAndAbort]);
+
+  // ── BLE(NoiPod) 연결이 끊기면 즉시 세션 종료 (네이티브 셸에서만) ──
+  // 정책: 디바이스 입력 채널이 사라지면 더 이상 정상 채점이 불가능하므로 명확한 사유와 함께
+  // 목록으로 돌려보낸다. 사용자가 "갑자기 화면이 바뀌었다"고 혼동하지 않도록 배너로 안내한다.
+  //
+  // 가드:
+  //   - reason === 'user' 는 사용자가 직접 디바이스 페이지에서 해제한 케이스인데,
+  //     트레이닝 진행 중에는 하단 네비가 가려져 다른 화면으로 갈 수 없으므로 실제로는 발생하지 않는다.
+  //     안전을 위해 'user' 는 명시적으로 무시한다.
+  //   - 일반 웹/Replit 미리보기에서는 BLE 자체가 없으므로 핸들러를 등록하지 않는다.
+  useEffect(() => {
+    if (!state) return;
+    if (!isNoiLinkNativeShell()) return;
+    const onBridge = (e: Event) => {
+      const detail = (e as CustomEvent<NativeToWebMessage>).detail;
+      if (!detail || detail.type !== 'ble.connection') return;
+      if (detail.payload.connected !== null) return;
+      if (detail.payload.reason === 'user') return;
+      finalizeAndAbort('ble-disconnect');
+    };
+    window.addEventListener('noilink-native-bridge', onBridge as EventListener);
+    return () => {
+      window.removeEventListener('noilink-native-bridge', onBridge as EventListener);
+    };
+  }, [state, finalizeAndAbort]);
 
   // 동일 자극(pod, tickId)에 UI tap과 BLE TOUCH가 둘 다 와도 카운트는 1회만.
   const tapDedupRef = useRef<Set<string>>(new Set());
@@ -250,6 +275,17 @@ export default function TrainingSessionPlay() {
   const cogLabel = phaseInfo.cognitiveMode ? COG_LABEL[phaseInfo.cognitiveMode] : '';
   const isComposite = state.isComposite || state.apiMode === 'COMPOSITE';
 
+  // 사용자가 명시적으로 화면을 떠날 때(뒤로/취소) 사용할 핸들러.
+  // - 결과 제출 실패 상태(err)에서 떠나면 결과가 영구 손실되므로, 목록 화면에서 사유 배너로 안내한다.
+  // - 그 외 평범한 취소/뒤로는 안내 배너 없이 조용히 목록으로 돌아간다.
+  const leaveToList = () => {
+    if (err) {
+      navigate('/training', { state: { abortReason: 'save-failed' satisfies TrainingAbortReason } });
+    } else {
+      navigate('/training');
+    }
+  };
+
   return (
     <MobileLayout hideBottomNav>
       <div
@@ -258,7 +294,7 @@ export default function TrainingSessionPlay() {
       >
         {/* 헤더 */}
         <div className="flex items-center gap-3 mb-4">
-          <button onClick={() => navigate('/training')} className="text-white" aria-label="뒤로">
+          <button onClick={leaveToList} className="text-white" aria-label="뒤로">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
@@ -334,7 +370,7 @@ export default function TrainingSessionPlay() {
         {/* 하단 버튼: 종료 */}
         <div className="mt-auto pt-6">
           <button
-            onClick={() => navigate('/training')}
+            onClick={leaveToList}
             disabled={submitting}
             className="w-full py-3 rounded-xl font-semibold text-white"
             style={{ backgroundColor: '#2A2A2A' }}

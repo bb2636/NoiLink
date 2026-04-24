@@ -11,6 +11,18 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import { TRAINING_BY_ID } from '../utils/trainingConfig';
+import {
+  TRAINING_ABORT_NOTICE,
+  isTrainingAbortReason,
+  type TrainingAbortReason,
+} from './trainingAbortReason';
+
+// 비정상 종료 안내 배너의 톤별 색상.
+// neutral: 일반 안내(검정 배경/흰 글자), warning: 주의가 필요한 사유(주황 배경/검정 글자).
+const ABORT_BANNER_STYLE: Record<'neutral' | 'warning', { background: string; text: string }> = {
+  neutral: { background: '#1A1A1A', text: '#FFFFFF' },
+  warning: { background: '#F59E0B', text: '#1A1A1A' },
+};
 
 interface CardItem {
   id: string;
@@ -34,16 +46,18 @@ export default function Training() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // 백그라운드로 인해 트레이닝이 중단된 직후 1회성 안내 배너를 보여준다.
-  // - location.state.abortReason === 'background' 일 때만 노출.
+  // 트레이닝이 의도치 않게 종료되면 1회성 안내 배너를 보여준다.
+  // - location.state.abortReason 값에 따라 사유별 메시지/톤을 사용 (TRAINING_ABORT_NOTICE).
   // - 한 번 표시 후 history state를 즉시 비워, 같은 화면을 다시 마운트해도 재노출되지 않는다.
-  // - 사용자가 명시적으로 취소(뒤로/취소 버튼)하거나 정상 종료된 경로에서는 state가 없으므로 뜨지 않는다.
-  const [abortBannerOpen, setAbortBannerOpen] = useState(
-    () => (location.state as { abortReason?: string } | null)?.abortReason === 'background'
-  );
+  // - 사용자가 명시적으로 취소(뒤로/취소 버튼) — 단, 결과 저장 실패 후 떠난 경우는 제외 — 하거나
+  //   정상 종료된 경로에서는 state가 없으므로 배너가 뜨지 않는다.
+  const [abortReason, setAbortReason] = useState<TrainingAbortReason | null>(() => {
+    const raw = (location.state as { abortReason?: unknown } | null)?.abortReason;
+    return isTrainingAbortReason(raw) ? raw : null;
+  });
 
   useEffect(() => {
-    if (abortBannerOpen) {
+    if (abortReason) {
       // React Router state를 즉시 비워, 새로고침/뒤로가기 등으로 같은 화면이 재마운트되어도
       // 안내 배너가 재노출되지 않도록 한다.
       // window.history.replaceState 대신 router의 navigate(replace)를 사용해
@@ -54,14 +68,19 @@ export default function Training() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const abortNotice = abortReason ? TRAINING_ABORT_NOTICE[abortReason] : null;
+  const abortStyle = abortNotice ? ABORT_BANNER_STYLE[abortNotice.tone] : null;
+
   return (
     <MobileLayout>
       <SuccessBanner
-        isOpen={abortBannerOpen}
-        message="화면을 가린 동안 트레이닝이 중단되었어요. 다시 시작해 주세요."
-        onClose={() => setAbortBannerOpen(false)}
+        isOpen={!!abortNotice}
+        message={abortNotice?.message ?? ''}
+        onClose={() => setAbortReason(null)}
         autoClose
         duration={4000}
+        backgroundColor={abortStyle?.background}
+        textColor={abortStyle?.text}
       />
       <div className="max-w-md mx-auto px-4 pb-6" style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '120px' }}>
         {/* 페이지 헤더 */}
