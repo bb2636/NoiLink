@@ -1,4 +1,5 @@
 import {
+  CTRL_STOP,
   NATIVE_BRIDGE_VERSION,
   encodeControlFrame,
   encodeLedFrame,
@@ -11,6 +12,7 @@ import {
   type NoiPodCharacteristicKey,
   type WebToNativeMessage,
 } from '@noilink/shared';
+import { AppState, type AppStateStatus, type NativeEventSubscription } from 'react-native';
 import { BleManagerError, bleManager } from '../ble/BleManager';
 import type { BleScanFilter } from '../ble/ble.types';
 import { clearStoredAuth, getStoredToken, getStoredUserDisplay, setStoredAuth } from '../auth/storage';
@@ -19,6 +21,8 @@ import { postNativeToWeb } from './injectToWeb';
 let activeScanStop: (() => void) | null = null;
 const notifySubscriptions = new Map<string, { remove: () => void; key: NoiPodCharacteristicKey }>();
 let eventHandlersBound = false;
+let appStateSubscription: NativeEventSubscription | null = null;
+let lastAppState: AppStateStatus = AppState.currentState;
 
 function ack(id: string, ok: boolean, error?: string): void {
   postNativeToWeb({
@@ -99,6 +103,58 @@ function ensureBleEventHandlersBound(): void {
     onUserDisconnect: (_deviceId) => {
       removeAllNotifySubscriptions();
     },
+  });
+}
+
+/**
+ * 앱이 백그라운드/비활성으로 전환될 때 NoiPod에 CONTROL_STOP을 즉시 송신.
+ *
+ * 배경: 트레이닝 진행 중 사용자가 홈 버튼/앱 스위처로 화면을 가리면, WebView 안의
+ * `document.visibilitychange`도 STOP을 시도하지만 iOS WKWebView의 JS 스레드가
+ * 곧바로 정지되면 그 메시지가 네이티브에 도달하기 전에 끊길 수 있다. 본 핸들러는
+ * RN AppState 전환을 네이티브 측에서 직접 잡아 한 번 더 STOP을 송신하는 안전망이다.
+ *
+ * - 디바이스 미연결 상태면 자동 no-op (writeCharacteristic이 NOT_CONNECTED를 던지므로
+ *   try/catch로 무시).
+ * - STOP은 idempotent이므로 세션이 없는 상태에 도달해도 펌웨어가 안전하게 무시한다.
+ */
+async function sendControlStopBestEffort(reason: string): Promise<void> {
+  const dev = bleManager.getNativeConnectedDevice();
+  if (!dev) return;
+  try {
+    const writeChar = bleManager.resolveLocator('write');
+    const frame = encodeControlFrame(CTRL_STOP);
+    await bleManager.writeCharacteristic(
+      writeChar.serviceUUID,
+      writeChar.characteristicUUID,
+      frame,
+      'auto'
+    );
+    console.log('[NoiLink bridge] AppState STOP sent', reason);
+  } catch (e) {
+    console.warn(
+      '[NoiLink bridge] AppState STOP failed',
+      reason,
+      e instanceof Error ? e.message : String(e)
+    );
+  }
+}
+
+/**
+ * 앱이 백그라운드로 들어가는 순간을 감지해 즉시 STOP을 보낸다.
+ * 한 번만 등록되며 (앱 라이프사이클 동안 살아 있음), 중복 등록은 무시한다.
+ */
+export function ensureAppLifecycleHandlerBound(): void {
+  if (appStateSubscription) return;
+  lastAppState = AppState.currentState;
+  appStateSubscription = AppState.addEventListener('change', (next) => {
+    const prev = lastAppState;
+    lastAppState = next;
+    // active → background/inactive 전환 시점에만 STOP을 보낸다.
+    // (active ↔ active 같은 동일 상태 반복은 무시)
+    if (prev === 'active' && (next === 'background' || next === 'inactive')) {
+      void sendControlStopBestEffort(`appstate ${prev}->${next}`);
+    }
   });
 }
 

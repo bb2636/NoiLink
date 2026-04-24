@@ -298,7 +298,15 @@ export class TrainingEngine {
 
   destroy(): void {
     if (!this.destroyed) {
-      // 중도 취소(언마운트 등) — STOP 송신 (bleWriteControl는 native 미연결 시 자동 no-op)
+      // 중도 취소(언마운트/백그라운드 등) — 펌웨어 STOP 인지 시점에 의존하지 않도록
+      // 1) 켜져 있던 Pod에 LED OFF 프레임을 먼저 보내 즉시 소등을 보장하고,
+      // 2) 그 다음 CONTROL_STOP을 보낸다.
+      // bleWriteLed/bleWriteControl는 네이티브 미연결(웹/Replit)에서는 자동 no-op.
+      for (const p of this.pods) {
+        if (p.fill !== 'OFF') {
+          this.bleOffPod(p.id, p.tickId);
+        }
+      }
       bleWriteControl(CTRL_STOP);
     }
     this.destroyed = true;
@@ -307,6 +315,19 @@ export class TrainingEngine {
     if (this.phaseTimer) window.clearTimeout(this.phaseTimer);
     this.pendingTimers.forEach((t) => window.clearTimeout(t));
     this.pendingTimers = [];
+  }
+
+  /**
+   * 세션을 정상 종료(complete)와 동일한 경로로 즉시 마감한다.
+   * - 켜져 있던 Pod LED OFF + CONTROL_STOP 송신
+   * - 누적된 메트릭으로 buildMetrics() 호출 → onComplete 통보 (호출 측이 결과 화면으로 이동)
+   *
+   * 자연 종료(시간 경과)는 여전히 내부 RAF가 complete()를 부르고, 본 메서드는 백그라운드
+   * 진입처럼 외부에서 즉시 마감해야 하는 케이스 전용 진입점이다. 이미 종료된 엔진에는
+   * no-op (complete 안의 destroyed 가드).
+   */
+  endNow(): void {
+    this.complete();
   }
 
   private schedule(fn: () => void, ms: number): void {

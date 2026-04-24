@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import WebView from 'react-native-webview';
 import { getStoredToken, getStoredUserDisplay } from '../auth/storage';
-import { dispatchWebMessage } from '../bridge/NativeBridgeDispatcher';
+import { dispatchWebMessage, ensureAppLifecycleHandlerBound } from '../bridge/NativeBridgeDispatcher';
 import { postNativeToWeb, registerWebViewInjector } from '../bridge/injectToWeb';
 import { buildBootstrapBeforeContentScript } from './bootstrapBeforeContent';
 import { getWebClientOrigin } from './webUrls';
@@ -39,6 +39,9 @@ export default function WebAppWebView() {
     registerWebViewInjector((script) => {
       webRef.current?.injectJavaScript(script);
     });
+    // 앱이 백그라운드로 들어가면 NoiPod에 즉시 STOP을 송신 (네이티브 측 안전망).
+    // WebView 안의 visibilitychange 핸들러와 별개로, JS 정지 직전에 한 번 더 보낸다.
+    ensureAppLifecycleHandlerBound();
     return () => registerWebViewInjector(null);
   }, []);
 

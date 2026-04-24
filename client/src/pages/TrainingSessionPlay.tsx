@@ -14,6 +14,7 @@ import { SESSION_MAX_MS } from '@noilink/shared';
 import { submitCompletedTraining } from '../utils/submitTrainingRun';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
 import { bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
+import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 
 export type TrainingRunState = {
   catalogId: string;
@@ -98,6 +99,47 @@ export default function TrainingSessionPlay() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── 앱이 백그라운드로 들어가면 즉시 세션 종료 (네이티브 셸에서만) ──
+  // 정책: 화면이 더 이상 보이지 않는 순간 LED 점등도 멈춰야 한다(배터리 보호 + 사용자 직관).
+  // 자동 재개는 하지 않고, 그때까지 누적된 메트릭으로 즉시 결과 화면으로 보낸다.
+  //   → engine.endNow()가 LED OFF + CONTROL_STOP을 보내고 onComplete를 발사하면,
+  //     아래 useEffect(engineMetrics)가 평소처럼 runSubmit → /result 로 이동시킨다.
+  //
+  // 가드:
+  //   - 네이티브 셸(WebView) 안에서만 동작. 일반 웹/Replit 미리보기에서는 탭 전환만으로
+  //     세션이 종료되지 않도록 핸들러를 아예 등록하지 않는다 (실 디바이스 LED가 없으므로
+  //     백그라운드-즉시 종료 정책이 의미 없고, 오히려 평가/디버그를 방해한다).
+  //   - 이미 결과 흐름(engineMetrics 산출 완료 또는 submitting 중)이라면 간섭하지 않는다.
+  //   - 추가 안전망으로 네이티브 측 AppState 핸들러도 STOP을 직접 송신한다
+  //     (NativeBridgeDispatcher.ensureAppLifecycleHandlerBound).
+  const aborted = useRef(false);
+  useEffect(() => {
+    if (!state) return;
+    if (!isNoiLinkNativeShell()) return; // 웹/Replit 미리보기에서는 비활성
+    const finalizeNow = () => {
+      if (aborted.current) return;
+      if (engineMetrics || submitting) return;
+      aborted.current = true;
+      const eng = engineRef.current;
+      if (eng) {
+        // LED OFF + CONTROL_STOP + onComplete(메트릭) 발사
+        eng.endNow();
+        // engineRef는 비우지 않는다 — 이 시점부터는 endNow() 호출이 idempotent.
+      }
+    };
+    const onVisibility = () => {
+      if (typeof document !== 'undefined' && !document.hidden) return;
+      finalizeNow();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    // pagehide는 RN WebView 라이프사이클에서도 페이지 언로드 시 한 번 더 발사된다.
+    window.addEventListener('pagehide', finalizeNow);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', finalizeNow);
+    };
+  }, [state, engineMetrics, submitting]);
 
   // 동일 자극(pod, tickId)에 UI tap과 BLE TOUCH가 둘 다 와도 카운트는 1회만.
   const tapDedupRef = useRef<Set<string>>(new Set());
