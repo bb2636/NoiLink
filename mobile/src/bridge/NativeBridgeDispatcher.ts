@@ -1,7 +1,11 @@
 import {
   NATIVE_BRIDGE_VERSION,
+  encodeControlFrame,
+  encodeLedFrame,
+  encodeSessionFrame,
   isWebToNativeMessage,
   resolveNoiPodCharacteristic,
+  tryParseTouchBase64,
   type BleErrorAction,
   type BleErrorCode,
   type BleScanFilterPayload,
@@ -280,10 +284,25 @@ async function handleWebMessage(msg: WebToNativeMessage): Promise<void> {
         resolved.serviceUUID,
         resolved.characteristicUUID,
         (base64Value) => {
+          // notify 채널이 NoiPod TOUCH 프레임이면 미리 파싱해 함께 전달
+          // (웹은 base64로 받아도 되고, 파싱된 touch만 써도 됨)
+          let touch = undefined;
+          if (key === 'notify') {
+            const parsed = tryParseTouchBase64(base64Value);
+            if (parsed) {
+              touch = parsed;
+              // 트레이닝 화면이 빠르게 받도록 별도 채널로도 push
+              postNativeToWeb({
+                v: NATIVE_BRIDGE_VERSION,
+                type: 'ble.touch',
+                payload: { touch: parsed },
+              });
+            }
+          }
           postNativeToWeb({
             v: NATIVE_BRIDGE_VERSION,
             type: 'ble.notify',
-            payload: { subscriptionId, key, base64Value },
+            payload: { subscriptionId, key, base64Value, touch },
           });
         }
       );
@@ -303,7 +322,7 @@ async function handleWebMessage(msg: WebToNativeMessage): Promise<void> {
     }
 
     case 'ble.writeCharacteristic': {
-      const { key, base64Value } = msg.payload;
+      const { key, base64Value, mode } = msg.payload;
       let resolved;
       try {
         resolved = resolveNoiPodCharacteristic(key);
@@ -311,7 +330,62 @@ async function handleWebMessage(msg: WebToNativeMessage): Promise<void> {
         const m = e instanceof Error ? e.message : String(e);
         throw new BleManagerError('UNKNOWN_CHARACTERISTIC', 'write', m);
       }
-      await bleManager.writeCharacteristic(resolved.serviceUUID, resolved.characteristicUUID, base64Value);
+      await bleManager.writeCharacteristic(
+        resolved.serviceUUID,
+        resolved.characteristicUUID,
+        base64Value,
+        mode ?? 'auto'
+      );
+      ack(msg.id, true);
+      return;
+    }
+
+    case 'ble.writeLed': {
+      const writeChar = resolveNoiPodCharacteristic('write');
+      const frame = encodeLedFrame(msg.payload);
+      await bleManager.writeCharacteristic(
+        writeChar.serviceUUID,
+        writeChar.characteristicUUID,
+        frame,
+        'auto'
+      );
+      ack(msg.id, true);
+      return;
+    }
+
+    case 'ble.writeSession': {
+      const writeChar = resolveNoiPodCharacteristic('write');
+      const frame = encodeSessionFrame(msg.payload);
+      await bleManager.writeCharacteristic(
+        writeChar.serviceUUID,
+        writeChar.characteristicUUID,
+        frame,
+        'auto'
+      );
+      ack(msg.id, true);
+      return;
+    }
+
+    case 'ble.writeControl': {
+      const writeChar = resolveNoiPodCharacteristic('write');
+      const frame = encodeControlFrame(msg.payload.cmd);
+      await bleManager.writeCharacteristic(
+        writeChar.serviceUUID,
+        writeChar.characteristicUUID,
+        frame,
+        'auto'
+      );
+      ack(msg.id, true);
+      return;
+    }
+
+    case 'ble.discoverGatt': {
+      const result = await bleManager.discoverGattAuto();
+      postNativeToWeb({
+        v: NATIVE_BRIDGE_VERSION,
+        type: 'ble.gatt',
+        payload: { services: result.services, selected: result.selected },
+      });
       ack(msg.id, true);
       return;
     }

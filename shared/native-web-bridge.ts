@@ -11,6 +11,7 @@
  */
 
 import type { BleDisconnectReason, BleErrorAction, BleErrorCode, NoiPodCharacteristicKey } from './ble-constants.js';
+import type { ChannelCode, ColorCode, ControlCmd, SessionPhase, TouchEvent } from './ble-protocol.js';
 
 export const NATIVE_BRIDGE_VERSION = 2 as const;
 
@@ -108,7 +109,45 @@ export type WebToNativeMessage =
         key: NoiPodCharacteristicKey;
         /** Base64 GATT payload (same convention as react-native-ble-plx). */
         base64Value: string;
+        /** 'auto' (기본): noResponse 시도 후 실패시 withResponse. */
+        mode?: 'auto' | 'withResponse' | 'withoutResponse';
       };
+    }
+  | {
+      v: BridgeVersion;
+      id: string;
+      type: 'ble.writeLed';
+      payload: {
+        tickId: number;
+        pod: number;
+        colorCode: ColorCode;
+        onMs: number;
+        flags?: number;
+      };
+    }
+  | {
+      v: BridgeVersion;
+      id: string;
+      type: 'ble.writeSession';
+      payload: {
+        bpm: number;
+        level: number;
+        phase: SessionPhase;
+        durationSec: number;
+        flags?: number;
+      };
+    }
+  | {
+      v: BridgeVersion;
+      id: string;
+      type: 'ble.writeControl';
+      payload: { cmd: ControlCmd };
+    }
+  | {
+      v: BridgeVersion;
+      id: string;
+      type: 'ble.discoverGatt';
+      payload?: Record<string, never>;
     }
   | {
       v: BridgeVersion;
@@ -116,6 +155,27 @@ export type WebToNativeMessage =
       type: 'push.requestPermission';
       payload?: Record<string, never>;
     };
+
+/** 자동 GATT 선택 결과 */
+export type GattAutoSelection = {
+  service: string;
+  txCharacteristic: string;
+  rxCharacteristic: string;
+} | null;
+
+export type GattCharMeta = {
+  uuid: string;
+  isReadable: boolean;
+  isWritableWithResponse: boolean;
+  isWritableWithoutResponse: boolean;
+  isNotifiable: boolean;
+  isIndicatable: boolean;
+};
+
+export type GattServiceMeta = {
+  uuid: string;
+  chars: GattCharMeta[];
+};
 
 // -----------------------------------------------------------------------------
 // Native → Web
@@ -173,6 +233,21 @@ export type NativeToWebMessage =
         subscriptionId: string;
         key: NoiPodCharacteristicKey;
         base64Value: string;
+        /** notify 채널이 NoiPod TOUCH 프레임이면 네이티브가 미리 파싱해 함께 전달 */
+        touch?: TouchEvent;
+      };
+    }
+  | {
+      v: BridgeVersion;
+      type: 'ble.touch';
+      payload: { touch: TouchEvent };
+    }
+  | {
+      v: BridgeVersion;
+      type: 'ble.gatt';
+      payload: {
+        services: GattServiceMeta[];
+        selected: GattAutoSelection;
       };
     }
   | {

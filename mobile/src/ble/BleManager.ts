@@ -10,9 +10,22 @@
  */
 import { PermissionsAndroid, Platform } from 'react-native';
 import { BleManager as PlxBleManager, Device, State, type Subscription } from 'react-native-ble-plx';
-import type { BleErrorAction, BleErrorCode, BleDisconnectReason } from '@noilink/shared';
+import type {
+  BleErrorAction,
+  BleErrorCode,
+  BleDisconnectReason,
+  GattAutoSelection,
+  GattServiceMeta,
+} from '@noilink/shared';
 import type { BleCharacteristicLocator, BleDiscoveryDevice, BleScanFilter, BleScanOptions } from './ble.types';
 import { uint8ArrayToBase64 } from './bleEncoding';
+
+export type BleWriteMode = 'auto' | 'withResponse' | 'withoutResponse';
+
+export interface BleGattDiscoveryResult {
+  services: GattServiceMeta[];
+  selected: GattAutoSelection;
+}
 
 type Listener = () => void;
 
@@ -587,29 +600,148 @@ export class NoiLinkBleController {
   }
 
   /**
+   * Write 한 번에 GATT로 전송. mode 'auto'(기본)는 noResponse → 실패 시 withResponse 폴백.
    * @param value `Uint8Array`는 내부에서 base64로 인코딩, `string`은 이미 **base64**인 것으로 간주해 그대로 전송
+   * @returns 실제 사용된 mode
    */
   async writeCharacteristic(
     serviceUUID: string,
     characteristicUUID: string,
-    value: Uint8Array | string
-  ): Promise<void> {
+    value: Uint8Array | string,
+    mode: BleWriteMode = 'auto'
+  ): Promise<'withResponse' | 'withoutResponse'> {
     const dev = this.connected;
     if (!dev) {
       throw new BleManagerError('NOT_CONNECTED', 'write', '연결된 기기가 없습니다.');
     }
     const base64Payload = typeof value === 'string' ? value : uint8ArrayToBase64(value);
-    console.log('[BLE] writeCharacteristic', serviceUUID, characteristicUUID, 'base64 length', base64Payload.length);
-    try {
-      await dev.writeCharacteristicWithResponseForService(
-        serviceUUID,
-        characteristicUUID,
-        base64Payload
-      );
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      throw new BleManagerError('WRITE_FAIL', 'write', msg, dev.id);
+    console.log(
+      '[BLE] writeCharacteristic',
+      serviceUUID,
+      characteristicUUID,
+      'b64.len=',
+      base64Payload.length,
+      'mode=',
+      mode
+    );
+
+    if (mode === 'withResponse') {
+      try {
+        await dev.writeCharacteristicWithResponseForService(serviceUUID, characteristicUUID, base64Payload);
+        return 'withResponse';
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new BleManagerError('WRITE_FAIL', 'write', msg, dev.id);
+      }
     }
+
+    if (mode === 'withoutResponse') {
+      try {
+        await dev.writeCharacteristicWithoutResponseForService(serviceUUID, characteristicUUID, base64Payload);
+        return 'withoutResponse';
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new BleManagerError('WRITE_FAIL', 'write', msg, dev.id);
+      }
+    }
+
+    // auto: noResponse 우선, 실패 시 withResponse 폴백 (savexx 명세 §9.2)
+    try {
+      await dev.writeCharacteristicWithoutResponseForService(serviceUUID, characteristicUUID, base64Payload);
+      return 'withoutResponse';
+    } catch (eNoRsp) {
+      const noRspMsg = eNoRsp instanceof Error ? eNoRsp.message : String(eNoRsp);
+      console.log('[BLE] write noResponse failed → trying withResponse', noRspMsg);
+      try {
+        await dev.writeCharacteristicWithResponseForService(serviceUUID, characteristicUUID, base64Payload);
+        return 'withResponse';
+      } catch (eWithRsp) {
+        const msg = eWithRsp instanceof Error ? eWithRsp.message : String(eWithRsp);
+        throw new BleManagerError('WRITE_FAIL', 'write', `noResponse+withResponse 모두 실패: ${msg}`, dev.id);
+      }
+    }
+  }
+
+  /**
+   * 현재 연결된 기기의 GATT 트리를 덤프하고 TX/RX 후보를 자동 선택.
+   * 우선순위 (savexx 명세 §7):
+   *  1. **같은 서비스** 안에서 (writableWithoutResponse|withResponse) + (notify|indicate) 조합 — 첫 매칭 서비스 채택
+   *  2. 위가 없으면 전체 서비스에서 첫 write 특성 + 첫 notify/indicate 특성 (서비스가 달라도 OK)
+   */
+  async discoverGattAuto(): Promise<BleGattDiscoveryResult> {
+    const dev = this.connected;
+    if (!dev) {
+      throw new BleManagerError('NOT_CONNECTED', 'connect', '연결된 기기가 없습니다.');
+    }
+
+    const services = await dev.services();
+    const meta: GattServiceMeta[] = [];
+    let bestSameService: GattAutoSelection = null;
+
+    for (const s of services) {
+      const chars = await dev.characteristicsForService(s.uuid);
+      const charMeta = chars.map((c) => ({
+        uuid: c.uuid,
+        isReadable: !!c.isReadable,
+        isWritableWithResponse: !!c.isWritableWithResponse,
+        isWritableWithoutResponse: !!c.isWritableWithoutResponse,
+        isNotifiable: !!c.isNotifiable,
+        isIndicatable: !!c.isIndicatable,
+      }));
+      meta.push({ uuid: s.uuid, chars: charMeta });
+
+      if (!bestSameService) {
+        const tx =
+          chars.find((c) => c.isWritableWithoutResponse) ??
+          chars.find((c) => c.isWritableWithResponse);
+        const rx = chars.find((c) => c.isNotifiable) ?? chars.find((c) => c.isIndicatable);
+        if (tx && rx) {
+          bestSameService = {
+            service: s.uuid,
+            txCharacteristic: tx.uuid,
+            rxCharacteristic: rx.uuid,
+          };
+        }
+      }
+    }
+
+    let selected: GattAutoSelection = bestSameService;
+    if (!selected) {
+      let txSvc: string | null = null;
+      let txCh: string | null = null;
+      let rxSvc: string | null = null;
+      let rxCh: string | null = null;
+      for (const s of meta) {
+        for (const c of s.chars) {
+          if (!txCh && (c.isWritableWithoutResponse || c.isWritableWithResponse)) {
+            txSvc = s.uuid;
+            txCh = c.uuid;
+          }
+          if (!rxCh && (c.isNotifiable || c.isIndicatable)) {
+            rxSvc = s.uuid;
+            rxCh = c.uuid;
+          }
+        }
+      }
+      if (txSvc && txCh && rxSvc && rxCh) {
+        // 두 후보의 service가 다를 수 있어 selected.service는 tx 기준으로 보고
+        // rxCharacteristic은 svc가 다르면 그대로 다른 svc일 수 있음 — 호출 측이 svc도 같이 다뤄야 함.
+        // 단순화: 같은 svc일 때만 selected를 채우고, 그렇지 않으면 null로 두어 호출측이 폴백 처리
+        if (txSvc === rxSvc) {
+          selected = { service: txSvc, txCharacteristic: txCh, rxCharacteristic: rxCh };
+        } else {
+          console.warn('[BLE] discoverGattAuto: tx/rx span different services — leaving selected=null', {
+            txSvc,
+            txCh,
+            rxSvc,
+            rxCh,
+          });
+        }
+      }
+    }
+
+    console.log('[BLE] discoverGattAuto', { services: meta.length, selected });
+    return { services: meta, selected };
   }
 
   /**
@@ -639,7 +771,7 @@ export class NoiLinkBleController {
     if (!this.connected || this.connected.id !== deviceId) {
       throw new BleManagerError('NOT_CONNECTED', 'write', 'deviceId mismatch or not connected', deviceId);
     }
-    return this.writeCharacteristic(locator.serviceUUID, locator.characteristicUUID, base64Value);
+    await this.writeCharacteristic(locator.serviceUUID, locator.characteristicUUID, base64Value);
   }
 }
 
