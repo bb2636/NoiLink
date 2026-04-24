@@ -98,10 +98,23 @@ export default function TrainingSessionPlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleTap = useCallback((podId: number) => {
+  // 동일 자극(pod, tickId)에 UI tap과 BLE TOUCH가 둘 다 와도 카운트는 1회만.
+  const tapDedupRef = useRef<Set<string>>(new Set());
+  const bumpTapCount = useCallback((podId: number, tickId: number | undefined) => {
+    if (tickId && tickId > 0) {
+      const key = `${podId}:${tickId}`;
+      if (tapDedupRef.current.has(key)) return;
+      tapDedupRef.current.add(key);
+    }
     setTapCount((n) => n + 1);
-    engineRef.current?.handleTap(podId);
   }, []);
+
+  const handleTap = useCallback((podId: number) => {
+    // UI tap 시점의 현재 점등 tickId를 dedup 키로 사용
+    const currentTickId = pods.find((p) => p.id === podId)?.tickId ?? 0;
+    bumpTapCount(podId, currentTickId);
+    engineRef.current?.handleTap(podId);
+  }, [pods, bumpTapCount]);
 
   // ── BLE TOUCH 이벤트 구독: 펌웨어가 측정한 deltaMs를 엔진에 그대로 전달 ──
   useEffect(() => {
@@ -110,12 +123,12 @@ export default function TrainingSessionPlay() {
       if (!detail || detail.type !== 'ble.touch') return;
       const t = detail.payload.touch;
       const useDelta = t.deviceDeltaValid ? t.deltaMs : undefined;
-      setTapCount((n) => n + 1);
+      bumpTapCount(t.pod, t.tickId);
       engineRef.current?.handleTap(t.pod, { deltaMs: useDelta, tickId: t.tickId });
     };
     window.addEventListener('noilink-native-bridge', onBridge as EventListener);
     return () => window.removeEventListener('noilink-native-bridge', onBridge as EventListener);
-  }, []);
+  }, [bumpTapCount]);
 
   // ── 엔진 종료 후 서버 제출 ──
   const runSubmit = useCallback(async (metrics: Omit<RawMetrics, 'sessionId' | 'userId'> | null) => {
