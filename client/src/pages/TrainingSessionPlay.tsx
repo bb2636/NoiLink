@@ -12,7 +12,8 @@ import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import PodGrid from '../components/PodGrid/PodGrid';
 import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noilink/shared';
 import { SESSION_MAX_MS } from '@noilink/shared';
-import { submitCompletedTraining } from '../utils/submitTrainingRun';
+import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
+import { enqueuePendingRun } from '../utils/pendingTrainingRuns';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
 import { bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
@@ -122,6 +123,13 @@ export default function TrainingSessionPlay() {
       reconnectTimerRef.current = null;
     }
   }, []);
+
+  // 부분 진행분(createSession 까지 성공했지만 metrics 단계가 실패한 케이스) 보존용.
+  // 이후 화면 내 재시도, 그리고 화면을 떠난 뒤 큐에 적재될 때 활용된다.
+  const partialSessionIdRef = useRef<string | undefined>(undefined);
+  // 화면 내 자동 재시도 + 사용자의 수동 재시도까지 누적된 시도 횟수.
+  // 화면을 떠나며 큐에 적재할 때 다음 백그라운드 drain 의 시도 한도 계산에 사용된다.
+  const accumulatedAttemptsRef = useRef(0);
 
   // ── 가드: 잘못된 진입은 목록으로 ──
   useEffect(() => {
@@ -375,6 +383,9 @@ export default function TrainingSessionPlay() {
   }, [bumpTapCount]);
 
   // ── 엔진 종료 후 서버 제출 ──
+  // 일시적 네트워크 끊김에 데이터를 잃지 않도록 자동 백오프 재시도를 한다.
+  // 그래도 실패하면 화면에 안내 + "저장 재시도" 버튼을 노출한다.
+  // 사용자가 그 상태로 화면을 떠나면 leaveToList() 가 큐에 적재한다(다음 진입 시 백그라운드 재전송).
   const runSubmit = useCallback(async (metrics: Omit<RawMetrics, 'sessionId' | 'userId'> | null) => {
     if (!state || submitLock.current) return;
     // 백그라운드로 중단된 세션은 (사용자가 부분 결과 저장을 선택해 aborted 게이트를
@@ -384,17 +395,30 @@ export default function TrainingSessionPlay() {
     submitLock.current = true;
     setSubmitting(true);
     setErr(null);
-    const res = await submitCompletedTraining({
-      userId: state.userId,
-      mode: state.apiMode,
-      bpm: state.bpm,
-      level: state.level,
-      totalDurationSec: totalSec,
-      yieldsScore: state.yieldsScore,
-      isComposite: state.isComposite,
-      tapCount,
-      engineMetrics: metrics ?? undefined,
-    });
+    const res = await submitCompletedTrainingWithRetry(
+      {
+        userId: state.userId,
+        mode: state.apiMode,
+        bpm: state.bpm,
+        level: state.level,
+        totalDurationSec: totalSec,
+        yieldsScore: state.yieldsScore,
+        isComposite: state.isComposite,
+        tapCount,
+        engineMetrics: metrics ?? undefined,
+        existingSessionId: partialSessionIdRef.current,
+      },
+      {
+        onAttempt: ({ result }) => {
+          // 시도 도중 createSession 이 성공한 sessionId 가 새로 확보되면 즉시 보존.
+          // 이후 재시도(자동/수동) 와 큐 적재 모두 같은 sessionId 를 재사용한다.
+          if (result.sessionCreated && result.sessionId && !partialSessionIdRef.current) {
+            partialSessionIdRef.current = result.sessionId;
+          }
+        },
+      },
+    );
+    accumulatedAttemptsRef.current += res.totalAttempts;
     setSubmitting(false);
     if (res.error) {
       setErr(res.error);
@@ -452,10 +476,33 @@ export default function TrainingSessionPlay() {
   const isComposite = state.isComposite || state.apiMode === 'COMPOSITE';
 
   // 사용자가 명시적으로 화면을 떠날 때(뒤로/취소) 사용할 핸들러.
-  // - 결과 제출 실패 상태(err)에서 떠나면 결과가 영구 손실되므로, 목록 화면에서 사유 배너로 안내한다.
+  // - 결과 제출 실패 상태(err)에서 떠나면 결과가 영구 손실되므로,
+  //   pending 큐에 적재해 다음 앱 진입 시 백그라운드로 재전송하도록 한다.
+  //   (성공/최종 실패는 이후 outcome 배너로 사용자에게 1회성으로 안내된다.)
   // - 그 외 평범한 취소/뒤로는 안내 배너 없이 조용히 목록으로 돌아간다.
   const leaveToList = () => {
-    if (err) {
+    if (err && state) {
+      try {
+        enqueuePendingRun({
+          input: {
+            userId: state.userId,
+            mode: state.apiMode,
+            bpm: state.bpm,
+            level: state.level,
+            totalDurationSec: totalSec,
+            yieldsScore: state.yieldsScore,
+            isComposite: state.isComposite,
+            tapCount,
+            engineMetrics: engineMetrics ?? undefined,
+          },
+          attempts: accumulatedAttemptsRef.current,
+          partialSessionId: partialSessionIdRef.current,
+          lastError: err,
+          title: state.title,
+        });
+      } catch {
+        // 큐 적재가 실패해도 사용자 흐름을 막지 않는다 — 기존대로 안내 배너만 노출.
+      }
       navigate('/training', { state: { abortReason: 'save-failed' satisfies TrainingAbortReason } });
     } else {
       navigate('/training');

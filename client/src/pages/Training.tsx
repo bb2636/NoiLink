@@ -16,6 +16,10 @@ import {
   isTrainingAbortReason,
   type TrainingAbortReason,
 } from './trainingAbortReason';
+import {
+  popOutcomeNotices,
+  type PendingTrainingOutcome,
+} from '../utils/pendingTrainingRuns';
 
 // 비정상 종료 안내 배너의 톤별 색상.
 // neutral: 일반 안내(검정 배경/흰 글자), warning: 주의가 필요한 사유(주황 배경/검정 글자).
@@ -42,6 +46,27 @@ const GRID: CardItem[] = [
   { id: 'AGILITY',       category: '밸런스', title: '멀티태스킹', desc: '여러 자극을 동시에 처리하는 복합 훈련',                 minutes: 8 },
 ];
 
+interface QueuedBanner {
+  key: string;
+  message: string;
+  background: string;
+  textColor: string;
+}
+
+function formatOutcomeMessage(o: PendingTrainingOutcome): string {
+  const what = o.title ? `'${o.title}'` : '이전';
+  if (o.outcome === 'success') {
+    return `${what} 트레이닝 결과를 백그라운드에서 안전하게 저장했어요.`;
+  }
+  return `${what} 트레이닝 결과를 끝내 저장하지 못했어요. 네트워크가 안정될 때 다시 시도해 주세요.`;
+}
+
+function outcomeStyle(o: PendingTrainingOutcome): { background: string; text: string } {
+  return o.outcome === 'success'
+    ? { background: '#1E2F1A', text: '#AAED10' }
+    : ABORT_BANNER_STYLE.warning;
+}
+
 export default function Training() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -55,6 +80,11 @@ export default function Training() {
     const raw = (location.state as { abortReason?: unknown } | null)?.abortReason;
     return isTrainingAbortReason(raw) ? raw : null;
   });
+
+  // 백그라운드 drain 결과(성공/최종 실패)를 1회성 배너로 안내하기 위해
+  // 마운트 시 outcome 큐를 비우고 메모리에 보관한다.
+  // 배너가 닫히면 한 건씩 소비된다 — 같은 결과가 두 번 노출되지 않는다.
+  const [outcomes, setOutcomes] = useState<PendingTrainingOutcome[]>(() => popOutcomeNotices());
 
   useEffect(() => {
     if (abortReason) {
@@ -71,16 +101,48 @@ export default function Training() {
   const abortNotice = abortReason ? TRAINING_ABORT_NOTICE[abortReason] : null;
   const abortStyle = abortNotice ? ABORT_BANNER_STYLE[abortNotice.tone] : null;
 
+  // 배너는 위치(fixed top-0)가 겹치므로 한 번에 하나씩 노출.
+  // 우선순위: 비정상 종료(abort) → 백그라운드 drain 결과 outcome 들 (FIFO).
+  const banners: QueuedBanner[] = [];
+  if (abortNotice && abortStyle) {
+    banners.push({
+      key: `abort-${abortReason}`,
+      message: abortNotice.message,
+      background: abortStyle.background,
+      textColor: abortStyle.text,
+    });
+  }
+  for (const o of outcomes) {
+    const s = outcomeStyle(o);
+    banners.push({
+      key: `outcome-${o.localId}`,
+      message: formatOutcomeMessage(o),
+      background: s.background,
+      textColor: s.text,
+    });
+  }
+  const activeBanner = banners[0];
+
+  const dismissActiveBanner = () => {
+    if (abortReason) {
+      setAbortReason(null);
+      return;
+    }
+    setOutcomes((prev) => prev.slice(1));
+  };
+
   return (
     <MobileLayout>
       <SuccessBanner
-        isOpen={!!abortNotice}
-        message={abortNotice?.message ?? ''}
-        onClose={() => setAbortReason(null)}
+        // key 변경으로 SuccessBanner 내부 setTimeout 가 새 배너마다 다시 시작되도록 한다.
+        key={activeBanner?.key ?? 'none'}
+        isOpen={!!activeBanner}
+        message={activeBanner?.message ?? ''}
+        onClose={dismissActiveBanner}
         autoClose
         duration={4000}
-        backgroundColor={abortStyle?.background}
-        textColor={abortStyle?.text}
+        backgroundColor={activeBanner?.background}
+        textColor={activeBanner?.textColor}
       />
       <div className="max-w-md mx-auto px-4 pb-6" style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '120px' }}>
         {/* 페이지 헤더 */}

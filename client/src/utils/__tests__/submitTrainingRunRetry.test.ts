@@ -1,0 +1,181 @@
+/**
+ * 결과 저장 자동 재시도(submitCompletedTrainingWithRetry) 회귀 테스트.
+ *
+ * 보호 대상:
+ *  - 일시적 네트워크 실패에도 데이터를 잃지 않도록 백오프 재시도가 동작한다.
+ *  - 한 번이라도 createSession 이 성공하면 이후 시도는 그 sessionId 를 재사용해
+ *    동일 트레이닝이 중복 저장되지 않는다.
+ *  - onAttempt 콜백으로 시도별 결과를 외부에 노출(부분 진행분 보존 동기화에 활용).
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../api', () => {
+  const createSession = vi.fn();
+  const calculateMetrics = vi.fn();
+  return {
+    default: { createSession, calculateMetrics },
+  };
+});
+
+import api from '../api';
+import {
+  submitCompletedTrainingWithRetry,
+  type SubmitCompletedTrainingInput,
+} from '../submitTrainingRun';
+
+const mockedApi = api as unknown as {
+  createSession: ReturnType<typeof vi.fn>;
+  calculateMetrics: ReturnType<typeof vi.fn>;
+};
+
+const baseInput = (overrides: Partial<SubmitCompletedTrainingInput> = {}): SubmitCompletedTrainingInput => ({
+  userId: 'u1',
+  mode: 'FOCUS',
+  bpm: 60,
+  level: 1,
+  totalDurationSec: 30,
+  yieldsScore: true,
+  isComposite: false,
+  tapCount: 12,
+  ...overrides,
+});
+
+beforeEach(() => {
+  mockedApi.createSession.mockReset();
+  mockedApi.calculateMetrics.mockReset();
+});
+
+afterEach(() => {
+  mockedApi.createSession.mockReset();
+  mockedApi.calculateMetrics.mockReset();
+});
+
+describe('submitCompletedTrainingWithRetry', () => {
+  it('첫 시도에 성공하면 한 번만 호출하고 totalAttempts=1', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-1' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({
+      success: true,
+      data: { focus: 80, memory: 70 },
+    });
+
+    const res = await submitCompletedTrainingWithRetry(baseInput(), {
+      backoffsMs: [0, 0],
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(res.error).toBeUndefined();
+    expect(res.sessionCreated).toBe(true);
+    expect(res.sessionId).toBe('sess-1');
+    expect(res.totalAttempts).toBe(1);
+    expect(mockedApi.createSession).toHaveBeenCalledTimes(1);
+    expect(mockedApi.calculateMetrics).toHaveBeenCalledTimes(1);
+  });
+
+  it('createSession 이 일시 실패해도 백오프 후 다음 시도에서 회복한다', async () => {
+    mockedApi.createSession
+      .mockResolvedValueOnce({ success: false, error: 'network down' })
+      .mockResolvedValueOnce({ success: true, data: { id: 'sess-2' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({
+      success: true,
+      data: { focus: 60 },
+    });
+
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const res = await submitCompletedTrainingWithRetry(baseInput(), {
+      backoffsMs: [10, 20],
+      sleep,
+    });
+
+    expect(res.error).toBeUndefined();
+    expect(res.sessionId).toBe('sess-2');
+    expect(res.totalAttempts).toBe(2);
+    expect(mockedApi.createSession).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(10);
+  });
+
+  it('createSession 성공 후 metrics 가 일시 실패하면, 이후 시도는 같은 sessionId 를 재사용한다 (중복 세션 방지)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-3' } });
+    mockedApi.calculateMetrics
+      .mockResolvedValueOnce({ success: false, error: '계산 실패' })
+      .mockResolvedValueOnce({ success: true, data: { focus: 50 } });
+
+    const res = await submitCompletedTrainingWithRetry(baseInput(), {
+      backoffsMs: [0, 0],
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(res.error).toBeUndefined();
+    expect(res.sessionId).toBe('sess-3');
+    expect(res.totalAttempts).toBe(2);
+    // 핵심: createSession 은 첫 시도에서만 호출, 이후 재시도는 metrics 만 시도.
+    expect(mockedApi.createSession).toHaveBeenCalledTimes(1);
+    expect(mockedApi.calculateMetrics).toHaveBeenCalledTimes(2);
+    // 두 번째 호출의 sessionId 는 첫 번째에서 받은 것과 동일해야 한다.
+    expect(mockedApi.calculateMetrics.mock.calls[1][0].sessionId).toBe('sess-3');
+  });
+
+  it('백오프 모두 소진해도 실패하면 마지막 에러와 함께 반환한다', async () => {
+    mockedApi.createSession.mockResolvedValue({ success: false, error: 'permanent' });
+
+    const res = await submitCompletedTrainingWithRetry(baseInput(), {
+      backoffsMs: [0, 0],
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(res.error).toBe('permanent');
+    expect(res.sessionCreated).toBe(false);
+    expect(res.totalAttempts).toBe(3);
+    expect(mockedApi.createSession).toHaveBeenCalledTimes(3);
+  });
+
+  it('existingSessionId 가 주어지면 createSession 을 건너뛰고 metrics 단계만 시도한다', async () => {
+    mockedApi.calculateMetrics.mockResolvedValueOnce({
+      success: true,
+      data: { focus: 80 },
+    });
+
+    const res = await submitCompletedTrainingWithRetry(
+      baseInput({ existingSessionId: 'pre-existing' }),
+      { backoffsMs: [0, 0], sleep: () => Promise.resolve() },
+    );
+
+    expect(res.error).toBeUndefined();
+    expect(res.sessionId).toBe('pre-existing');
+    expect(mockedApi.createSession).not.toHaveBeenCalled();
+    expect(mockedApi.calculateMetrics).toHaveBeenCalledTimes(1);
+  });
+
+  it('FREE 모드는 metrics 단계를 호출하지 않는다', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-free' } });
+
+    const res = await submitCompletedTrainingWithRetry(
+      baseInput({ mode: 'FREE', yieldsScore: false }),
+      { backoffsMs: [0, 0], sleep: () => Promise.resolve() },
+    );
+
+    expect(res.error).toBeUndefined();
+    expect(res.sessionId).toBe('sess-free');
+    expect(mockedApi.calculateMetrics).not.toHaveBeenCalled();
+  });
+
+  it('onAttempt 가 매 시도 결과와 함께 호출된다 (부분 진행분 외부 동기화 통로)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-on' } });
+    mockedApi.calculateMetrics
+      .mockResolvedValueOnce({ success: false, error: 'tmp' })
+      .mockResolvedValueOnce({ success: true, data: { focus: 90 } });
+
+    const onAttempt = vi.fn();
+    await submitCompletedTrainingWithRetry(baseInput(), {
+      backoffsMs: [0, 0],
+      sleep: () => Promise.resolve(),
+      onAttempt,
+    });
+
+    expect(onAttempt).toHaveBeenCalledTimes(2);
+    expect(onAttempt.mock.calls[0][0].attemptIndex).toBe(0);
+    expect(onAttempt.mock.calls[0][0].result.sessionId).toBe('sess-on');
+    expect(onAttempt.mock.calls[0][0].result.error).toBe('tmp');
+    expect(onAttempt.mock.calls[1][0].attemptIndex).toBe(1);
+    expect(onAttempt.mock.calls[1][0].result.error).toBeUndefined();
+  });
+});

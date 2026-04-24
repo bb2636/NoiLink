@@ -13,6 +13,7 @@ function OuterMobileLayout({ children }: { children: React.ReactNode }) {
   return <MobileLayout hideBottomNav={hideNav}>{children}</MobileLayout>;
 }
 import { useAuth, AuthProvider } from './hooks/useAuth';
+import { useDrainPendingTrainingRuns } from './hooks/useDrainPendingTrainingRuns';
 
 // Pages
 import Home from './pages/Home';
@@ -119,6 +120,9 @@ function App() {
 }
 
 function AppRoutes() {
+  // 인증 완료 후, 결과 저장 실패로 큐에 남은 트레이닝 런이 있으면 백그라운드로 재전송한다.
+  // 결과는 outcome notice 로 보존되어, 사용자가 다음에 트레이닝 목록을 열 때 1회성으로 안내된다.
+  useDrainPendingTrainingRuns();
   return (
     <Routes>
         <Route path="/splash" element={<Splash />} />
