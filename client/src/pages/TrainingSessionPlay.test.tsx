@@ -36,19 +36,44 @@ import type { TrainingRunState } from './TrainingSessionPlay';
 // ───────────────────────────────────────────────────────────
 
 // 트레이닝 엔진은 실제 타이머를 돌리지 않는 더미로 대체한다.
-// destroy/endNow/handleTap 만 호출되며, 콜백은 발사하지 않는다(=engineMetrics null 유지).
+// 단, 진짜 엔진과 동일하게:
+//   - endNow() 는 onComplete 를 동기 발사한다 (TrainingSessionPlay 의 부분 결과 모달이
+//     `engineMetrics !== null` 가드로 보호되므로, 백그라운드 분기 회귀 테스트가 모달
+//     상태를 검증하려면 합성 메트릭이라도 즉시 통보돼야 한다).
+//   - 진행률 트리거가 필요한 테스트는 `emitElapsed(ms)` 로 onElapsedMs 를 직접 발사한다
+//     (FakeEngine.start() 는 자동 진행하지 않는다).
+// 인스턴스 핸들은 globalThis 에 보관해 vi.mock 외부 스코프에서 접근한다.
 vi.mock('../training/engine', () => {
+  type EngineOpts = {
+    onElapsedMs?: (ms: number) => void;
+    onComplete?: (m: unknown) => void;
+  };
   class FakeEngine {
-    constructor(_: unknown) {}
+    private opts: EngineOpts;
+    constructor(opts: EngineOpts) {
+      this.opts = opts;
+      (globalThis as { __fakeEngineInstance__?: FakeEngine }).__fakeEngineInstance__ = this;
+    }
     start() {}
-    destroy() {}
-    endNow() {}
+    destroy() {
+      const g = globalThis as { __fakeEngineInstance__?: FakeEngine };
+      if (g.__fakeEngineInstance__ === this) g.__fakeEngineInstance__ = undefined;
+    }
+    endNow() {
+      // 부분 결과 모달의 engineMetrics 가드를 통과시키기 위해 합성 메트릭을 즉시 발사.
+      // 실제 엔진과 동일하게 onComplete 는 동기적으로 호출된다.
+      this.opts.onComplete?.({});
+    }
     handleTap() {
       return false;
     }
     // Task #27: BLE 회복 구간 알림 — 실제 채점 누적은 하지 않는 no-op stub.
     beginRecoveryWindow() {}
     endRecoveryWindow() {}
+    // Task #35: 진행률 트리거 — onElapsedMs 를 직접 발사해 elapsedMsRef 를 동기화.
+    emitElapsed(ms: number) {
+      this.opts.onElapsedMs?.(ms);
+    }
   }
   return {
     TrainingEngine: FakeEngine,
@@ -67,13 +92,19 @@ vi.mock('../native/initNativeBridge', () => ({
 }));
 
 // 결과 제출은 aborted 게이트로 차단되어 호출되지 않지만, 안전하게 모킹.
-vi.mock('../utils/submitTrainingRun', () => ({
-  submitCompletedTraining: vi.fn(async () => ({
+// TrainingSessionPlay 는 백오프 래퍼인 `submitCompletedTrainingWithRetry` 를 호출하므로
+// 그 export 도 함께 노출해야 부분 결과 confirm 분기에서 throw 되지 않는다.
+vi.mock('../utils/submitTrainingRun', () => {
+  const success = async () => ({
     error: null,
     displayScore: null,
     sessionId: 'test-session',
-  })),
-}));
+  });
+  return {
+    submitCompletedTraining: vi.fn(success),
+    submitCompletedTrainingWithRetry: vi.fn(success),
+  };
+});
 
 // 레이아웃/그리드/모달은 BLE 분기와 무관하므로 가벼운 더미로 대체한다.
 // (MobileLayout 은 useAuth 등 컨텍스트를 요구해 단위 테스트에서 부담스럽다.)
@@ -85,8 +116,37 @@ vi.mock('../components/Layout', () => ({
 vi.mock('../components/PodGrid/PodGrid', () => ({
   default: () => <div data-testid="pod-grid" />,
 }));
+// 부분 결과 저장 모달의 isOpen / 핸들러 호출을 검증할 수 있도록 가벼운 더미를 둔다.
+// isOpen=false 일 때는 null 을 그대로 반환해 BLE 분기 테스트 동작에 영향이 없다.
 vi.mock('../components/ConfirmModal/ConfirmModal', () => ({
-  default: () => null,
+  default: ({
+    isOpen,
+    title,
+    message,
+    confirmText,
+    cancelText,
+    onConfirm,
+    onCancel,
+  }: {
+    isOpen: boolean;
+    title?: string;
+    message?: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+  }) =>
+    isOpen ? (
+      <div data-testid="confirm-modal" data-title={title ?? ''}>
+        <p data-testid="confirm-modal-message">{message}</p>
+        <button data-testid="confirm-modal-confirm" onClick={onConfirm}>
+          {confirmText ?? 'confirm'}
+        </button>
+        <button data-testid="confirm-modal-cancel" onClick={onCancel}>
+          {cancelText ?? 'cancel'}
+        </button>
+      </div>
+    ) : null,
 }));
 
 import TrainingSessionPlay from './TrainingSessionPlay';
@@ -120,14 +180,15 @@ function LocationProbe() {
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
-function renderApp() {
+function renderApp(override?: Partial<TrainingRunState>) {
+  const runState: TrainingRunState = { ...RUN_STATE, ...override };
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
     root!.render(
       <MemoryRouter
-        initialEntries={[{ pathname: '/training/session', state: RUN_STATE }]}
+        initialEntries={[{ pathname: '/training/session', state: runState }]}
       >
         <Routes>
           <Route path="/training/session" element={<TrainingSessionPlay />} />
@@ -137,6 +198,15 @@ function renderApp() {
       </MemoryRouter>,
     );
   });
+}
+
+/** 모킹된 FakeEngine 인스턴스 핸들 (emitElapsed 로 진행률을 직접 트리거). */
+type FakeEngineHandle = { emitElapsed: (ms: number) => void };
+function getFakeEngine(): FakeEngineHandle {
+  const inst = (globalThis as { __fakeEngineInstance__?: FakeEngineHandle })
+    .__fakeEngineInstance__;
+  if (!inst) throw new Error('FakeEngine 인스턴스가 아직 생성되지 않았습니다');
+  return inst;
 }
 
 function unmountApp() {
@@ -275,5 +345,154 @@ describe('TrainingSessionPlay — BLE 단절/재연결 분기', () => {
     });
     expect(lastLocation).toBeNull();
     expect(container?.querySelector('[data-testid="pod-grid"]')).toBeTruthy();
+  });
+});
+
+/**
+ * 백그라운드 진입 → 부분 결과 저장 분기 회귀 테스트 (TrainingSessionPlay)
+ *
+ * 보호 대상 정책 (TrainingSessionPlay.tsx 의 visibilitychange/pagehide useEffect):
+ *   1. 진행률 < PARTIAL_RESULT_THRESHOLD (또는 점수 비산출 모드: yieldsScore=false / FREE)
+ *      에서 백그라운드 진입 시 → finalizeAndAbort('background') 가 호출되어 LED OFF +
+ *      목록 화면으로 navigate(`/training`) + abortReason='background'.
+ *   2. 진행률 ≥ PARTIAL_RESULT_THRESHOLD 인 점수 산출 세션은 navigate 가 발생하지 않고
+ *      `partialFinishOpen` 모달이 열린다 (= 사용자에게 부분 결과 저장 선택지 제공).
+ *   3. handlePartialConfirm: aborted 게이트가 해제되어 결과 제출
+ *      (submitCompletedTrainingWithRetry — TrainingSessionPlay 가 호출하는 백오프 래퍼)
+ *      이 진행된다.
+ *   4. handlePartialDismiss: 'background' 사유로 목록 화면으로 돌아간다.
+ *
+ * BLE 분기 테스트와 동일한 모킹 패턴(엔진/브리지/서브미트 무력화)을 재사용하고,
+ * 진행률은 FakeEngine.emitElapsed 로 직접 트리거하며, 백그라운드 진입은
+ * `document.hidden = true` + `visibilitychange` 디스패치로 재현한다.
+ */
+describe('TrainingSessionPlay — 백그라운드 진입/부분 결과 저장 분기', () => {
+  let documentHidden = false;
+  let originalHidden: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    lastLocation = null;
+    documentHidden = false;
+    (window as unknown as { ReactNativeWebView?: { postMessage: (s: string) => void } })
+      .ReactNativeWebView = { postMessage: () => {} };
+    // jsdom 의 document.hidden 은 prototype getter — instance 에 configurable 속성으로
+    // 덮어써서 테스트 중에만 값을 바꾸고, afterEach 에서 원복한다.
+    originalHidden = Object.getOwnPropertyDescriptor(document, 'hidden');
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      get: () => documentHidden,
+    });
+  });
+
+  afterEach(() => {
+    unmountApp();
+    delete (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView;
+    vi.useRealTimers();
+    vi.clearAllMocks();
+    if (originalHidden) {
+      Object.defineProperty(document, 'hidden', originalHidden);
+    } else {
+      // instance 속성을 제거해 prototype 의 기본 getter 가 다시 활성화되도록 한다.
+      delete (document as unknown as { hidden?: boolean }).hidden;
+    }
+  });
+
+  /** 백그라운드 진입을 모사한다 — document.hidden=true 후 visibilitychange 디스패치. */
+  function fireBackground() {
+    documentHidden = true;
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+  }
+
+  /** 진행률(0~1)을 FakeEngine 의 onElapsedMs 로 직접 통보해 elapsedMsRef 를 동기화한다. */
+  function setProgressRatio(pct: number) {
+    act(() => {
+      getFakeEngine().emitElapsed(RUN_STATE.totalDurationSec * 1000 * pct);
+    });
+  }
+
+  function modal(): HTMLElement | null {
+    return container?.querySelector<HTMLElement>('[data-testid="confirm-modal"]') ?? null;
+  }
+
+  it('진행률 < 임계값(80%) 에서 백그라운드 진입 시 background 사유로 목록으로 돌아간다', () => {
+    renderApp();
+    // 점수 산출 모드(FOCUS) + 진행률 50% — 임계값(80%) 미만.
+    setProgressRatio(0.5);
+    fireBackground();
+
+    expect(onTrainingListWithReason('background')).toBe(true);
+    // 부분 결과 모달은 열리지 않아야 한다.
+    expect(modal()).toBeNull();
+  });
+
+  it('점수 비산출(FREE) 모드에서는 진행률 100% 라도 background 사유로 목록으로 돌아간다', () => {
+    // FREE 모드는 임계값과 무관하게 항상 즉시 종료 경로로 가야 한다.
+    renderApp({ apiMode: 'FREE', yieldsScore: false });
+    setProgressRatio(1.0);
+    fireBackground();
+
+    expect(onTrainingListWithReason('background')).toBe(true);
+    expect(modal()).toBeNull();
+  });
+
+  it('점수 산출 + 진행률 ≥ 임계값(80%) 에서 백그라운드 진입 시 부분 결과 모달이 열리고 navigate 는 발생하지 않는다', () => {
+    renderApp();
+    setProgressRatio(0.85);
+    fireBackground();
+
+    // partialFinishOpen=true && engineMetrics !== null → 모달이 렌더링된다.
+    const m = modal();
+    expect(m).toBeTruthy();
+    expect(m?.getAttribute('data-title')).toBe('거의 다 끝났던 세션이에요');
+    // 목록/결과 화면으로의 이탈은 발생하지 않아야 한다.
+    expect(lastLocation).toBeNull();
+  });
+
+  it('handlePartialConfirm: aborted 게이트가 해제되어 결과 제출이 진행된다', async () => {
+    renderApp();
+    setProgressRatio(0.85);
+    fireBackground();
+
+    // TrainingSessionPlay 의 runSubmit 은 백오프 래퍼(submitCompletedTrainingWithRetry)
+    // 를 통과하므로 회귀 테스트도 동일한 함수를 검증한다.
+    const { submitCompletedTrainingWithRetry } = await import('../utils/submitTrainingRun');
+    // 모달이 열린 시점(=aborted 게이트 ON)에서는 자동 제출이 차단되어 있어야 한다.
+    expect(submitCompletedTrainingWithRetry).not.toHaveBeenCalled();
+
+    // "결과 보러가기" 클릭 → handlePartialConfirm.
+    const confirmBtn = container?.querySelector<HTMLButtonElement>(
+      '[data-testid="confirm-modal-confirm"]',
+    );
+    expect(confirmBtn).toBeTruthy();
+    await act(async () => {
+      confirmBtn!.click();
+      // runSubmit 는 async — 제출 함수 호출 직전 await 까지 microtask 비움.
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(submitCompletedTrainingWithRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('handlePartialDismiss: 그만두기 시 background 사유로 목록 화면으로 돌아간다', async () => {
+    renderApp();
+    setProgressRatio(0.85);
+    fireBackground();
+
+    const { submitCompletedTrainingWithRetry } = await import('../utils/submitTrainingRun');
+    const cancelBtn = container?.querySelector<HTMLButtonElement>(
+      '[data-testid="confirm-modal-cancel"]',
+    );
+    expect(cancelBtn).toBeTruthy();
+    act(() => {
+      cancelBtn!.click();
+    });
+
+    // 부분 결과 저장 없이 목록 화면으로 복귀 + abortReason='background'.
+    expect(onTrainingListWithReason('background')).toBe(true);
+    expect(submitCompletedTrainingWithRetry).not.toHaveBeenCalled();
   });
 });
