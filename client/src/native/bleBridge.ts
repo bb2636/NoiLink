@@ -84,13 +84,20 @@ export function bleWriteCharacteristic(
   });
 }
 
-/** LED 점등 프레임 송신. 네이티브 미연결(웹/Expo Go)이면 자동 no-op */
+/**
+ * LED 점등 프레임 송신. 네이티브 미연결(웹/Expo Go)이면 자동 no-op.
+ *
+ * `mode`로 BLE write 신뢰도를 지정할 수 있다. OFF 프레임처럼 손실되면
+ * 시각적 잔상이 남는 프레임은 'withResponse'(ack 보장)를 권장한다.
+ * 일반 점등 프레임은 기본 'auto'로 두면 된다(저지연 우선).
+ */
 export function bleWriteLed(payload: {
   tickId: number;
   pod: number;
   colorCode: ColorCode;
   onMs: number;
   flags?: number;
+  mode?: 'auto' | 'withResponse' | 'withoutResponse';
 }): void {
   post({
     v: NATIVE_BRIDGE_VERSION,

@@ -8,6 +8,9 @@
  *
  * 펌웨어와 정합성을 맞추는 정본은 이 파일이다. 바이트 레이아웃 변경 시
  * 펌웨어 팀과 동시에 수정해야 한다.
+ *
+ * LED 즉시 소등 컨벤션(색=0xFF 또는 onMs=0)은 펌웨어 합의서를 참고:
+ *   docs/firmware/led-off-convention.md
  */
 
 // ---------------------------------------------------------------------------
@@ -223,7 +226,7 @@ export function encodeLedFrame(opts: LedFrameOpts): Uint8Array {
 /**
  * 단일 Pod 즉시 소등용 LED 프레임 빌더.
  *
- * 펌웨어와의 약속:
+ * 펌웨어와의 약속 (정본: docs/firmware/led-off-convention.md):
  *  - colorCode = `COLOR_CODE.OFF (0xFF)`
  *  - onMs = 0
  *  - 둘 중 하나만 충족해도 OFF로 해석한다(이중 안전장치).
@@ -240,7 +243,10 @@ export function encodeLedOffFrame(opts: { tickId: number; pod: number }): Uint8A
   });
 }
 
-/** LED 프레임이 OFF 컨벤션(색=OFF 또는 onMs=0)을 만족하는지 검사 */
+/**
+ * LED 프레임이 OFF 컨벤션(색=OFF 또는 onMs=0)을 만족하는지 검사.
+ * 정본: docs/firmware/led-off-convention.md
+ */
 export function isLedOffPayload(opts: { colorCode: number; onMs: number }): boolean {
   return opts.colorCode === COLOR_CODE.OFF || opts.onMs === 0;
 }

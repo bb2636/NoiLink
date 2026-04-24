@@ -565,14 +565,22 @@ export class TrainingEngine {
   // ───── 점등 헬퍼 ────────────────────────────────────────────────────
   /**
    * 디바이스 LED 단일 Pod 즉시 소등 송신.
-   * onMs=0 + colorCode=OFF 컨벤션 (shared/ble-protocol.encodeLedOffFrame)
+   * onMs=0 + colorCode=OFF 컨벤션 (정본: docs/firmware/led-off-convention.md)
    * - 펌웨어가 잔여 onMs를 무시하고 LED를 즉시 끈다.
    * - tickId는 마지막 점등의 tickId를 그대로 사용해 펌웨어가 같은 점등에
    *   대한 OFF임을 식별할 수 있게 한다(0이면 새 tickId 발급).
    */
   private bleOffPod(podId: number, lastTickId: number): void {
     const tickId = lastTickId > 0 ? lastTickId : this.nextTickId();
-    bleWriteLed({ tickId, pod: podId, colorCode: COLOR_CODE.OFF, onMs: 0 });
+    // OFF 프레임은 손실되면 잔상이 남으므로 ack 보장(withResponse) 모드로 송신.
+    // 일반 점등 프레임은 저지연 우선이라 기본 'auto'를 유지한다.
+    bleWriteLed({
+      tickId,
+      pod: podId,
+      colorCode: COLOR_CODE.OFF,
+      onMs: 0,
+      mode: 'withResponse',
+    });
   }
 
   private allOff(): void {

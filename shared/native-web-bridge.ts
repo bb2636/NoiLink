@@ -123,6 +123,11 @@ export type WebToNativeMessage =
         colorCode: ColorCode;
         onMs: number;
         flags?: number;
+        /**
+         * BLE write 신뢰도 모드. OFF 프레임처럼 손실되면 시각적으로
+         * 잔상이 남는 프레임은 'withResponse'를 권장한다. 기본 'auto'.
+         */
+        mode?: 'auto' | 'withResponse' | 'withoutResponse';
       };
     }
   | {

@@ -357,7 +357,7 @@ async function handleWebMessage(msg: WebToNativeMessage): Promise<void> {
         writeChar.serviceUUID,
         writeChar.characteristicUUID,
         frame,
-        'auto'
+        msg.payload.mode ?? 'auto'
       );
       ack(msg.id, true);
       return;

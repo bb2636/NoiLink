@@ -65,6 +65,13 @@ Auto-detection priority:
 
 Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production without `ADMIN_PASSWORD`)
 
+## Hardware Protocol (NoiPod BLE)
+
+- 정본 코드: `shared/ble-protocol.ts` (LED / SESSION / CONTROL / TOUCH 인코딩)
+- LED 즉시 소등 컨벤션 (펌웨어 합의서): `docs/firmware/led-off-convention.md`
+  - 색=0xFF 또는 onMs=0 → 펌웨어가 잔여 onMs 무시하고 LED 즉시 OFF
+  - 펌웨어 측 구현·릴리스 노트 반영 필요 (별도 리포지토리)
+
 ## Deployment
 
 - Target: autoscale
