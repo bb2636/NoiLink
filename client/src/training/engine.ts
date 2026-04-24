@@ -613,23 +613,25 @@ export class TrainingEngine {
   /**
    * 입력 처리. opts.deltaMs는 펌웨어가 측정한 (실제 입력 시각 - 점등 목표 시각) 값.
    * 동일한 (pod, tickId) 입력이 UI tap과 BLE TOUCH 양쪽에서 와도 1회만 처리한다.
+   * @returns true: 입력이 실제로 채점에 반영됨 / false: stale/중복/소등 상태로 무시됨
+   *          (UI 카운터 증분 여부 판단용)
    */
-  handleTap(podId: number, opts?: { deltaMs?: number; tickId?: number }): void {
-    if (this.destroyed) return;
+  handleTap(podId: number, opts?: { deltaMs?: number; tickId?: number }): boolean {
+    if (this.destroyed) return false;
     const now = Date.now();
     const pod = this.pods.find(p => p.id === podId);
-    if (!pod || pod.fill === 'OFF') return;
+    if (!pod || pod.fill === 'OFF') return false;
 
     // BLE에서 명시 tickId가 왔는데 현재 pod의 점등 tickId와 다르면 stale (구 tick의 지연 입력) → drop.
     // UI tap은 tickId 미지정이므로 항상 현재 pod.tickId 기준으로 처리.
     if (opts?.tickId && opts.tickId > 0 && pod.tickId > 0 && opts.tickId !== pod.tickId) {
-      return; // stale BLE TOUCH
+      return false; // stale BLE TOUCH
     }
     // 중복 처리 차단 — UI(브릿지된 클릭) + BLE TOUCH 동시 도착 케이스
     const expectedTickId = pod.tickId > 0 ? pod.tickId : (opts?.tickId ?? 0);
     if (expectedTickId > 0) {
       const key = `${podId}:${expectedTickId}`;
-      if (this.consumedTickIds.has(key)) return;
+      if (this.consumedTickIds.has(key)) return false;
       this.consumedTickIds.add(key);
     }
 
@@ -641,7 +643,7 @@ export class TrainingEngine {
 
     if (segIsRhythm) {
       this.handleRhythmTap(pod, now, opts?.deltaMs);
-      return;
+      return true;
     }
 
     // 더블탭 처리 (JUDGMENT YELLOW)
@@ -673,6 +675,7 @@ export class TrainingEngine {
     }
     // tap 처리 후 끄기 (RHYTHM 외)
     this.allOff();
+    return true;
   }
 
   /** RT (ms) — BLE deltaMs가 있으면 점등 onMs 기준 절댓값(=실제 RT 근사), 없으면 wall-clock 차이 */

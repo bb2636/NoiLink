@@ -113,8 +113,9 @@ export default function TrainingSessionPlay() {
   const handleTap = useCallback((podId: number) => {
     // UI tap 시점의 현재 점등 tickId를 dedup 키로 사용
     const currentTickId = pods.find((p) => p.id === podId)?.tickId ?? 0;
-    bumpTapCount(podId, currentTickId);
-    engineRef.current?.handleTap(podId);
+    // 엔진이 실제로 채점에 반영한 경우만 카운트 (stale/중복/소등 입력은 미반영)
+    const accepted = engineRef.current?.handleTap(podId) ?? false;
+    if (accepted) bumpTapCount(podId, currentTickId);
   }, [pods, bumpTapCount]);
 
   // ── BLE TOUCH notify 구독 + 이벤트 수신 ──
@@ -129,8 +130,9 @@ export default function TrainingSessionPlay() {
       if (!detail || detail.type !== 'ble.touch') return;
       const t = detail.payload.touch;
       const useDelta = t.deviceDeltaValid ? t.deltaMs : undefined;
-      bumpTapCount(t.pod, t.tickId);
-      engineRef.current?.handleTap(t.pod, { deltaMs: useDelta, tickId: t.tickId });
+      // 엔진이 실제로 채점에 반영한 경우만 카운트 (stale 등 거부 입력 제외)
+      const accepted = engineRef.current?.handleTap(t.pod, { deltaMs: useDelta, tickId: t.tickId }) ?? false;
+      if (accepted) bumpTapCount(t.pod, t.tickId);
     };
     window.addEventListener('noilink-native-bridge', onBridge as EventListener);
     return () => {
