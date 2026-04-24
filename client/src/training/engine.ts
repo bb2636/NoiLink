@@ -11,13 +11,11 @@
  */
 
 import type {
-  ColorCode,
   Level,
   RawMetrics,
   TrainingMode,
 } from '@noilink/shared';
 import {
-  COLOR_CODE,
   COMPOSITE_TOTAL_MS,
   COGNITIVE_PHASE_MS,
   CTRL_START,
@@ -26,6 +24,7 @@ import {
   SESSION_PHASE_COGNITIVE,
   SESSION_PHASE_RHYTHM,
   judgeRhythmError,
+  logicColorToCode,
   rhythmStepsForBeat,
 } from '@noilink/shared';
 import { bleWriteControl, bleWriteLed, bleWriteSession } from '../native/bleBridge';
@@ -50,16 +49,8 @@ export interface PodState {
   tickId: number;
 }
 
-/** 의미 색 → 펌웨어 ColorCode (WHITE는 RGB 합성, MIXED는 사용 안 함) */
-function logicColorToCode(c: LogicColor): ColorCode {
-  switch (c) {
-    case 'GREEN': return COLOR_CODE.GREEN;
-    case 'RED': return COLOR_CODE.RED;
-    case 'BLUE': return COLOR_CODE.BLUE;
-    case 'YELLOW': return COLOR_CODE.YELLOW;
-    case 'WHITE': return COLOR_CODE.WHITE;
-  }
-}
+// 의미 색 → 펌웨어 ColorCode 변환은 shared/training-spec.logicColorToCode 사용
+// (단일 소스: LOGIC_TO_HARDWARE_COLOR 경유, MIXED는 사용 안 함)
 
 export type EnginePhase = 'IDLE' | 'RHYTHM' | 'COGNITIVE' | 'DONE';
 
