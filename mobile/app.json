@@ -35,7 +35,10 @@
       "bundleIdentifier": "com.noilink.mobile",
       "supportsTablet": true,
       "infoPlist": {
-        "NSBluetoothAlwaysUsageDescription": "NoiPod 트레이닝 기기와 연결해 반응 신호를 기록하기 위해 블루투스가 필요합니다."
+        "NSBluetoothAlwaysUsageDescription": "NoiPod 트레이닝 기기와 연결해 반응 신호를 기록하기 위해 블루투스가 필요합니다.",
+        "UIBackgroundModes": [
+          "bluetooth-central"
+        ]
       }
     },
     "web": {
