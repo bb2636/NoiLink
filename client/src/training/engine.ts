@@ -16,6 +16,7 @@ import type {
   TrainingMode,
 } from '@noilink/shared';
 import {
+  COLOR_CODE,
   COMPOSITE_TOTAL_MS,
   COGNITIVE_PHASE_MS,
   CTRL_START,
@@ -555,7 +556,26 @@ export class TrainingEngine {
   }
 
   // ───── 점등 헬퍼 ────────────────────────────────────────────────────
+  /**
+   * 디바이스 LED 단일 Pod 즉시 소등 송신.
+   * onMs=0 + colorCode=OFF 컨벤션 (shared/ble-protocol.encodeLedOffFrame)
+   * - 펌웨어가 잔여 onMs를 무시하고 LED를 즉시 끈다.
+   * - tickId는 마지막 점등의 tickId를 그대로 사용해 펌웨어가 같은 점등에
+   *   대한 OFF임을 식별할 수 있게 한다(0이면 새 tickId 발급).
+   */
+  private bleOffPod(podId: number, lastTickId: number): void {
+    const tickId = lastTickId > 0 ? lastTickId : this.nextTickId();
+    bleWriteLed({ tickId, pod: podId, colorCode: COLOR_CODE.OFF, onMs: 0 });
+  }
+
   private allOff(): void {
+    // 켜져 있던 Pod 각각에 대해 디바이스 LED OFF 프레임 송신.
+    // (이미 OFF인 Pod에는 보내지 않아 BLE 트래픽을 줄인다.)
+    for (const p of this.pods) {
+      if (p.fill !== 'OFF') {
+        this.bleOffPod(p.id, p.tickId);
+      }
+    }
     this.pods = this.pods.map(p => ({ ...p, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null, tickId: 0 }));
     this.cfg.onPodStates(this.pods);
   }
@@ -707,7 +727,8 @@ export class TrainingEngine {
     else if (grade === 'GOOD') this.acc.rGood += 1;
     else if (grade === 'BAD') this.acc.rBad += 1;
     else this.acc.rMiss += 1;
-    // 다음 점등을 위해 끄기
+    // 다음 점등을 위해 끄기 — 화면 UI와 디바이스 LED를 동기 소등
+    this.bleOffPod(pod.id, pod.tickId);
     this.pods = this.pods.map(p => p.id === pod.id ? { ...p, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null, tickId: 0 } : p);
     this.cfg.onPodStates(this.pods);
   }

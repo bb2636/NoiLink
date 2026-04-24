@@ -41,6 +41,13 @@ export const COLOR_CODE = {
   YELLOW: 3,
   WHITE: 4,
   MIXED: 5,
+  /**
+   * 즉시 소등용 색 코드. 사용자가 점등 onMs 만료 전에 탭하거나 엔진이
+   * `allOff()`를 호출했을 때 디바이스 LED도 함께 끄기 위해 사용한다.
+   * 펌웨어는 OFF 색을 받으면 onMs와 무관하게 즉시 LED를 끈다.
+   * onMs=0 컨벤션도 동일한 의미로 해석한다(둘 다 OFF로 간주).
+   */
+  OFF: 0xff,
 } as const;
 export type ColorCode = (typeof COLOR_CODE)[keyof typeof COLOR_CODE];
 
@@ -211,6 +218,31 @@ export function encodeLedFrame(opts: LedFrameOpts): Uint8Array {
   buf[10] = (opts.flags ?? 0) & 0xff;
   buf[11] = 0;
   return buf;
+}
+
+/**
+ * 단일 Pod 즉시 소등용 LED 프레임 빌더.
+ *
+ * 펌웨어와의 약속:
+ *  - colorCode = `COLOR_CODE.OFF (0xFF)`
+ *  - onMs = 0
+ *  - 둘 중 하나만 충족해도 OFF로 해석한다(이중 안전장치).
+ *
+ * 사용자가 점등 onMs 안에 탭하거나 엔진이 `allOff()`를 호출할 때 호출해
+ * 화면 UI와 디바이스 LED의 종료 시점을 일치시키는 데 사용한다.
+ */
+export function encodeLedOffFrame(opts: { tickId: number; pod: number }): Uint8Array {
+  return encodeLedFrame({
+    tickId: opts.tickId,
+    pod: opts.pod,
+    colorCode: COLOR_CODE.OFF,
+    onMs: 0,
+  });
+}
+
+/** LED 프레임이 OFF 컨벤션(색=OFF 또는 onMs=0)을 만족하는지 검사 */
+export function isLedOffPayload(opts: { colorCode: number; onMs: number }): boolean {
+  return opts.colorCode === COLOR_CODE.OFF || opts.onMs === 0;
 }
 
 export interface SessionFrameOpts {
