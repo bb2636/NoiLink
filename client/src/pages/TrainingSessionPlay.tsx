@@ -574,6 +574,10 @@ export default function TrainingSessionPlay() {
           const retryDisabled =
             !reconnectInfo || isLastAttempt || countdownElapsed || manualRetryInFlight;
           const label = (() => {
+            // "지금 다시 시도" 클릭 직후 ~다음 ble.reconnect/ble.connection 도착 전까지의
+            // 짧은 구간엔 "재시도를 요청했어요…" 안내로 즉각 피드백을 준다.
+            // 카운트다운/시도 정보 텍스트를 덮어 시각적 충돌(예: "0초 후 재시도" 잔상)을 막는다.
+            if (manualRetryInFlight) return '재시도를 요청했어요…';
             if (!reconnectInfo) return '기기 연결 회복 중…';
             if (isLastAttempt) {
               return `기기 연결 회복 중… 마지막 시도 중 (${reconnectInfo.attempt}/${reconnectInfo.maxAttempts})`;
