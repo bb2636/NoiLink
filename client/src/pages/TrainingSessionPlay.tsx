@@ -13,6 +13,7 @@ import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noili
 import { SESSION_MAX_MS } from '@noilink/shared';
 import { submitCompletedTraining } from '../utils/submitTrainingRun';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
+import { bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
 
 export type TrainingRunState = {
   catalogId: string;
@@ -116,8 +117,13 @@ export default function TrainingSessionPlay() {
     engineRef.current?.handleTap(podId);
   }, [pods, bumpTapCount]);
 
-  // ── BLE TOUCH 이벤트 구독: 펌웨어가 측정한 deltaMs를 엔진에 그대로 전달 ──
+  // ── BLE TOUCH notify 구독 + 이벤트 수신 ──
+  // 트레이닝 화면이 떠 있는 동안에만 디바이스 입력을 받는다.
+  // 네이티브 셸이 아니거나 디바이스 미연결이면 ble.subscribeCharacteristic은 자동 no-op.
   useEffect(() => {
+    const subscriptionId = `training-touch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    bleSubscribeCharacteristic(subscriptionId, 'notify');
+
     const onBridge = (e: Event) => {
       const detail = (e as CustomEvent<NativeToWebMessage>).detail;
       if (!detail || detail.type !== 'ble.touch') return;
@@ -127,7 +133,10 @@ export default function TrainingSessionPlay() {
       engineRef.current?.handleTap(t.pod, { deltaMs: useDelta, tickId: t.tickId });
     };
     window.addEventListener('noilink-native-bridge', onBridge as EventListener);
-    return () => window.removeEventListener('noilink-native-bridge', onBridge as EventListener);
+    return () => {
+      window.removeEventListener('noilink-native-bridge', onBridge as EventListener);
+      bleUnsubscribeCharacteristic(subscriptionId);
+    };
   }, [bumpTapCount]);
 
   // ── 엔진 종료 후 서버 제출 ──
