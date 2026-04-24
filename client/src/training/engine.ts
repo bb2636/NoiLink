@@ -25,6 +25,7 @@ import {
   RHYTHM_PHASE_MS,
   SESSION_PHASE_COGNITIVE,
   SESSION_PHASE_RHYTHM,
+  judgeRhythmError,
   rhythmStepsForBeat,
 } from '@noilink/shared';
 import { bleWriteControl, bleWriteLed, bleWriteSession } from '../native/bleBridge';
@@ -290,8 +291,8 @@ export class TrainingEngine {
 
   destroy(): void {
     if (!this.destroyed) {
-      // 중도 취소(언마운트 등) — STOP 송신
-      try { bleWriteControl(CTRL_STOP); } catch (_e) { /* noop */ }
+      // 중도 취소(언마운트 등) — STOP 송신 (bleWriteControl는 native 미연결 시 자동 no-op)
+      bleWriteControl(CTRL_STOP);
     }
     this.destroyed = true;
     if (this.rafId) window.cancelAnimationFrame(this.rafId);
@@ -686,9 +687,11 @@ export class TrainingEngine {
       offset = Math.abs(now - t);
     }
     this.acc.rOffsets.push(offset);
-    if (offset <= 80) this.acc.rPerfect += 1;
-    else if (offset <= 180) this.acc.rGood += 1;
-    else if (offset <= 320) this.acc.rBad += 1;
+    // 펌웨어와 동일한 임계값으로 등급 판정 (shared/ble-protocol.judgeRhythmError)
+    const grade = judgeRhythmError(offset);
+    if (grade === 'PERFECT') this.acc.rPerfect += 1;
+    else if (grade === 'GOOD') this.acc.rGood += 1;
+    else if (grade === 'BAD') this.acc.rBad += 1;
     else this.acc.rMiss += 1;
     // 다음 점등을 위해 끄기
     this.pods = this.pods.map(p => p.id === pod.id ? { ...p, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null, tickId: 0 } : p);
@@ -815,8 +818,8 @@ export class TrainingEngine {
     if (this.tickTimer) window.clearTimeout(this.tickTimer);
     if (this.phaseTimer) window.clearTimeout(this.phaseTimer);
     this.allOff();
-    // BLE 정상 종료
-    try { bleWriteControl(CTRL_STOP); } catch (_e) { /* noop */ }
+    // BLE 정상 종료 (bleWriteControl는 native 미연결 시 자동 no-op)
+    bleWriteControl(CTRL_STOP);
     this.cfg.onPhaseChange({ phase: 'DONE', cycleIndex: 0 });
     this.cfg.onComplete(this.buildMetrics());
   }
