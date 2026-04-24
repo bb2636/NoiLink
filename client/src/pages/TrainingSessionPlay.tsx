@@ -93,6 +93,20 @@ export default function TrainingSessionPlay() {
   // 임계값 판정에 사용한다.
   const elapsedMsRef = useRef(0);
 
+  // BLE 단절 → 재연결 그레이스 기간. 짧은 신호 단절(예: 2~3초)에서는 즉시 종료하지 않고
+  // 임시 안내만 띄운다. 네이티브의 자동 재연결 백오프는 1s/2s/4s 총 ~7s 이므로
+  // 그보다 약간 긴 안전 타임아웃(8s)을 두고, 그 안에 'connected'가 다시 오면 그대로 진행한다.
+  // 'retry-failed' 사유로 최종 실패가 통보되면 즉시 종료한다.
+  const BLE_RECONNECT_GRACE_MS = 8000;
+  const [bleReconnecting, setBleReconnecting] = useState(false);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
   // ── 가드: 잘못된 진입은 목록으로 ──
   useEffect(() => {
     if (!state || !state.userId || totalSec <= 0) {
@@ -212,30 +226,60 @@ export default function TrainingSessionPlay() {
     };
   }, [state, totalMs, engineMetrics, submitting, finalizeAndAbort]);
 
-  // ── BLE(NoiPod) 연결이 끊기면 즉시 세션 종료 (네이티브 셸에서만) ──
-  // 정책: 디바이스 입력 채널이 사라지면 더 이상 정상 채점이 불가능하므로 명확한 사유와 함께
-  // 목록으로 돌려보낸다. 사용자가 "갑자기 화면이 바뀌었다"고 혼동하지 않도록 배너로 안내한다.
+  // ── BLE(NoiPod) 연결이 끊기면 그레이스 기간 후 세션 종료 (네이티브 셸에서만) ──
+  // 정책: 짧은 신호 단절은 네이티브가 자동 재연결을 시도하므로(1s/2s/4s 백오프) 즉시 끊지 않고
+  // 임시 배너로 "회복 중" 상태를 보여준다. 그 사이에 다시 연결되면 트레이닝을 그대로 이어가고,
+  // 최종 재연결 실패('retry-failed') 또는 안전 타임아웃 만료에서만 'ble-disconnect' 사유로 종료한다.
   //
   // 가드:
   //   - reason === 'user' 는 사용자가 직접 디바이스 페이지에서 해제한 케이스인데,
   //     트레이닝 진행 중에는 하단 네비가 가려져 다른 화면으로 갈 수 없으므로 실제로는 발생하지 않는다.
   //     안전을 위해 'user' 는 명시적으로 무시한다.
   //   - 일반 웹/Replit 미리보기에서는 BLE 자체가 없으므로 핸들러를 등록하지 않는다.
+  //   - ble.reconnect 알림은 그레이스 기간 동안 배너 유지를 위한 보조 신호로만 사용한다
+  //     (별도 추가 동작 없음 — 'connected != null' 또는 'retry-failed'가 최종 신호).
   useEffect(() => {
     if (!state) return;
     if (!isNoiLinkNativeShell()) return;
     const onBridge = (e: Event) => {
       const detail = (e as CustomEvent<NativeToWebMessage>).detail;
-      if (!detail || detail.type !== 'ble.connection') return;
-      if (detail.payload.connected !== null) return;
-      if (detail.payload.reason === 'user') return;
-      finalizeAndAbort('ble-disconnect');
+      if (!detail) return;
+      if (detail.type === 'ble.connection') {
+        if (detail.payload.connected !== null) {
+          // 재연결 성공 — 그레이스 중이면 배너/타이머를 정리하고 트레이닝을 계속 진행한다.
+          clearReconnectTimer();
+          setBleReconnecting(false);
+          return;
+        }
+        if (detail.payload.reason === 'user') return;
+        if (detail.payload.reason === 'retry-failed') {
+          // 자동 재연결이 모두 실패 — 즉시 종료.
+          clearReconnectTimer();
+          setBleReconnecting(false);
+          finalizeAndAbort('ble-disconnect');
+          return;
+        }
+        // 'unexpected' (또는 사유 누락) — 그레이스 기간 시작 / 갱신.
+        setBleReconnecting(true);
+        clearReconnectTimer();
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectTimerRef.current = null;
+          setBleReconnecting(false);
+          finalizeAndAbort('ble-disconnect');
+        }, BLE_RECONNECT_GRACE_MS);
+        return;
+      }
+      if (detail.type === 'ble.reconnect') {
+        // 재연결 시도 알림 — 배너 상태만 보장.
+        setBleReconnecting(true);
+      }
     };
     window.addEventListener('noilink-native-bridge', onBridge as EventListener);
     return () => {
       window.removeEventListener('noilink-native-bridge', onBridge as EventListener);
+      clearReconnectTimer();
     };
-  }, [state, finalizeAndAbort]);
+  }, [state, finalizeAndAbort, clearReconnectTimer]);
 
   // 동일 자극(pod, tickId)에 UI tap과 BLE TOUCH가 둘 다 와도 카운트는 1회만.
   const tapDedupRef = useRef<Set<string>>(new Set());
@@ -387,6 +431,18 @@ export default function TrainingSessionPlay() {
           </button>
           <h1 className="text-lg font-semibold">{state.title}</h1>
         </div>
+
+        {/* BLE 재연결 회복 중 임시 안내 — 그레이스 기간 동안만 노출 */}
+        {bleReconnecting && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mb-3 px-3 py-2 rounded-lg text-xs text-center"
+            style={{ backgroundColor: '#3A2A00', color: '#FFD66B', border: '1px solid #5A4500' }}
+          >
+            기기 연결 회복 중…
+          </div>
+        )}
 
         {/* 페이즈/모드 표시 */}
         <div className="flex items-center justify-center gap-2 mb-4">
