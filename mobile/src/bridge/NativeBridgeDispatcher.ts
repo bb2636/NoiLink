@@ -4,7 +4,6 @@ import {
   encodeLedFrame,
   encodeSessionFrame,
   isWebToNativeMessage,
-  resolveNoiPodCharacteristic,
   tryParseTouchBase64,
   type BleErrorAction,
   type BleErrorCode,
@@ -248,6 +247,16 @@ async function handleWebMessage(msg: WebToNativeMessage): Promise<void> {
         type: 'ble.connection',
         payload: { connected: snap },
       });
+      // connect() 안에서 자동 GATT 탐색을 한 번 수행했으므로 그 결과를 웹에도 알려준다.
+      // selected가 있으면 그 UUID들이 이후 write/notify에 사용된다 (없으면 NoiPod 상수 fallback).
+      const gatt = bleManager.getLastGattDiscovery();
+      if (gatt) {
+        postNativeToWeb({
+          v: NATIVE_BRIDGE_VERSION,
+          type: 'ble.gatt',
+          payload: { services: gatt.services, selected: gatt.selected },
+        });
+      }
       ack(msg.id, true);
       return;
     }
@@ -273,7 +282,8 @@ async function handleWebMessage(msg: WebToNativeMessage): Promise<void> {
       const { subscriptionId, key } = msg.payload;
       let resolved;
       try {
-        resolved = resolveNoiPodCharacteristic(key);
+        // 동적 매핑(연결 시 GATT 탐색으로 받은 UUID) 우선, 없으면 NoiPod 상수
+        resolved = bleManager.resolveLocator(key);
       } catch (e) {
         const m = e instanceof Error ? e.message : String(e);
         throw new BleManagerError('UNKNOWN_CHARACTERISTIC', 'subscribe', m);
@@ -325,7 +335,7 @@ async function handleWebMessage(msg: WebToNativeMessage): Promise<void> {
       const { key, base64Value, mode } = msg.payload;
       let resolved;
       try {
-        resolved = resolveNoiPodCharacteristic(key);
+        resolved = bleManager.resolveLocator(key);
       } catch (e) {
         const m = e instanceof Error ? e.message : String(e);
         throw new BleManagerError('UNKNOWN_CHARACTERISTIC', 'write', m);
@@ -341,7 +351,7 @@ async function handleWebMessage(msg: WebToNativeMessage): Promise<void> {
     }
 
     case 'ble.writeLed': {
-      const writeChar = resolveNoiPodCharacteristic('write');
+      const writeChar = bleManager.resolveLocator('write');
       const frame = encodeLedFrame(msg.payload);
       await bleManager.writeCharacteristic(
         writeChar.serviceUUID,
@@ -354,7 +364,7 @@ async function handleWebMessage(msg: WebToNativeMessage): Promise<void> {
     }
 
     case 'ble.writeSession': {
-      const writeChar = resolveNoiPodCharacteristic('write');
+      const writeChar = bleManager.resolveLocator('write');
       const frame = encodeSessionFrame(msg.payload);
       await bleManager.writeCharacteristic(
         writeChar.serviceUUID,
@@ -367,7 +377,7 @@ async function handleWebMessage(msg: WebToNativeMessage): Promise<void> {
     }
 
     case 'ble.writeControl': {
-      const writeChar = resolveNoiPodCharacteristic('write');
+      const writeChar = bleManager.resolveLocator('write');
       const frame = encodeControlFrame(msg.payload.cmd);
       await bleManager.writeCharacteristic(
         writeChar.serviceUUID,

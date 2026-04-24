@@ -10,12 +10,14 @@
  */
 import { PermissionsAndroid, Platform } from 'react-native';
 import { BleManager as PlxBleManager, Device, State, type Subscription } from 'react-native-ble-plx';
-import type {
-  BleErrorAction,
-  BleErrorCode,
-  BleDisconnectReason,
-  GattAutoSelection,
-  GattServiceMeta,
+import {
+  resolveNoiPodCharacteristic,
+  type BleErrorAction,
+  type BleErrorCode,
+  type BleDisconnectReason,
+  type GattAutoSelection,
+  type GattServiceMeta,
+  type NoiPodCharacteristicKey,
 } from '@noilink/shared';
 import type { BleCharacteristicLocator, BleDiscoveryDevice, BleScanFilter, BleScanOptions } from './ble.types';
 import { uint8ArrayToBase64 } from './bleEncoding';
@@ -79,6 +81,14 @@ export class NoiLinkBleController {
   /** `${deviceId}|${serviceUUID}|${characteristicUUID}` → notify 구독 */
   private characteristicSubscriptions = new Map<string, Subscription>();
   private events: BleManagerEventHandlers = {};
+
+  /**
+   * 연결된 기기에서 실제로 발견된 UUID로 채워지는 동적 매핑.
+   * 비어 있으면 `shared/ble-constants.ts`의 NoiPod 표준 UUID로 fallback.
+   * 즉 "캡쳐된 UUID 우선 사용 + 실제 기기 GATT가 다르면 그것을 우선" 구조.
+   */
+  private dynamicLocators: Partial<Record<NoiPodCharacteristicKey, BleCharacteristicLocator>> = {};
+  private lastGattDiscovery: BleGattDiscoveryResult | null = null;
 
   /** dispatcher가 재연결 이벤트를 web으로 push하기 위해 등록 */
   setEventHandlers(handlers: BleManagerEventHandlers): void {
@@ -301,6 +311,9 @@ export class NoiLinkBleController {
       this.connectionMeta = { deviceId: d.id, shouldReconnect: true };
       this.attachDisconnectListener(d);
       console.log('[BLE] connected + discovered', deviceId);
+      // 새 기기 → 이전 동적 매핑 폐기 후 자동 GATT 탐색 시도. 실패해도 fallback(상수)로 동작.
+      this.resetDynamicLocators();
+      await this.tryAutoMapFromGatt();
       this.emit();
       return d;
     } catch (e) {
@@ -471,6 +484,9 @@ export class NoiLinkBleController {
           this.connected = d;
           this.connectionMeta = { deviceId: d.id, shouldReconnect: true };
           this.attachDisconnectListener(d);
+          // 재연결 시에도 GATT 재탐색 (펌웨어 OTA 등으로 UUID가 바뀌었을 가능성 대비)
+          this.resetDynamicLocators();
+          await this.tryAutoMapFromGatt();
           console.log('[BLE] reconnect success', deviceId, 'attempt', attempt);
           this.emit();
           this.events.onReconnectSuccess?.(d);
@@ -508,11 +524,59 @@ export class NoiLinkBleController {
       console.warn('[BLE] disconnect warn', e);
     } finally {
       this.connected = null;
+      this.resetDynamicLocators();
       if (reason === 'user') {
         this.connectionMeta = null;
         this.events.onUserDisconnect?.(id);
       }
       this.emit();
+    }
+  }
+
+  /**
+   * key('write'|'notify')에 대한 실제 사용 UUID를 반환합니다.
+   * - 연결된 기기에서 GATT 자동 탐색이 성공해 동적으로 매핑된 게 있으면 그것을 우선
+   * - 없으면 `shared/ble-constants.ts`의 NoiPod 표준 UUID로 fallback
+   */
+  resolveLocator(key: NoiPodCharacteristicKey): BleCharacteristicLocator {
+    const dyn = this.dynamicLocators[key];
+    return dyn ?? resolveNoiPodCharacteristic(key);
+  }
+
+  /**
+   * 가장 최근의 GATT 자동 탐색 결과 (없으면 null).
+   * UI/디버그/웹측 노출용.
+   */
+  getLastGattDiscovery(): BleGattDiscoveryResult | null {
+    return this.lastGattDiscovery;
+  }
+
+  private resetDynamicLocators(): void {
+    this.dynamicLocators = {};
+    this.lastGattDiscovery = null;
+  }
+
+  /**
+   * 연결 직후/재연결 직후에 호출. 자동 탐색이 성공해 같은 service 내 tx+rx 페어를 찾으면
+   * 동적 locator로 박아 둡니다. 실패해도 상수 fallback이 살아 있으므로 throw하지 않습니다.
+   */
+  private async tryAutoMapFromGatt(): Promise<void> {
+    try {
+      const result = await this.discoverGattAuto();
+      this.lastGattDiscovery = result;
+      if (result.selected) {
+        const { service, txCharacteristic, rxCharacteristic } = result.selected;
+        this.dynamicLocators.write = { serviceUUID: service, characteristicUUID: txCharacteristic };
+        this.dynamicLocators.notify = { serviceUUID: service, characteristicUUID: rxCharacteristic };
+        console.log('[BLE] dynamic locators set from discovery', this.dynamicLocators);
+      } else {
+        console.warn('[BLE] discoverGattAuto: no selection — using constant UUIDs (fallback)');
+      }
+    } catch (e) {
+      console.warn(
+        '[BLE] auto GATT map failed — using constant UUIDs (fallback):',
+        e instanceof Error ? e.message : String(e)
+      );
     }
   }
 
