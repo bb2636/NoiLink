@@ -69,6 +69,47 @@ button, a {
   min-width: 44px;
 }
 
+/* ─────────────────────────────────────────────────────────────
+ * Pod 시각 보강: 박자 잔상(after-glow)·둘레 펄스
+ *
+ * RHYTHM Lv4/Lv5는 LED 점등이 박의 40%(빠른 BPM에서는 ~120ms 이하)로
+ * 짧기 때문에, 점등 직후 색상 잔상을 ~420ms 동안 유지하고 둘레 링을
+ * 펄스시켜 시각적 박자감을 보강한다. 입력 판정에는 영향이 없도록
+ * pointer-events:none 으로 분리한다.
+ * ───────────────────────────────────────────────────────────── */
+@keyframes pod-afterglow {
+  0%   { opacity: 0.85; transform: scale(1); }
+  60%  { opacity: 0.35; transform: scale(1.06); }
+  100% { opacity: 0;    transform: scale(1.12); }
+}
+
+@keyframes pod-beat-ring {
+  0%   { opacity: 0.75; transform: scale(1);    border-width: 3px; }
+  70%  { opacity: 0.20; transform: scale(1.35); border-width: 2px; }
+  100% { opacity: 0;    transform: scale(1.55); border-width: 1px; }
+}
+
+.pod-afterglow {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  pointer-events: none;
+  background-color: var(--pod-glow-color, transparent);
+  box-shadow: 0 0 36px 6px var(--pod-glow-shadow, transparent);
+  animation: pod-afterglow var(--pod-glow-ms, 420ms) cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.pod-beat-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  pointer-events: none;
+  border: 3px solid var(--pod-glow-shadow, transparent);
+  animation: pod-beat-ring var(--pod-ring-ms, 520ms) cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
 /* 스크롤바 숨김 (모바일 레이아웃 등) */
 .scrollbar-hide {
   scrollbar-width: none;
