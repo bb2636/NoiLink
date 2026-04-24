@@ -72,8 +72,14 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
   - 색=0xFF 또는 onMs=0 → 펌웨어가 잔여 onMs 무시하고 LED 즉시 OFF
   - 펌웨어 측 구현·릴리스 노트 반영 필요 (별도 리포지토리)
 - 바이트 레이아웃 회귀 테스트: `shared/ble-protocol.test.ts`
-  - 실행: `npm test` (vitest, 34 tests). 인코더/디코더 변경 시 OFF 합의서의
+  - 실행: `npm test` (vitest). 인코더/디코더 변경 시 OFF 합의서의
     테스트 벡터가 깨지지 않는지 자동 검증된다.
+- 엔진 LED 소등 흐름 회귀 테스트: `client/src/training/engine.test.ts`
+  - `bleWriteLed`/`bleWriteControl`/`bleWriteSession` 모킹 후, 사용자가 onMs 안에
+    탭하면 OFF 페이로드(`isLedOffPayload` 컨벤션, `mode='withResponse'`)가 송신되고
+    `allOff`가 모든 점등 Pod에 OFF + CTRL_STOP 을 보내며 두 번째 호출에는
+    멱등하게 동작함을 검증한다. (jsdom + vi.useFakeTimers)
+  - `npm test` (root)는 shared → client 순으로 vitest 를 실행한다.
 
 ## Deployment
 
