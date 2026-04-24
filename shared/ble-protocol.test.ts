@@ -23,6 +23,12 @@ import {
   bytesToHex,
   hexToBytes,
   bytesToBase64,
+  RHYTHM_THRESHOLDS_MS,
+  RHYTHM_GRADE_SCORE,
+  judgeRhythmError,
+  rhythmScoreFromCounts,
+  onMsForLevel,
+  mixedColorRate,
 } from './ble-protocol.js';
 
 function hex(...byteSeq: number[]): Uint8Array {
@@ -328,5 +334,225 @@ describe('round-trip — encode → bytes layout sanity', () => {
     const frame = encodeLedOffFrame({ tickId: 0, pod: 0 });
     expect(bytesToHex(frame)).toBe(expected);
     expect(Array.from(hexToBytes(expected))).toEqual(Array.from(frame));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 리듬 판정 / 점수 — 회귀 테스트
+// (정본: shared/ble-protocol.ts §리듬 판정, 명세 12.6)
+// ---------------------------------------------------------------------------
+
+describe('RHYTHM_THRESHOLDS_MS — 임계값 상수 잠금', () => {
+  // 임계값이 바뀌면 사용자가 체감하는 난이도가 그대로 어긋난다.
+  // 의도치 않은 수정을 막기 위해 정확한 숫자를 잠근다.
+  it('PERFECT=45, GOOD=110, BAD=200', () => {
+    expect(RHYTHM_THRESHOLDS_MS.PERFECT).toBe(45);
+    expect(RHYTHM_THRESHOLDS_MS.GOOD).toBe(110);
+    expect(RHYTHM_THRESHOLDS_MS.BAD).toBe(200);
+  });
+
+  it('등급별 점수표: PERFECT=100, GOOD=70, BAD=35, MISS=0', () => {
+    expect(RHYTHM_GRADE_SCORE.PERFECT).toBe(100);
+    expect(RHYTHM_GRADE_SCORE.GOOD).toBe(70);
+    expect(RHYTHM_GRADE_SCORE.BAD).toBe(35);
+    expect(RHYTHM_GRADE_SCORE.MISS).toBe(0);
+  });
+});
+
+describe('judgeRhythmError — 경계값 진리표', () => {
+  it('errMs=0 → PERFECT', () => {
+    expect(judgeRhythmError(0)).toBe('PERFECT');
+  });
+
+  // PERFECT 경계: |errMs| <= 45 → PERFECT
+  it('errMs=+45 (PERFECT 상한 inclusive) → PERFECT', () => {
+    expect(judgeRhythmError(45)).toBe('PERFECT');
+  });
+  it('errMs=-45 (PERFECT 하한 inclusive) → PERFECT', () => {
+    expect(judgeRhythmError(-45)).toBe('PERFECT');
+  });
+  it('errMs=+46 (PERFECT 직후) → GOOD', () => {
+    expect(judgeRhythmError(46)).toBe('GOOD');
+  });
+  it('errMs=-46 (PERFECT 직후) → GOOD', () => {
+    expect(judgeRhythmError(-46)).toBe('GOOD');
+  });
+
+  // GOOD 경계: 45 < |errMs| <= 110 → GOOD
+  it('errMs=+110 (GOOD 상한 inclusive) → GOOD', () => {
+    expect(judgeRhythmError(110)).toBe('GOOD');
+  });
+  it('errMs=-110 (GOOD 하한 inclusive) → GOOD', () => {
+    expect(judgeRhythmError(-110)).toBe('GOOD');
+  });
+  it('errMs=+111 (GOOD 직후) → BAD', () => {
+    expect(judgeRhythmError(111)).toBe('BAD');
+  });
+  it('errMs=-111 (GOOD 직후) → BAD', () => {
+    expect(judgeRhythmError(-111)).toBe('BAD');
+  });
+
+  // BAD 경계: 110 < |errMs| <= 200 → BAD
+  it('errMs=+200 (BAD 상한 inclusive) → BAD', () => {
+    expect(judgeRhythmError(200)).toBe('BAD');
+  });
+  it('errMs=-200 (BAD 하한 inclusive) → BAD', () => {
+    expect(judgeRhythmError(-200)).toBe('BAD');
+  });
+  it('errMs=+201 (BAD 직후) → MISS', () => {
+    expect(judgeRhythmError(201)).toBe('MISS');
+  });
+  it('errMs=-201 (BAD 직후) → MISS', () => {
+    expect(judgeRhythmError(-201)).toBe('MISS');
+  });
+
+  // MISS: |errMs| > 200
+  it('errMs=+9999 → MISS', () => {
+    expect(judgeRhythmError(9999)).toBe('MISS');
+  });
+  it('errMs=-9999 → MISS', () => {
+    expect(judgeRhythmError(-9999)).toBe('MISS');
+  });
+
+  it('부호 무관: judge(+x) === judge(-x)', () => {
+    for (const x of [0, 10, 45, 46, 99, 110, 111, 150, 200, 201, 500]) {
+      expect(judgeRhythmError(x)).toBe(judgeRhythmError(-x));
+    }
+  });
+});
+
+describe('rhythmScoreFromCounts — 종합 점수 0..100', () => {
+  it('counts 모두 0 → 0 (분모 보호)', () => {
+    expect(rhythmScoreFromCounts({ perfect: 0, good: 0, bad: 0, miss: 0 })).toBe(0);
+  });
+
+  it('전부 PERFECT → 100', () => {
+    expect(rhythmScoreFromCounts({ perfect: 10, good: 0, bad: 0, miss: 0 })).toBe(100);
+  });
+
+  it('전부 GOOD → 70', () => {
+    expect(rhythmScoreFromCounts({ perfect: 0, good: 5, bad: 0, miss: 0 })).toBe(70);
+  });
+
+  it('전부 BAD → 35', () => {
+    expect(rhythmScoreFromCounts({ perfect: 0, good: 0, bad: 4, miss: 0 })).toBe(35);
+  });
+
+  it('전부 MISS → 0', () => {
+    expect(rhythmScoreFromCounts({ perfect: 0, good: 0, bad: 0, miss: 7 })).toBe(0);
+  });
+
+  it('PERFECT 1 + MISS 1 → 50 (가중평균)', () => {
+    // (100 + 0) / (2 * 100) * 100 = 50
+    expect(rhythmScoreFromCounts({ perfect: 1, good: 0, bad: 0, miss: 1 })).toBe(50);
+  });
+
+  it('PERFECT 2 + GOOD 2 → 85', () => {
+    // (200 + 140) / (4 * 100) * 100 = 85
+    expect(rhythmScoreFromCounts({ perfect: 2, good: 2, bad: 0, miss: 0 })).toBe(85);
+  });
+
+  it('1 of each → round((100+70+35+0)/400 * 100) = 51', () => {
+    // 205/400 = 0.5125 → 51.25 → round → 51
+    expect(rhythmScoreFromCounts({ perfect: 1, good: 1, bad: 1, miss: 1 })).toBe(51);
+  });
+
+  it('Math.round 사용: 0.5 이상 올림 (PERFECT 1 + GOOD 1 → 85)', () => {
+    // (100+70)/200 * 100 = 85.0 (정확값) — 반올림 경계 검증
+    expect(rhythmScoreFromCounts({ perfect: 1, good: 1, bad: 0, miss: 0 })).toBe(85);
+  });
+
+  it('큰 카운트도 정수로 떨어진다 (PERFECT 100 → 100)', () => {
+    expect(rhythmScoreFromCounts({ perfect: 100, good: 0, bad: 0, miss: 0 })).toBe(100);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 트레이닝 보조 공식 — 회귀 테스트 (명세 12.6)
+// ---------------------------------------------------------------------------
+
+describe('onMsForLevel — clamp(380 - level*45, 120, 420)', () => {
+  // 명세 12.6: level 1..5 기준 점등 길이 산출
+  it('level=1 → 335ms (380 - 45)', () => {
+    expect(onMsForLevel(1)).toBe(335);
+  });
+  it('level=2 → 290ms', () => {
+    expect(onMsForLevel(2)).toBe(290);
+  });
+  it('level=3 → 245ms', () => {
+    expect(onMsForLevel(3)).toBe(245);
+  });
+  it('level=4 → 200ms', () => {
+    expect(onMsForLevel(4)).toBe(200);
+  });
+  it('level=5 → 155ms', () => {
+    expect(onMsForLevel(5)).toBe(155);
+  });
+
+  // clamp 하한: 380 - L*45 < 120 ⇔ L > 5.78 → 6 이상에서 발생
+  it('level=6 → 120ms (하한 clamp; 380 - 270 = 110 → 120)', () => {
+    expect(onMsForLevel(6)).toBe(120);
+  });
+  it('level=100 → 120ms (하한 clamp 유지)', () => {
+    expect(onMsForLevel(100)).toBe(120);
+  });
+
+  // clamp 상한: 380 - L*45 > 420 ⇔ L < -0.89 → 음수에서 발생
+  it('level=0 → 380ms (clamp 범위 안)', () => {
+    expect(onMsForLevel(0)).toBe(380);
+  });
+  it('level=-1 → 420ms (상한 clamp; 380 + 45 = 425 → 420)', () => {
+    expect(onMsForLevel(-1)).toBe(420);
+  });
+  it('level=-100 → 420ms (상한 clamp 유지)', () => {
+    expect(onMsForLevel(-100)).toBe(420);
+  });
+
+  it('결과는 항상 [120, 420] 범위 안', () => {
+    for (let l = -10; l <= 20; l++) {
+      const v = onMsForLevel(l);
+      expect(v).toBeGreaterThanOrEqual(120);
+      expect(v).toBeLessThanOrEqual(420);
+    }
+  });
+});
+
+describe('mixedColorRate — Lv≤1 → 0, Lv≥5 → 0.35, 사이 선형 보간', () => {
+  // 명세 12.6: 혼합색 등장 비율
+  it('level=1 → 0 (하한 inclusive)', () => {
+    expect(mixedColorRate(1)).toBe(0);
+  });
+  it('level=0 → 0 (하한 clamp)', () => {
+    expect(mixedColorRate(0)).toBe(0);
+  });
+  it('level=-5 → 0 (하한 clamp)', () => {
+    expect(mixedColorRate(-5)).toBe(0);
+  });
+
+  it('level=5 → 0.35 (상한 inclusive)', () => {
+    expect(mixedColorRate(5)).toBe(0.35);
+  });
+  it('level=10 → 0.35 (상한 clamp)', () => {
+    expect(mixedColorRate(10)).toBe(0.35);
+  });
+
+  // 선형 보간: ((L - 1) / 4) * 0.35
+  it('level=2 → 0.0875', () => {
+    expect(mixedColorRate(2)).toBeCloseTo(0.0875, 10);
+  });
+  it('level=3 → 0.175 (중앙값)', () => {
+    expect(mixedColorRate(3)).toBeCloseTo(0.175, 10);
+  });
+  it('level=4 → 0.2625', () => {
+    expect(mixedColorRate(4)).toBeCloseTo(0.2625, 10);
+  });
+
+  it('단조 비감소: level이 커질수록 비율도 같거나 커진다', () => {
+    let prev = -Infinity;
+    for (let l = 0; l <= 6; l++) {
+      const v = mixedColorRate(l);
+      expect(v).toBeGreaterThanOrEqual(prev);
+      prev = v;
+    }
   });
 });
