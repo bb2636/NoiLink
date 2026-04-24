@@ -376,6 +376,38 @@ describe('TrainingEngine: BLE 단절 회복 구간은 채점에서 제외된다 
     engine.destroy();
   });
 
+  it('getRecoveryStats — windows 와 누적 시간(현재 진행 중 구간 포함) 을 정확히 노출 (Task #38)', () => {
+    const { cfg } = makeConfig({ mode: 'FOCUS', bpm: 60 });
+    const engine = new TrainingEngine(cfg);
+    engine.start();
+    vi.advanceTimersByTime(360);
+
+    // 초기 상태
+    expect(engine.getRecoveryStats()).toEqual({ windows: 0, totalMs: 0 });
+
+    // 첫 회복 구간: 2초
+    engine.beginRecoveryWindow();
+    vi.advanceTimersByTime(2000);
+    let s = engine.getRecoveryStats();
+    expect(s.windows).toBe(1);
+    expect(s.totalMs).toBeGreaterThanOrEqual(1900);
+    expect(s.totalMs).toBeLessThanOrEqual(2100);
+    engine.endRecoveryWindow();
+
+    // 두 번째 회복 구간: 3초 진행 중
+    vi.advanceTimersByTime(500);
+    engine.beginRecoveryWindow();
+    vi.advanceTimersByTime(3000);
+    s = engine.getRecoveryStats();
+    expect(s.windows).toBe(2);
+    // 종료된 구간 2초 + 진행 중 구간 3초 ≈ 5초
+    expect(s.totalMs).toBeGreaterThanOrEqual(4900);
+    expect(s.totalMs).toBeLessThanOrEqual(5100);
+
+    engine.endRecoveryWindow();
+    engine.destroy();
+  });
+
   it('회복 중 종료(complete/destroy)되면 누적 시간이 자동 마감된다', () => {
     const { cfg } = makeConfig({ mode: 'FOCUS', bpm: 60 });
     const engine = new TrainingEngine(cfg);

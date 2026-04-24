@@ -70,6 +70,15 @@ vi.mock('../training/engine', () => {
     // Task #27: BLE 회복 구간 알림 — 실제 채점 누적은 하지 않는 no-op stub.
     beginRecoveryWindow() {}
     endRecoveryWindow() {}
+    // Task #38: 단절 빈도/누적 시간 안내 토스트 임계치 판정용 스냅샷.
+    // 테스트가 setRecoveryStats() 로 임의 값을 주입할 수 있도록 가변 필드로 둔다.
+    private __recoveryStats: { windows: number; totalMs: number } = { windows: 0, totalMs: 0 };
+    getRecoveryStats() {
+      return this.__recoveryStats;
+    }
+    setRecoveryStats(stats: { windows: number; totalMs: number }) {
+      this.__recoveryStats = stats;
+    }
     // Task #35: 진행률 트리거 — onElapsedMs 를 직접 발사해 elapsedMsRef 를 동기화.
     emitElapsed(ms: number) {
       this.opts.onElapsedMs?.(ms);
@@ -118,6 +127,35 @@ vi.mock('../components/PodGrid/PodGrid', () => ({
 }));
 // 부분 결과 저장 모달의 isOpen / 핸들러 호출을 검증할 수 있도록 가벼운 더미를 둔다.
 // isOpen=false 일 때는 null 을 그대로 반환해 BLE 분기 테스트 동작에 영향이 없다.
+// SuccessBanner 는 framer-motion AnimatePresence 로 렌더되는데 jsdom + 가짜 타이머
+// 환경에서는 exit 애니메이션이 깨끗이 끝나지 않아 DOM 잔상이 남는다. Task #38 의
+// 토스트 1회 노출 보장을 검증하기 위해 가벼운 더미로 대체한다 — isOpen 이 false
+// 인 동안에는 아무 것도 렌더하지 않으며, onClose 는 SuccessBanner 자체의
+// duration 타이머가 호출하도록 그대로 두면 된다 (실 컴포넌트와 동일한 시그니처).
+vi.mock('../components/SuccessBanner/SuccessBanner', () => ({
+  default: ({
+    isOpen,
+    message,
+    onClose,
+    duration = 3000,
+    autoClose = true,
+  }: {
+    isOpen: boolean;
+    message: string;
+    onClose?: () => void;
+    duration?: number;
+    autoClose?: boolean;
+  }) => {
+    React.useEffect(() => {
+      if (isOpen && autoClose && onClose) {
+        const id = setTimeout(() => onClose(), duration);
+        return () => clearTimeout(id);
+      }
+    }, [isOpen, autoClose, duration, onClose]);
+    return isOpen ? <div data-testid="success-banner">{message}</div> : null;
+  },
+}));
+
 vi.mock('../components/ConfirmModal/ConfirmModal', () => ({
   default: ({
     isOpen,
@@ -201,7 +239,10 @@ function renderApp(override?: Partial<TrainingRunState>) {
 }
 
 /** 모킹된 FakeEngine 인스턴스 핸들 (emitElapsed 로 진행률을 직접 트리거). */
-type FakeEngineHandle = { emitElapsed: (ms: number) => void };
+type FakeEngineHandle = {
+  emitElapsed: (ms: number) => void;
+  setRecoveryStats: (stats: { windows: number; totalMs: number }) => void;
+};
 function getFakeEngine(): FakeEngineHandle {
   const inst = (globalThis as { __fakeEngineInstance__?: FakeEngineHandle })
     .__fakeEngineInstance__;
@@ -345,6 +386,85 @@ describe('TrainingSessionPlay — BLE 단절/재연결 분기', () => {
     });
     expect(lastLocation).toBeNull();
     expect(container?.querySelector('[data-testid="pod-grid"]')).toBeTruthy();
+  });
+});
+
+/**
+ * Task #38 — 잦은 BLE 단절 안내 토스트 회귀 테스트
+ *
+ * 정책:
+ *   - 단절-재연결이 한 세션에 누적 3회 이상 또는 누적 15초 이상이면 부드러운
+ *     안내 토스트("기기 연결이 자주 끊겨요. 거리·간섭을 확인해 보세요.")를
+ *     상단에 1회만 노출한다.
+ *   - 임계 미달이면 토스트가 뜨지 않는다.
+ *   - 임계를 넘은 뒤에 회복이 더 발생해도 한 세션에 한 번만 노출된다.
+ *
+ * 토스트 컴포넌트(SuccessBanner)는 `framer-motion` AnimatePresence 안에서
+ * 렌더되므로 텍스트 검사로 노출 여부를 판단한다.
+ */
+describe('TrainingSessionPlay — BLE 단절 빈도 안내 토스트 (Task #38)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    lastLocation = null;
+    (window as unknown as { ReactNativeWebView?: { postMessage: (s: string) => void } })
+      .ReactNativeWebView = { postMessage: () => {} };
+  });
+
+  afterEach(() => {
+    unmountApp();
+    delete (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView;
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  const STABILITY_NOTICE = '기기 연결이 자주 끊겨요';
+  const stabilityNoticeVisible = () =>
+    Boolean(container?.textContent?.includes(STABILITY_NOTICE));
+
+  it('회복이 1회뿐이면 임계 미달이라 토스트가 뜨지 않는다', () => {
+    renderApp();
+    // 1회·5초만 누적된 상태로 회복 종료를 통보.
+    getFakeEngine().setRecoveryStats({ windows: 1, totalMs: 5_000 });
+    dispatchBridge(bleConnectionMessage({ connected: false, reason: 'unexpected' }));
+    dispatchBridge(bleConnectionMessage({ connected: true }));
+    expect(stabilityNoticeVisible()).toBe(false);
+  });
+
+  it('회복 횟수가 임계(3회)에 도달하면 토스트가 노출된다', () => {
+    renderApp();
+    getFakeEngine().setRecoveryStats({ windows: 3, totalMs: 4_000 });
+    dispatchBridge(bleConnectionMessage({ connected: false, reason: 'unexpected' }));
+    dispatchBridge(bleConnectionMessage({ connected: true }));
+    expect(stabilityNoticeVisible()).toBe(true);
+  });
+
+  it('회복 누적 시간이 임계(15초)에 도달하면 토스트가 노출된다', () => {
+    renderApp();
+    getFakeEngine().setRecoveryStats({ windows: 2, totalMs: 15_000 });
+    dispatchBridge(bleConnectionMessage({ connected: false, reason: 'unexpected' }));
+    dispatchBridge(bleConnectionMessage({ connected: true }));
+    expect(stabilityNoticeVisible()).toBe(true);
+  });
+
+  it('한 세션에 한 번만 노출된다 — 토스트 자동 닫힘 후 추가 회복에도 다시 뜨지 않음', () => {
+    renderApp();
+    // 첫 노출.
+    getFakeEngine().setRecoveryStats({ windows: 3, totalMs: 4_000 });
+    dispatchBridge(bleConnectionMessage({ connected: false, reason: 'unexpected' }));
+    dispatchBridge(bleConnectionMessage({ connected: true }));
+    expect(stabilityNoticeVisible()).toBe(true);
+
+    // 자동 닫힘 시간(4s) 경과 후 토스트 사라짐.
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(stabilityNoticeVisible()).toBe(false);
+
+    // 더 많은 회복이 누적되며 추가 재연결이 와도 다시 뜨지 않아야 한다.
+    getFakeEngine().setRecoveryStats({ windows: 5, totalMs: 30_000 });
+    dispatchBridge(bleConnectionMessage({ connected: false, reason: 'unexpected' }));
+    dispatchBridge(bleConnectionMessage({ connected: true }));
+    expect(stabilityNoticeVisible()).toBe(false);
   });
 });
 

@@ -381,6 +381,23 @@ export class TrainingEngine {
     this.recoveryEnteredAt = 0;
   }
 
+  /**
+   * 외부(트레이닝 화면)에서 BLE 단절 빈도/누적 시간을 조회하기 위한 스냅샷.
+   * - windows: 지금까지 시작된 회복 구간의 총 횟수(현재 구간 포함).
+   * - totalMs: 종료된 구간들의 누적 시간 + 현재 진행 중 구간의 경과 시간.
+   * 화면은 이 값으로 "단절이 너무 잦다"는 부드러운 안내(토스트)를 1회 띄우는
+   * 임계치 판정에 사용한다 (Task #38).
+   */
+  getRecoveryStats(): { windows: number; totalMs: number } {
+    const ongoing = this.inRecoveryWindow
+      ? Math.max(0, Date.now() - this.recoveryEnteredAt)
+      : 0;
+    return {
+      windows: this.acc.recoveryWindows,
+      totalMs: this.acc.recoveryMs + ongoing,
+    };
+  }
+
   private schedule(fn: () => void, ms: number): void {
     const id = window.setTimeout(() => {
       this.pendingTimers = this.pendingTimers.filter((t) => t !== id);

@@ -10,6 +10,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
 import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import PodGrid from '../components/PodGrid/PodGrid';
+import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noilink/shared';
 import { SESSION_MAX_MS } from '@noilink/shared';
 import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
@@ -31,6 +32,19 @@ import type { TrainingAbortReason } from './trainingAbortReason';
  *    실용적 하한선이다 (COMPOSITE 5사이클 기준 4사이클 완료 직전).
  */
 const PARTIAL_RESULT_THRESHOLD = 0.8;
+
+/**
+ * BLE 단절이 잦을 때 사용자에게 환경 점검을 부드럽게 권하는 토스트의 임계값 (Task #38).
+ * 회복 구간이 시작/종료되는 흐름은 이미 채점에서 제외되지만, 사용자에게는 별도
+ * 안내가 없어 "기기가 이상하다"는 인상만 남는다. 다음 두 임계 중 하나만 충족해도
+ * 한 세션에 한 번 토스트를 띄운다:
+ *  - 회복 구간 누적 횟수 ≥ 3회
+ *  - 회복 구간 누적 시간 ≥ 15초
+ * 결과 화면 회복 배너와 동일한 노란 톤(#3A2A00 / #FFD66B) + 동일한 어휘
+ * ("기기 연결" / "거리·간섭")을 사용해 일관된 경험을 준다.
+ */
+const BLE_STABILITY_WINDOW_THRESHOLD = 3;
+const BLE_STABILITY_MS_THRESHOLD = 15_000;
 
 /**
  * 재연결 진행 상황 스냅샷 — 네이티브의 ble.reconnect 페이로드 + 수신 시각.
@@ -122,6 +136,11 @@ export default function TrainingSessionPlay() {
   // - 카운트다운 0초 시점(=실제 connectToDevice 진행 중)도 별도로 비활성화 조건이지만,
   //   이 플래그는 그 사이의 짧은 race(클릭 → 250ms 틱 갱신)도 함께 막아준다.
   const [manualRetryInFlight, setManualRetryInFlight] = useState(false);
+  // BLE 단절이 잦을 때 1회만 노출하는 안내 토스트 (Task #38).
+  // bleStabilityNoticeShownRef 는 한 세션 내 중복 노출을 막는 영속 플래그
+  // (사용자가 토스트를 닫아도 다시 뜨지 않는다 — 한 세션에 정확히 한 번).
+  const [bleStabilityNoticeOpen, setBleStabilityNoticeOpen] = useState(false);
+  const bleStabilityNoticeShownRef = useRef(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -283,6 +302,19 @@ export default function TrainingSessionPlay() {
           setManualRetryInFlight(false);
           // 회복 구간 종료 알림 — 채점 제외 시간을 누적 마감 (Task #27).
           engineRef.current?.endRecoveryWindow();
+          // 단절이 잦으면 환경 점검을 권하는 토스트를 1회만 노출 (Task #38).
+          // endRecoveryWindow() 직후이므로 직전 구간의 시간/횟수까지 모두 누적된 상태.
+          if (!bleStabilityNoticeShownRef.current) {
+            const stats = engineRef.current?.getRecoveryStats();
+            if (
+              stats &&
+              (stats.windows >= BLE_STABILITY_WINDOW_THRESHOLD ||
+                stats.totalMs >= BLE_STABILITY_MS_THRESHOLD)
+            ) {
+              bleStabilityNoticeShownRef.current = true;
+              setBleStabilityNoticeOpen(true);
+            }
+          }
           return;
         }
         if (detail.payload.reason === 'user') return;
@@ -705,6 +737,18 @@ export default function TrainingSessionPlay() {
           "결과 보러가기" 클릭 시 합성 메트릭(submitTrainingRun 의 fallback)이
           아니라 항상 진짜 부분 메트릭이 서버로 제출된다. endNow()는 동기적으로
           onComplete 를 호출하므로 모달이 닫혀 있는 시간은 사실상 1 렌더 미만이다. */}
+      {/* BLE 단절이 잦을 때 환경 점검을 부드럽게 권하는 토스트 (Task #38).
+          학습 흐름을 방해하지 않도록 상단 토스트(자동 닫힘)로만 노출하고,
+          한 세션에 한 번만 표시한다. 색·어휘는 결과 화면의 회복 배너와 일관. */}
+      <SuccessBanner
+        isOpen={bleStabilityNoticeOpen}
+        message="기기 연결이 자주 끊겨요. 거리·간섭을 확인해 보세요."
+        backgroundColor="#3A2A00"
+        textColor="#FFD66B"
+        duration={4000}
+        onClose={() => setBleStabilityNoticeOpen(false)}
+      />
+
       <ConfirmModal
         isOpen={partialFinishOpen && engineMetrics !== null}
         title="거의 다 끝났던 세션이에요"
