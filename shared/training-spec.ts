@@ -143,6 +143,21 @@ export function rhythmPatternForLevel(level: Level): RhythmPatternKind {
  * - tickIndex: 페이즈 시작부터 0,1,2…
  * - 반환: 각 step은 동시에 점등할 Pod id 배열, offsetRatio는 박자 안에서의 시작 시점(0=정박, 0.5=8분 뒷박)
  * 모든 step은 isTarget=true 이며 클라이언트가 점등 → BLE LED 송신을 함께 한다.
+ *
+ * ── 점등 지속시간 정책 ─────────────────────────────────────────────────
+ * Lv4/Lv5는 한 박 안에 두 step(offsetRatio 0, 0.5)이 함께 들어간다.
+ * 따라서 각 점등의 지속시간(onMs)은 **지원 BPM 범위(60~140) 안에서 박의 40% 이하**가
+ * 되도록 두어
+ *   - 정박(0.0~0.40) → 갭(0.40~0.50) → 뒷박(0.50~0.90) → 갭(0.90~1.00)
+ * 형태로 두 점등 사이와 다음 박 정박 직전에 ~10%씩 안전 마진을 둬야 한다.
+ * 이 마진이 없으면 빠른 BPM(>120)에서 타이머 지터(±수 ms) 누적으로 두 점등이
+ * 겹쳐 한 점등처럼 보이거나 한쪽이 사라지는 시각 인공물이 생긴다.
+ *
+ * 엔진 구현은 `client/src/training/engine.ts`의 `fireRhythmTick`
+ * (`onMs = Math.max(80, beatMs * 0.40)`) 참고. 80ms 하한은 시인성 보정용이며
+ * BPM ≤ 187.5 까지는 40% 비율을 강제로 위반하지 않는다 (지원 범위(60~140) 내에서
+ * 항상 만족). 더 높은 BPM이 도입되면 하한을 낮추거나 다음 점등 직전에 강제 OFF
+ * 프레임을 송신하는 대안 정책을 함께 검토해야 한다.
  */
 export interface RhythmStep {
   pods: number[];

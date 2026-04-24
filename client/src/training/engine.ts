@@ -467,7 +467,14 @@ export class TrainingEngine {
     const steps = rhythmStepsForBeat(this.cfg.level, this.rhythmStep);
     this.rhythmStep += 1;
     if (steps.length === 0) return; // 쉬는 박
-    const onMs = Math.max(120, beatMs * 0.45);
+    // Lv4/Lv5는 한 박 안에 정박(offset 0)과 8분 뒷박(offset 0.5)을 함께 점등한다.
+    // 점등 길이를 박의 40%로 제한해 두 점등 사이(0.40→0.50)와 뒷박 종료 후 다음 박
+    // 정박 시작 사이(0.90→1.00)에 각각 ~10%의 안전 마진을 확보한다. 빠른 BPM에서도
+    // 타이머 지터(±수 ms)가 누적될 때 두 점등이 겹치거나 한쪽이 사라져 보이는 일을
+    // 막아 박자감을 유지한다. 80ms 하한은 시인성 보정용이며 지원 BPM 범위(60~140)에서는
+    // 항상 40% 비율을 만족한다 (BPM ≤ 187.5 까지 안전).
+    // 관련 정책: shared/training-spec.rhythmStepsForBeat 의 "점등 지속시간 정책".
+    const onMs = Math.max(80, beatMs * 0.40);
     for (const step of steps) {
       const delay = Math.round(beatMs * step.offsetRatio);
       this.schedule(() => {
