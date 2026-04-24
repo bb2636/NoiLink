@@ -4,6 +4,7 @@
  */
 
 import type { Level, LogicColor, HardwareColor, PhaseType, TrainingMode } from './types.js';
+import { COLOR_CODE, type ColorCode } from './ble-protocol.js';
 
 // =============================================================================
 // 0. 측정 지표 (Metrics & Data) — 용어 정의
@@ -89,7 +90,6 @@ export const LOGIC_TO_HARDWARE_COLOR: Record<LogicColor, HardwareColor> = {
  * 의미 색 → 펌웨어 ColorCode (단일 소스: LOGIC_TO_HARDWARE_COLOR 경유)
  * 새 색을 추가하려면 LOGIC_TO_HARDWARE_COLOR와 HARDWARE_TO_COLOR_CODE 양쪽만 갱신하면 됩니다.
  */
-import { COLOR_CODE, type ColorCode } from './ble-protocol.js';
 const HARDWARE_TO_COLOR_CODE: Record<HardwareColor, ColorCode> = {
   G: COLOR_CODE.GREEN,
   R: COLOR_CODE.RED,
