@@ -244,14 +244,28 @@ export class TrainingEngine {
     this.consumedTickIds.clear();
 
     // BLE 세션 메타 + START (네이티브 셸이 아니면 자동 no-op)
-    // 정책: writeSession.durationSec는 "현재 활성 세그먼트(페이즈)의 길이"로 일관 송신.
-    //   - 단일 모드: start()에서 1회 (페이즈=COGNITIVE, durationSec=totalDurationMs)
-    //   - COMPOSITE: 매 페이즈 전환 시 (runNextPlan 내) 송신, currentBlePhase=-1 sentinel로 첫 세그먼트도 보장
+    // 정책:
+    //   1) 항상 writeSession을 먼저 보내고 그 다음 writeControl(START) — 펌웨어가
+    //      세션 메타를 받은 상태에서 시작하도록 보장.
+    //   2) durationSec는 "현재 활성 세그먼트(페이즈)의 길이"로 일관 송신.
+    //   3) COMPOSITE는 첫 세그먼트의 페이즈/길이를 start()에서 한 번 보내고,
+    //      이후 페이즈가 바뀔 때만 runNextPlan에서 재송신 (currentBlePhase 비교).
     const isComp = this.cfg.isComposite || this.cfg.mode === 'COMPOSITE';
-    bleWriteControl(CTRL_START);
 
     if (isComp) {
       this.buildCompositePlan();
+      const first = this.compositePlan[0];
+      if (first) {
+        const firstPhase = first.type === 'RHYTHM' ? SESSION_PHASE_RHYTHM : SESSION_PHASE_COGNITIVE;
+        this.currentBlePhase = firstPhase;
+        bleWriteSession({
+          bpm: this.cfg.bpm,
+          level: this.cfg.level,
+          phase: firstPhase,
+          durationSec: Math.round(first.durationMs / 1000),
+        });
+      }
+      bleWriteControl(CTRL_START);
       this.runNextPlan();
     } else {
       this.currentCognitiveMode = this.cfg.mode === 'FREE' ? 'FOCUS' : this.cfg.mode;
@@ -262,6 +276,7 @@ export class TrainingEngine {
         phase: SESSION_PHASE_COGNITIVE,
         durationSec: Math.round(this.cfg.totalDurationMs / 1000),
       });
+      bleWriteControl(CTRL_START);
       this.cfg.onPhaseChange({ phase: 'COGNITIVE', cognitiveMode: this.currentCognitiveMode, cycleIndex: 0 });
       this.startTickLoop(this.cfg.totalDurationMs);
     }
