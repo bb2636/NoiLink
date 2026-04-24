@@ -5,9 +5,11 @@
  *  2) 카테고리별 트레이닝 그리드 (2열)
  *  3) 자유 훈련 (프리 트레이닝)
  */
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
+import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import { TRAINING_BY_ID } from '../utils/trainingConfig';
 
 interface CardItem {
@@ -30,9 +32,37 @@ const GRID: CardItem[] = [
 
 export default function Training() {
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // 백그라운드로 인해 트레이닝이 중단된 직후 1회성 안내 배너를 보여준다.
+  // - location.state.abortReason === 'background' 일 때만 노출.
+  // - 한 번 표시 후 history state를 즉시 비워, 같은 화면을 다시 마운트해도 재노출되지 않는다.
+  // - 사용자가 명시적으로 취소(뒤로/취소 버튼)하거나 정상 종료된 경로에서는 state가 없으므로 뜨지 않는다.
+  const [abortBannerOpen, setAbortBannerOpen] = useState(
+    () => (location.state as { abortReason?: string } | null)?.abortReason === 'background'
+  );
+
+  useEffect(() => {
+    if (abortBannerOpen) {
+      // React Router state를 즉시 비워, 새로고침/뒤로가기 등으로 같은 화면이 재마운트되어도
+      // 안내 배너가 재노출되지 않도록 한다.
+      // window.history.replaceState 대신 router의 navigate(replace)를 사용해
+      // router 내부 history 메타데이터(key/idx 등)가 손상되지 않게 한다.
+      navigate(location.pathname, { replace: true, state: null });
+    }
+    // 최초 마운트 시 한 번만 동작.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <MobileLayout>
+      <SuccessBanner
+        isOpen={abortBannerOpen}
+        message="화면을 가린 동안 트레이닝이 중단되었어요. 다시 시작해 주세요."
+        onClose={() => setAbortBannerOpen(false)}
+        autoClose
+        duration={4000}
+      />
       <div className="max-w-md mx-auto px-4 pb-6" style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '120px' }}>
         {/* 페이지 헤더 */}
         <div className="flex items-center gap-2 mb-6">

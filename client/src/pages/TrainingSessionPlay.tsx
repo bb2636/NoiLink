@@ -102,9 +102,11 @@ export default function TrainingSessionPlay() {
 
   // ── 앱이 백그라운드로 들어가면 즉시 세션 종료 (네이티브 셸에서만) ──
   // 정책: 화면이 더 이상 보이지 않는 순간 LED 점등도 멈춰야 한다(배터리 보호 + 사용자 직관).
-  // 자동 재개는 하지 않고, 그때까지 누적된 메트릭으로 즉시 결과 화면으로 보낸다.
-  //   → engine.endNow()가 LED OFF + CONTROL_STOP을 보내고 onComplete를 발사하면,
-  //     아래 useEffect(engineMetrics)가 평소처럼 runSubmit → /result 로 이동시킨다.
+  // 자동 재개는 하지 않고, 사용자에게 사유를 안내하기 위해 트레이닝 목록으로 돌려보낸다.
+  //   → engine.endNow()가 LED OFF + CONTROL_STOP을 보내고,
+  //     navigate('/training', { state: { abortReason: 'background' } })가
+  //     목록 화면에 1회성 안내 배너를 띄우는 트리거가 된다.
+  //   → 결과 화면(/result)으로 가지 않도록 aborted ref가 runSubmit을 차단한다.
   //
   // 가드:
   //   - 네이티브 셸(WebView) 안에서만 동작. 일반 웹/Replit 미리보기에서는 탭 전환만으로
@@ -127,6 +129,12 @@ export default function TrainingSessionPlay() {
         eng.endNow();
         // engineRef는 비우지 않는다 — 이 시점부터는 endNow() 호출이 idempotent.
       }
+      // 사용자가 "내가 뒤로 간 적이 없는데 왜 처음부터 다시 골라야 하지?" 하고
+      // 혼동하지 않도록, 중단 사유를 navigate state로 전달한다.
+      navigate('/training', {
+        replace: true,
+        state: { abortReason: 'background' as const },
+      });
     };
     const onVisibility = () => {
       if (typeof document !== 'undefined' && !document.hidden) return;
@@ -191,6 +199,9 @@ export default function TrainingSessionPlay() {
   // ── 엔진 종료 후 서버 제출 ──
   const runSubmit = useCallback(async (metrics: Omit<RawMetrics, 'sessionId' | 'userId'> | null) => {
     if (!state || submitLock.current) return;
+    // 백그라운드로 중단된 세션은 결과 화면으로 보내지 않는다.
+    // 사용자는 트레이닝 목록에서 안내 배너를 보고 다시 시작하게 된다.
+    if (aborted.current) return;
     submitLock.current = true;
     setSubmitting(true);
     setErr(null);
