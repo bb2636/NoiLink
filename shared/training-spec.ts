@@ -61,17 +61,17 @@ function clamp01(x: number): number {
 // 1. 공통 정책
 // =============================================================================
 
-/** 세션 최대 길이 (ms) — 45초 자동 종료 (테스트용 단축) */
-export const SESSION_MAX_MS = 45_000;
+/** 세션 최대 길이 (ms) — 종합 5분(300s) 기준 자동 종료 */
+export const SESSION_MAX_MS = 300_000;
 
-/** 종합 트레이닝 총 시간 (고정 45초, 테스트용 단축) */
-export const COMPOSITE_TOTAL_MS = 45_000;
+/** 종합 트레이닝 총 시간 (300s = 5분, 기획서 v2.0) */
+export const COMPOSITE_TOTAL_MS = 300_000;
 
-/** 리듬 페이즈 길이 (4.5s × 5사이클 = 22.5s) */
-export const RHYTHM_PHASE_MS = 4_500;
+/** 리듬 페이즈 길이 (30s × 5사이클 = 150s) */
+export const RHYTHM_PHASE_MS = 30_000;
 
-/** 인지 페이즈 길이 (4.5s × 5사이클 = 22.5s) */
-export const COGNITIVE_PHASE_MS = 4_500;
+/** 인지 페이즈 길이 (30s × 5사이클 = 150s) */
+export const COGNITIVE_PHASE_MS = 30_000;
 
 /**
  * 의미 색 → 물리 LED 매핑 (명세 2.1)
@@ -120,6 +120,63 @@ export function rhythmPatternForLevel(level: Level): RhythmPatternKind {
   if (level === 3) return 'L3_2_4_SEQUENTIAL';
   if (level === 4) return 'L4_2_4_EXTRA_8TH_P2P3';
   return 'L5_2_4_EXTRA_8TH_P0P1_P2P3';
+}
+
+/**
+ * 한 박(beat) 안에서 점등할 Pod 시퀀스.
+ * - tickIndex: 페이즈 시작부터 0,1,2…
+ * - 반환: 각 step은 동시에 점등할 Pod id 배열, offsetRatio는 박자 안에서의 시작 시점(0=정박, 0.5=8분 뒷박)
+ * 모든 step은 isTarget=true 이며 클라이언트가 점등 → BLE LED 송신을 함께 한다.
+ */
+export interface RhythmStep {
+  pods: number[];
+  /** beat 길이 대비 시작 시점 (0.0 ~ 1.0). 0.5는 8분 뒷박 */
+  offsetRatio: number;
+}
+
+export function rhythmStepsForBeat(level: Level, tickIndex: number): RhythmStep[] {
+  const kind = rhythmPatternForLevel(level);
+  switch (kind) {
+    case 'L1_4_4_SEQUENTIAL_LAST':
+    case 'L2_4_4_SEQUENTIAL_LAST': {
+      // 4/4 순차: P0→P1→P2→P3, 마지막(P3) 박은 강조(타겟 동일하나 UI에서 강조 가능)
+      const pod = tickIndex % 4;
+      return [{ pods: [pod], offsetRatio: 0 }];
+    }
+    case 'L3_2_4_SEQUENTIAL': {
+      // 2/4 순차: P0→P1 반복 (혹은 P2→P3 교대) — 4박 중 2박만 점등
+      const pos = tickIndex % 4;
+      if (pos === 0) return [{ pods: [0], offsetRatio: 0 }];
+      if (pos === 2) return [{ pods: [1], offsetRatio: 0 }];
+      return [];
+    }
+    case 'L4_2_4_EXTRA_8TH_P2P3': {
+      // 2/4 + 8분 뒷박에 P2,P3 추가 (각 박마다)
+      const pos = tickIndex % 4;
+      if (pos === 0) return [
+        { pods: [0], offsetRatio: 0 },
+        { pods: [2], offsetRatio: 0.5 },
+      ];
+      if (pos === 2) return [
+        { pods: [1], offsetRatio: 0 },
+        { pods: [3], offsetRatio: 0.5 },
+      ];
+      return [];
+    }
+    case 'L5_2_4_EXTRA_8TH_P0P1_P2P3': {
+      // 2/4 + 8분 뒷박: P0/P1 또는 P2/P3 동시 점등
+      const pos = tickIndex % 4;
+      if (pos === 0) return [
+        { pods: [0, 1], offsetRatio: 0 },
+        { pods: [2, 3], offsetRatio: 0.5 },
+      ];
+      if (pos === 2) return [
+        { pods: [2, 3], offsetRatio: 0 },
+        { pods: [0, 1], offsetRatio: 0.5 },
+      ];
+      return [];
+    }
+  }
 }
 
 // =============================================================================

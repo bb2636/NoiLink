@@ -11,15 +11,23 @@
  */
 
 import type {
+  ColorCode,
   Level,
   RawMetrics,
   TrainingMode,
 } from '@noilink/shared';
 import {
+  COLOR_CODE,
   COMPOSITE_TOTAL_MS,
   COGNITIVE_PHASE_MS,
+  CTRL_START,
+  CTRL_STOP,
   RHYTHM_PHASE_MS,
+  SESSION_PHASE_COGNITIVE,
+  SESSION_PHASE_RHYTHM,
+  rhythmStepsForBeat,
 } from '@noilink/shared';
+import { bleWriteControl, bleWriteLed, bleWriteSession } from '../native/bleBridge';
 
 // ─────────────────────────────────────────────────────────────────────
 // 색상/Pod 상태
@@ -37,6 +45,19 @@ export interface PodState {
   litAt: number | null;
   /** 입력 마감 시각 */
   expiresAt: number | null;
+  /** 현재 점등을 식별하는 monotonic id — BLE TOUCH/UI 입력 중복 처리 방지 */
+  tickId: number;
+}
+
+/** 의미 색 → 펌웨어 ColorCode (WHITE는 RGB 합성, MIXED는 사용 안 함) */
+function logicColorToCode(c: LogicColor): ColorCode {
+  switch (c) {
+    case 'GREEN': return COLOR_CODE.GREEN;
+    case 'RED': return COLOR_CODE.RED;
+    case 'BLUE': return COLOR_CODE.BLUE;
+    case 'YELLOW': return COLOR_CODE.YELLOW;
+    case 'WHITE': return COLOR_CODE.WHITE;
+  }
 }
 
 export type EnginePhase = 'IDLE' | 'RHYTHM' | 'COGNITIVE' | 'DONE';
@@ -205,23 +226,50 @@ export class TrainingEngine {
   private switchPendingFirst = false; // COMPREHENSION 전환 직후 첫 입력 측정
   private switchedAt = 0;
   private destroyed = false;
+  /** monotonic tick id — BLE LED/TOUCH 매칭과 중복 입력 차단에 사용 */
+  private tickIdCounter = 0;
+  /** 이미 처리된 (pod, tickId) — UI tap과 BLE TOUCH가 모두 와도 1회만 */
+  private consumedTickIds = new Set<string>();
+  /** -1: 아직 한 번도 송신 안 됨 (첫 세그먼트에서 무조건 writeSession 보내기 위함) */
+  private currentBlePhase: -1 | 0 | 1 = -1;
 
   constructor(cfg: EngineConfig) {
     this.cfg = cfg;
     this.pods = Array.from({ length: cfg.podCount }, (_, i) => ({
-      id: i, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null,
+      id: i, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null, tickId: 0,
     }));
+  }
+
+  private nextTickId(): number {
+    this.tickIdCounter = (this.tickIdCounter + 1) >>> 0;
+    if (this.tickIdCounter === 0) this.tickIdCounter = 1;
+    return this.tickIdCounter;
   }
 
   start(): void {
     this.startedAt = Date.now();
     this.acc = emptyAcc();
+    this.consumedTickIds.clear();
 
-    if (this.cfg.isComposite || this.cfg.mode === 'COMPOSITE') {
+    // BLE 세션 메타 + START (네이티브 셸이 아니면 자동 no-op)
+    // 정책: writeSession.durationSec는 "현재 활성 세그먼트(페이즈)의 길이"로 일관 송신.
+    //   - 단일 모드: start()에서 1회 (페이즈=COGNITIVE, durationSec=totalDurationMs)
+    //   - COMPOSITE: 매 페이즈 전환 시 (runNextPlan 내) 송신, currentBlePhase=-1 sentinel로 첫 세그먼트도 보장
+    const isComp = this.cfg.isComposite || this.cfg.mode === 'COMPOSITE';
+    bleWriteControl(CTRL_START);
+
+    if (isComp) {
       this.buildCompositePlan();
       this.runNextPlan();
     } else {
       this.currentCognitiveMode = this.cfg.mode === 'FREE' ? 'FOCUS' : this.cfg.mode;
+      this.currentBlePhase = SESSION_PHASE_COGNITIVE;
+      bleWriteSession({
+        bpm: this.cfg.bpm,
+        level: this.cfg.level,
+        phase: SESSION_PHASE_COGNITIVE,
+        durationSec: Math.round(this.cfg.totalDurationMs / 1000),
+      });
       this.cfg.onPhaseChange({ phase: 'COGNITIVE', cognitiveMode: this.currentCognitiveMode, cycleIndex: 0 });
       this.startTickLoop(this.cfg.totalDurationMs);
     }
@@ -241,6 +289,10 @@ export class TrainingEngine {
   }
 
   destroy(): void {
+    if (!this.destroyed) {
+      // 중도 취소(언마운트 등) — STOP 송신
+      try { bleWriteControl(CTRL_STOP); } catch (_e) { /* noop */ }
+    }
     this.destroyed = true;
     if (this.rafId) window.cancelAnimationFrame(this.rafId);
     if (this.tickTimer) window.clearTimeout(this.tickTimer);
@@ -293,6 +345,18 @@ export class TrainingEngine {
       this.currentCognitiveMode = seg.cognitiveMode || 'FOCUS';
       this.cfg.onPhaseChange({ phase: 'COGNITIVE', cognitiveMode: this.currentCognitiveMode, cycleIndex: cycle });
     }
+    // 페이즈 전환(또는 첫 세그먼트)을 펌웨어에도 알린다.
+    // currentBlePhase=-1(미송신)이거나 페이즈가 바뀐 경우 모두 재송신.
+    const blePhase = seg.type === 'RHYTHM' ? SESSION_PHASE_RHYTHM : SESSION_PHASE_COGNITIVE;
+    if (blePhase !== this.currentBlePhase) {
+      this.currentBlePhase = blePhase;
+      bleWriteSession({
+        bpm: this.cfg.bpm,
+        level: this.cfg.level,
+        phase: blePhase,
+        durationSec: Math.round(seg.durationMs / 1000),
+      });
+    }
     this.startTickLoop(seg.durationMs, () => {
       this.currentPlanIdx += 1;
       this.runNextPlan();
@@ -331,8 +395,14 @@ export class TrainingEngine {
         this.memoryRecallStartedAt = Date.now();
         this.memoryLastTapAt = 0;
         this.allOff();
-        // WHITE 입력 신호
-        this.pods = this.pods.map(p => ({ ...p, fill: 'WHITE', isTarget: true, litAt: Date.now(), expiresAt: Date.now() + tickInterval * seqLen }));
+        // WHITE 입력 신호 — Pod별 monotonic tickId 부여 + BLE 점등
+        const recallWindow = tickInterval * seqLen;
+        const now = Date.now();
+        this.pods = this.pods.map(p => {
+          const tickId = this.nextTickId();
+          bleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode('WHITE'), onMs: recallWindow });
+          return { ...p, fill: 'WHITE', isTarget: true, litAt: now, expiresAt: now + recallWindow, tickId };
+        });
         this.cfg.onPodStates(this.pods);
       }, showEnd);
     }
@@ -385,10 +455,25 @@ export class TrainingEngine {
 
   // ───── 모드별 tick 점등 ─────────────────────────────────────────────
   private fireRhythmTick(beatMs: number): void {
-    const podId = this.rhythmStep % this.cfg.podCount;
+    // 기획 v2.0: 레벨별 RHYTHM 패턴 (rhythmStepsForBeat) 사용
+    const steps = rhythmStepsForBeat(this.cfg.level, this.rhythmStep);
     this.rhythmStep += 1;
-    this.acc.rhythmTicks += 1;
-    this.lightSinglePod(podId, 'GREEN', beatMs * 0.85, true);
+    if (steps.length === 0) return; // 쉬는 박
+    const onMs = Math.max(120, beatMs * 0.45);
+    for (const step of steps) {
+      const delay = Math.round(beatMs * step.offsetRatio);
+      this.schedule(() => {
+        this.acc.rhythmTicks += 1;
+        if (step.pods.length === 1) {
+          this.lightSinglePod(step.pods[0], 'GREEN', onMs, true);
+        } else if (step.pods.length === 2) {
+          this.lightTwoPods(step.pods[0], 'GREEN', step.pods[1], 'GREEN', onMs, true);
+        } else {
+          // 3개 이상 동시는 사양상 없지만 안전 처리
+          step.pods.forEach((p) => this.lightSinglePod(p, 'GREEN', onMs, true));
+        }
+      }, delay);
+    }
   }
 
   private fireFocusTick(beatMs: number): void {
@@ -464,12 +549,17 @@ export class TrainingEngine {
 
   // ───── 점등 헬퍼 ────────────────────────────────────────────────────
   private allOff(): void {
-    this.pods = this.pods.map(p => ({ ...p, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null }));
+    this.pods = this.pods.map(p => ({ ...p, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null, tickId: 0 }));
     this.cfg.onPodStates(this.pods);
   }
 
   private flashAll(color: LogicColor, ms: number): void {
-    this.pods = this.pods.map(p => ({ ...p, fill: color, isTarget: false, litAt: null, expiresAt: null }));
+    // 입력을 받지 않는 시각 신호이므로 BLE는 동기 송신만 (tickId는 부여하지만 consume 추적 X)
+    this.pods = this.pods.map(p => {
+      const tickId = this.nextTickId();
+      bleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode(color), onMs: ms });
+      return { ...p, fill: color, isTarget: false, litAt: null, expiresAt: null, tickId: 0 };
+    });
     this.cfg.onPodStates(this.pods);
     this.schedule(() => this.allOff(), ms);
   }
@@ -477,10 +567,12 @@ export class TrainingEngine {
   private lightSinglePod(podId: number, color: LogicColor, windowMs: number, isTarget = true): void {
     const now = Date.now();
     const expiresAt = now + windowMs;
+    const tickId = this.nextTickId();
+    bleWriteLed({ tickId, pod: podId, colorCode: logicColorToCode(color), onMs: Math.min(0xffff, Math.round(windowMs)) });
     this.pods = this.pods.map(p =>
       p.id === podId
-        ? { ...p, fill: color, isTarget, litAt: now, expiresAt }
-        : { ...p, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null }
+        ? { ...p, fill: color, isTarget, litAt: now, expiresAt, tickId }
+        : { ...p, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null, tickId: 0 }
     );
     this.cfg.onPodStates(this.pods);
     this.schedule(() => {
@@ -496,21 +588,44 @@ export class TrainingEngine {
   private lightTwoPods(idA: number, colorA: LogicColor, idB: number, colorB: LogicColor, windowMs: number, isTarget = true): void {
     const now = Date.now();
     const expiresAt = now + windowMs;
+    const tickIdA = this.nextTickId();
+    const tickIdB = this.nextTickId();
+    const onMsClamped = Math.min(0xffff, Math.round(windowMs));
+    bleWriteLed({ tickId: tickIdA, pod: idA, colorCode: logicColorToCode(colorA), onMs: onMsClamped });
+    bleWriteLed({ tickId: tickIdB, pod: idB, colorCode: logicColorToCode(colorB), onMs: onMsClamped });
     this.pods = this.pods.map(p => {
-      if (p.id === idA) return { ...p, fill: colorA, isTarget, litAt: now, expiresAt };
-      if (p.id === idB) return { ...p, fill: colorB, isTarget, litAt: now, expiresAt };
-      return { ...p, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null };
+      if (p.id === idA) return { ...p, fill: colorA, isTarget, litAt: now, expiresAt, tickId: tickIdA };
+      if (p.id === idB) return { ...p, fill: colorB, isTarget, litAt: now, expiresAt, tickId: tickIdB };
+      return { ...p, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null, tickId: 0 };
     });
     this.cfg.onPodStates(this.pods);
     this.schedule(() => this.allOff(), windowMs);
   }
 
   // ───── 입력 처리 ────────────────────────────────────────────────────
-  handleTap(podId: number): void {
+  /**
+   * 입력 처리. opts.deltaMs는 펌웨어가 측정한 (실제 입력 시각 - 점등 목표 시각) 값.
+   * 동일한 (pod, tickId) 입력이 UI tap과 BLE TOUCH 양쪽에서 와도 1회만 처리한다.
+   */
+  handleTap(podId: number, opts?: { deltaMs?: number; tickId?: number }): void {
     if (this.destroyed) return;
     const now = Date.now();
     const pod = this.pods.find(p => p.id === podId);
     if (!pod || pod.fill === 'OFF') return;
+
+    // BLE에서 명시 tickId가 왔는데 현재 pod의 점등 tickId와 다르면 stale (구 tick의 지연 입력) → drop.
+    // UI tap은 tickId 미지정이므로 항상 현재 pod.tickId 기준으로 처리.
+    if (opts?.tickId && opts.tickId > 0 && pod.tickId > 0 && opts.tickId !== pod.tickId) {
+      return; // stale BLE TOUCH
+    }
+    // 중복 처리 차단 — UI(브릿지된 클릭) + BLE TOUCH 동시 도착 케이스
+    const expectedTickId = pod.tickId > 0 ? pod.tickId : (opts?.tickId ?? 0);
+    if (expectedTickId > 0) {
+      const key = `${podId}:${expectedTickId}`;
+      if (this.consumedTickIds.has(key)) return;
+      this.consumedTickIds.add(key);
+    }
+
     const elapsedTotal = this.elapsedMs();
 
     const segIsRhythm =
@@ -518,7 +633,7 @@ export class TrainingEngine {
       this.compositePlan[this.currentPlanIdx]?.type === 'RHYTHM';
 
     if (segIsRhythm) {
-      this.handleRhythmTap(pod, now);
+      this.handleRhythmTap(pod, now, opts?.deltaMs);
       return;
     }
 
@@ -534,16 +649,16 @@ export class TrainingEngine {
     switch (this.currentCognitiveMode) {
       case 'FOCUS':
       case 'ENDURANCE':
-        this.handleFocusTap(pod, now, elapsedTotal);
+        this.handleFocusTap(pod, now, elapsedTotal, opts?.deltaMs);
         break;
       case 'COMPREHENSION':
-        this.handleComprehensionTap(pod, now, elapsedTotal);
+        this.handleComprehensionTap(pod, now, elapsedTotal, opts?.deltaMs);
         break;
       case 'JUDGMENT':
-        this.handleJudgmentTap(pod, now, isDoubleTap);
+        this.handleJudgmentTap(pod, now, isDoubleTap, opts?.deltaMs);
         break;
       case 'AGILITY':
-        this.handleAgilityTap(pod, now);
+        this.handleAgilityTap(pod, now, opts?.deltaMs);
         break;
       case 'MEMORY':
         this.handleMemoryTap(pod, now);
@@ -553,21 +668,35 @@ export class TrainingEngine {
     this.allOff();
   }
 
-  private handleRhythmTap(pod: PodState, now: number): void {
-    const t = pod.litAt ?? now;
-    const offset = Math.abs(now - t);
+  /** RT (ms) — BLE deltaMs가 있으면 점등 onMs 기준 절댓값(=실제 RT 근사), 없으면 wall-clock 차이 */
+  private rtFromTap(pod: PodState, now: number, deltaMs?: number): number {
+    if (typeof deltaMs === 'number' && Number.isFinite(deltaMs)) {
+      return Math.max(0, Math.abs(deltaMs));
+    }
+    return pod.litAt ? Math.max(0, now - pod.litAt) : 500;
+  }
+
+  private handleRhythmTap(pod: PodState, now: number, deltaMs?: number): void {
+    // BLE TOUCH가 펌웨어 자체 측정을 제공하면 그 값을 |errMs|로 사용 (드리프트 누적 없음)
+    let offset: number;
+    if (typeof deltaMs === 'number' && Number.isFinite(deltaMs)) {
+      offset = Math.abs(deltaMs);
+    } else {
+      const t = pod.litAt ?? now;
+      offset = Math.abs(now - t);
+    }
     this.acc.rOffsets.push(offset);
     if (offset <= 80) this.acc.rPerfect += 1;
     else if (offset <= 180) this.acc.rGood += 1;
     else if (offset <= 320) this.acc.rBad += 1;
     else this.acc.rMiss += 1;
     // 다음 점등을 위해 끄기
-    this.pods = this.pods.map(p => p.id === pod.id ? { ...p, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null } : p);
+    this.pods = this.pods.map(p => p.id === pod.id ? { ...p, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null, tickId: 0 } : p);
     this.cfg.onPodStates(this.pods);
   }
 
-  private handleFocusTap(pod: PodState, now: number, elapsedTotal: number): void {
-    const rt = pod.litAt ? now - pod.litAt : 500;
+  private handleFocusTap(pod: PodState, now: number, elapsedTotal: number, deltaMs?: number): void {
+    const rt = this.rtFromTap(pod, now, deltaMs);
     if (pod.fill === 'BLUE' && pod.isTarget) {
       this.acc.fTargetHits += 1;
       this.acc.fRTs.push(rt);
@@ -577,8 +706,8 @@ export class TrainingEngine {
     }
   }
 
-  private handleComprehensionTap(pod: PodState, now: number, elapsedTotal: number): void {
-    const rt = pod.litAt ? now - pod.litAt : 500;
+  private handleComprehensionTap(pod: PodState, now: number, elapsedTotal: number, deltaMs?: number): void {
+    const rt = this.rtFromTap(pod, now, deltaMs);
     const isCorrect = pod.fill === this.currentRule;
     if (isCorrect) {
       this.acc.cCorrect += 1;
@@ -594,8 +723,8 @@ export class TrainingEngine {
     this.acc.cSwitchAttempts += 1;
   }
 
-  private handleJudgmentTap(pod: PodState, now: number, isDoubleTap: boolean): void {
-    const rt = pod.litAt ? now - pod.litAt : 500;
+  private handleJudgmentTap(pod: PodState, now: number, isDoubleTap: boolean, deltaMs?: number): void {
+    const rt = this.rtFromTap(pod, now, deltaMs);
     if (pod.fill === 'GREEN') {
       this.acc.jGoHit += 1;
       this.acc.jGoRTs.push(rt);
@@ -606,8 +735,8 @@ export class TrainingEngine {
     }
   }
 
-  private handleAgilityTap(pod: PodState, now: number): void {
-    const rt = pod.litAt ? now - pod.litAt : 500;
+  private handleAgilityTap(pod: PodState, now: number, deltaMs?: number): void {
+    const rt = this.rtFromTap(pod, now, deltaMs);
     this.acc.aRTs.push(rt);
     if (pod.fill === 'GREEN') this.acc.aHandHit += 1;
     else if (pod.fill === 'BLUE' || pod.fill === 'YELLOW') this.acc.aFootHit += 1;
@@ -686,6 +815,8 @@ export class TrainingEngine {
     if (this.tickTimer) window.clearTimeout(this.tickTimer);
     if (this.phaseTimer) window.clearTimeout(this.phaseTimer);
     this.allOff();
+    // BLE 정상 종료
+    try { bleWriteControl(CTRL_STOP); } catch (_e) { /* noop */ }
     this.cfg.onPhaseChange({ phase: 'DONE', cycleIndex: 0 });
     this.cfg.onComplete(this.buildMetrics());
   }

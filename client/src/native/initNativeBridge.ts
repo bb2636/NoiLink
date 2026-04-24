@@ -39,6 +39,8 @@ function dispatchNativeMessage(msg: NativeToWebMessage): void {
     case 'ble.connection':
     case 'ble.reconnect':
     case 'ble.notify':
+    case 'ble.touch':
+    case 'ble.gatt':
     case 'ble.error':
     case 'push.state':
       window.dispatchEvent(new CustomEvent('noilink-native-bridge', { detail: msg }));

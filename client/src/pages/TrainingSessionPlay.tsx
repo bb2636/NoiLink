@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
 import PodGrid from '../components/PodGrid/PodGrid';
-import type { Level, RawMetrics, TrainingMode } from '@noilink/shared';
+import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noilink/shared';
 import { SESSION_MAX_MS } from '@noilink/shared';
 import { submitCompletedTraining } from '../utils/submitTrainingRun';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
@@ -54,7 +54,7 @@ export default function TrainingSessionPlay() {
 
   const [pods, setPods] = useState<PodState[]>(
     Array.from({ length: 4 }, (_, i) => ({
-      id: i, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null,
+      id: i, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null, tickId: 0,
     }))
   );
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -101,6 +101,20 @@ export default function TrainingSessionPlay() {
   const handleTap = useCallback((podId: number) => {
     setTapCount((n) => n + 1);
     engineRef.current?.handleTap(podId);
+  }, []);
+
+  // ── BLE TOUCH 이벤트 구독: 펌웨어가 측정한 deltaMs를 엔진에 그대로 전달 ──
+  useEffect(() => {
+    const onBridge = (e: Event) => {
+      const detail = (e as CustomEvent<NativeToWebMessage>).detail;
+      if (!detail || detail.type !== 'ble.touch') return;
+      const t = detail.payload.touch;
+      const useDelta = t.deviceDeltaValid ? t.deltaMs : undefined;
+      setTapCount((n) => n + 1);
+      engineRef.current?.handleTap(t.pod, { deltaMs: useDelta, tickId: t.tickId });
+    };
+    window.addEventListener('noilink-native-bridge', onBridge as EventListener);
+    return () => window.removeEventListener('noilink-native-bridge', onBridge as EventListener);
   }, []);
 
   // ── 엔진 종료 후 서버 제출 ──
