@@ -19,6 +19,10 @@ export type TrainingResultState = {
   previousScore?: number;
   yieldsScore: boolean;
   sessionId?: string;
+  /** BLE 단절 → 자동 재연결 회복 구간 누적 시간(ms). 0 또는 미존재면 배너 숨김. */
+  recoveryExcludedMs?: number;
+  /** 회복 구간 발생 횟수 (안내 문구 정밀도 향상용). */
+  recoveryWindows?: number;
 };
 
 export default function Result() {
@@ -42,6 +46,14 @@ export default function Result() {
   const pctChange = prevScore > 0 ? Math.round((diff / prevScore) * 1000) / 10 : 0;
   const nextMilestone = Math.ceil((todayScore + 5) / 5) * 5;
   const nickname = user?.nickname || user?.name || '회원';
+
+  // BLE 단절 회복 안내(Task #27): 회복 구간이 1초 이상 누적된 세션에만 노출.
+  // 1초 미만은 사용자가 인지하지도 못한 일시적 신호 흔들림이므로 굳이 알리지 않는다.
+  // 표기 단위는 사용자 가독성을 위해 초 단위로 올림 처리.
+  const recoveryExcludedMs = state?.recoveryExcludedMs ?? 0;
+  const recoveryWindows = state?.recoveryWindows ?? 0;
+  const showRecoveryBanner = recoveryExcludedMs >= 1000;
+  const recoveryExcludedSec = Math.ceil(recoveryExcludedMs / 1000);
 
   // 반짝이 입자 (랜덤 시드 안정화)
   const particles = useMemo(
@@ -182,6 +194,28 @@ export default function Result() {
               )}
             </div>
           </motion.div>
+
+          {/* BLE 단절 회복 안내(Task #27) — 채점에서 제외된 시간을 솔직히 알린다.
+              "왜 점수가 낮지?" 의문을 줄이고, 회복 구간이 잦은 사용자에게 환경
+              (블루투스 간섭/거리)을 점검하라는 신호도 된다. */}
+          {showRecoveryBanner && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.25 }}
+              role="status"
+              className="rounded-xl px-3 py-2 mb-3 text-xs text-center"
+              style={{
+                backgroundColor: '#3A2A00',
+                color: '#FFD66B',
+                border: '1px solid #5A4500',
+              }}
+            >
+              기기 연결 회복 구간 {recoveryExcludedSec}초
+              {recoveryWindows > 1 ? ` (${recoveryWindows}회)` : ''}
+              {' '}이(가) 채점에서 제외됐어요
+            </motion.div>
+          )}
 
           {/* 비교 카드 */}
           <motion.div

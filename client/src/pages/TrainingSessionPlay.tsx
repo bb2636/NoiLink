@@ -281,6 +281,8 @@ export default function TrainingSessionPlay() {
           setBleReconnecting(false);
           setReconnectInfo(null);
           setManualRetryInFlight(false);
+          // 회복 구간 종료 알림 — 채점 제외 시간을 누적 마감 (Task #27).
+          engineRef.current?.endRecoveryWindow();
           return;
         }
         if (detail.payload.reason === 'user') return;
@@ -290,11 +292,16 @@ export default function TrainingSessionPlay() {
           setBleReconnecting(false);
           setReconnectInfo(null);
           setManualRetryInFlight(false);
+          // finalizeAndAbort 가 endNow → complete → endRecoveryWindow 안전망을
+          // 거치므로 별도 호출 불필요.
           finalizeAndAbort('ble-disconnect');
           return;
         }
         // 'unexpected' (또는 사유 누락) — 그레이스 기간 시작 / 갱신.
         setBleReconnecting(true);
+        // 채점에서 회복 구간을 제외하기 위해 엔진에 알린다 (Task #27).
+        // 멱등이므로 같은 구간에 여러 신호가 와도 안전.
+        engineRef.current?.beginRecoveryWindow();
         clearReconnectTimer();
         reconnectTimerRef.current = setTimeout(() => {
           reconnectTimerRef.current = null;
@@ -310,6 +317,7 @@ export default function TrainingSessionPlay() {
         // 페이로드를 그대로 보관한다. receivedAt 으로 nextDelayMs 카운트다운을 계산한다.
         // 새 attempt 알림은 곧 진행할 시도이므로 "지금 다시 시도" 버튼을 다시 활성화한다
         // (manualRetryInFlight는 직전 클릭 → 다음 attempt 알림까지의 짧은 잠금 용도).
+        // 동시에 회복 구간 시작을 엔진에 알려 채점 제외 시간을 누적한다 (Task #27, 멱등).
         setBleReconnecting(true);
         setReconnectInfo({
           attempt: detail.payload.attempt,
@@ -318,6 +326,7 @@ export default function TrainingSessionPlay() {
           receivedAt: Date.now(),
         });
         setManualRetryInFlight(false);
+        engineRef.current?.beginRecoveryWindow();
       }
     };
     window.addEventListener('noilink-native-bridge', onBridge as EventListener);
@@ -444,6 +453,10 @@ export default function TrainingSessionPlay() {
         displayScore: res.displayScore,
         yieldsScore: state.yieldsScore,
         sessionId: res.sessionId,
+        // 회복 구간 안내(Task #27): 결과 화면이 "BLE 단절 회복 X초가 채점에서
+        // 제외됨" 배너를 띄울 수 있게 메트릭에서 추출해 navigate state로 전달.
+        recoveryExcludedMs: metrics?.recovery?.excludedMs ?? 0,
+        recoveryWindows: metrics?.recovery?.windows ?? 0,
       },
     });
   }, [state, totalSec, tapCount, navigate]);

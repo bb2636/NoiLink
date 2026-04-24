@@ -46,6 +46,9 @@ vi.mock('../training/engine', () => {
     handleTap() {
       return false;
     }
+    // Task #27: BLE 회복 구간 알림 — 실제 채점 누적은 하지 않는 no-op stub.
+    beginRecoveryWindow() {}
+    endRecoveryWindow() {}
   }
   return {
     TrainingEngine: FakeEngine,

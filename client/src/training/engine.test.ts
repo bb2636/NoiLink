@@ -261,6 +261,162 @@ describe('TrainingEngine: allOff 경로(destroy)가 모든 점등 Pod에 OFF 프
 // (3) RHYTHM 탭 — handleRhythmTap 의 즉시 소등 경로
 // ───────────────────────────────────────────────────────────
 
+// ───────────────────────────────────────────────────────────
+// (4) BLE 단절 회복 구간 정책 (Task #27)
+//   - beginRecoveryWindow → 새 자극이 점등되지 않고 분모/누락이 잡히지 않는다
+//   - endRecoveryWindow → 곧장 다음 박부터 정상 점등 재개
+//   - 회복 누적 시간이 buildMetrics().recovery 에 노출된다 (excludedMs/windows)
+//
+// 기획 의도: 짧은 BLE 단절 동안 도달하지 않은 입력을 '미반응'으로 채점하면
+// 사용자가 부당하게 손해를 보므로, 회복 구간을 채점에서 통째로 제외한다.
+// 이 정책이 조용히 깨지면 사용자에게 "갑자기 점수가 추락"하는 형태로만 드러나
+// 진단이 어렵기 때문에 본 회귀 테스트로 잠근다.
+// ───────────────────────────────────────────────────────────
+
+describe('TrainingEngine: BLE 단절 회복 구간은 채점에서 제외된다 (Task #27)', () => {
+  it('회복 중 fireFocusTick 호출이 분모/LED 송신을 일으키지 않는다', () => {
+    // 결정론적 점등 — 첫 random < 0.6 → 타겟(BLUE)
+    const seq = [0.1, 0.0, 0.1, 0.0, 0.1, 0.0];
+    let i = 0;
+    vi.spyOn(Math, 'random').mockImplementation(() => seq[i++ % seq.length]);
+
+    const { cfg, bag } = makeConfig({ mode: 'FOCUS', bpm: 60 });
+    const engine = new TrainingEngine(cfg);
+    engine.start();
+
+    // 첫 tick(350ms 후)에서 정상 점등이 발생
+    vi.advanceTimersByTime(360);
+    const litBefore = litCalls().length;
+    expect(litBefore).toBeGreaterThanOrEqual(1);
+
+    // 회복 구간 진입 — 켜져 있던 Pod가 OFF 처리되고 이후 tick은 점등을 건너뛴다
+    engine.beginRecoveryWindow();
+    const lastSnap = bag.podStates[bag.podStates.length - 1];
+    expect(lastSnap.every((p) => p.fill === 'OFF')).toBe(true);
+
+    const litAtEntry = litCalls().length;
+    // 한 박(=1000ms) 이상 진행해도 새 점등이 없어야 한다
+    vi.advanceTimersByTime(1500);
+    expect(litCalls().length).toBe(litAtEntry);
+
+    // 회복 종료 → 다음 tick부터 다시 점등 가능
+    engine.endRecoveryWindow();
+    vi.advanceTimersByTime(1100);
+    expect(litCalls().length).toBeGreaterThan(litAtEntry);
+
+    engine.destroy();
+  });
+
+  it('회복 구간 누적 시간이 buildMetrics().recovery 로 노출되고 windows 가 1 증가', () => {
+    const { cfg } = makeConfig({ mode: 'FOCUS', bpm: 60 });
+    const engine = new TrainingEngine(cfg);
+    engine.start();
+    vi.advanceTimersByTime(360);
+
+    engine.beginRecoveryWindow();
+    vi.advanceTimersByTime(2500); // 2.5초 회복 후 종료
+    engine.endRecoveryWindow();
+
+    // private buildMetrics 직접 호출 — 입력→출력 검증에 한정
+    const metrics = (engine as unknown as { buildMetrics: () => Record<string, unknown> })
+      .buildMetrics() as { recovery: { excludedMs: number; windows: number } };
+    expect(metrics.recovery.windows).toBe(1);
+    // 타이머 정밀도 마진 — 2500ms 부근(2400~2600)
+    expect(metrics.recovery.excludedMs).toBeGreaterThanOrEqual(2400);
+    expect(metrics.recovery.excludedMs).toBeLessThanOrEqual(2600);
+
+    engine.destroy();
+  });
+
+  it('beginRecoveryWindow 는 멱등 — 같은 구간에 여러 번 호출해도 windows 1, 시작 시각은 첫 호출 기준', () => {
+    const { cfg } = makeConfig({ mode: 'FOCUS', bpm: 60 });
+    const engine = new TrainingEngine(cfg);
+    engine.start();
+    vi.advanceTimersByTime(360);
+
+    engine.beginRecoveryWindow();
+    vi.advanceTimersByTime(500);
+    // 두 번째 신호 — 무시되어야 한다 (시작 시각 갱신 X, windows 증분 X)
+    engine.beginRecoveryWindow();
+    vi.advanceTimersByTime(1000);
+    engine.endRecoveryWindow();
+
+    const metrics = (engine as unknown as { buildMetrics: () => Record<string, unknown> })
+      .buildMetrics() as { recovery: { excludedMs: number; windows: number } };
+    expect(metrics.recovery.windows).toBe(1);
+    // 누적 회복 시간은 ~1500ms (첫 호출 시점부터 endRecoveryWindow까지)
+    expect(metrics.recovery.excludedMs).toBeGreaterThanOrEqual(1400);
+    expect(metrics.recovery.excludedMs).toBeLessThanOrEqual(1600);
+
+    engine.destroy();
+  });
+
+  it('endRecoveryWindow 는 멱등 — 회복 중이 아닐 때 호출해도 누적/windows에 영향 없음', () => {
+    const { cfg } = makeConfig({ mode: 'FOCUS', bpm: 60 });
+    const engine = new TrainingEngine(cfg);
+    engine.start();
+    vi.advanceTimersByTime(360);
+
+    // 회복 시작 전에 종료 호출 — no-op
+    engine.endRecoveryWindow();
+
+    engine.beginRecoveryWindow();
+    vi.advanceTimersByTime(800);
+    engine.endRecoveryWindow();
+    // 종료 후 다시 종료 호출 — no-op (누적 시간이 두 배가 되지 않아야 한다)
+    vi.advanceTimersByTime(500);
+    engine.endRecoveryWindow();
+
+    const metrics = (engine as unknown as { buildMetrics: () => Record<string, unknown> })
+      .buildMetrics() as { recovery: { excludedMs: number; windows: number } };
+    expect(metrics.recovery.windows).toBe(1);
+    expect(metrics.recovery.excludedMs).toBeGreaterThanOrEqual(700);
+    expect(metrics.recovery.excludedMs).toBeLessThanOrEqual(900);
+
+    engine.destroy();
+  });
+
+  it('회복 중 종료(complete/destroy)되면 누적 시간이 자동 마감된다', () => {
+    const { cfg } = makeConfig({ mode: 'FOCUS', bpm: 60 });
+    const engine = new TrainingEngine(cfg);
+    engine.start();
+    vi.advanceTimersByTime(360);
+
+    engine.beginRecoveryWindow();
+    vi.advanceTimersByTime(1200);
+    // 명시적 endRecoveryWindow 없이 종료
+    engine.endNow();
+
+    const metrics = (engine as unknown as { buildMetrics: () => Record<string, unknown> })
+      .buildMetrics() as { recovery: { excludedMs: number; windows: number } };
+    expect(metrics.recovery.windows).toBe(1);
+    expect(metrics.recovery.excludedMs).toBeGreaterThanOrEqual(1100);
+    expect(metrics.recovery.excludedMs).toBeLessThanOrEqual(1300);
+  });
+
+  it('회복 진입 시 켜져 있던 Pod에는 OFF 프레임이 송신된다 (UI/디바이스 동기 정리)', () => {
+    const seq = [0.1, 0.0, 0.5, 0.0];
+    let i = 0;
+    vi.spyOn(Math, 'random').mockImplementation(() => seq[i++ % seq.length]);
+
+    const { cfg, bag } = makeConfig({ mode: 'FOCUS', bpm: 60 });
+    const engine = new TrainingEngine(cfg);
+    engine.start();
+    vi.advanceTimersByTime(360);
+
+    const litPod = bag.podStates[bag.podStates.length - 1].find((p) => p.fill !== 'OFF');
+    expect(litPod).toBeDefined();
+
+    const offsBefore = offCalls().length;
+    engine.beginRecoveryWindow();
+    const offsAfter = offCalls().length;
+    // 켜져 있던 Pod 1개에 OFF 프레임이 추가 송신
+    expect(offsAfter).toBe(offsBefore + 1);
+
+    engine.destroy();
+  });
+});
+
 describe('TrainingEngine: COMPOSITE/RHYTHM 탭 → bleOffPod 즉시 송신', () => {
   it('RHYTHM 점등 후 탭 → 동일 tickId/pod의 OFF 프레임이 송신된다', () => {
     // composite 모드 → 첫 세그먼트는 RHYTHM

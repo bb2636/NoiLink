@@ -149,6 +149,12 @@ interface ModeAcc {
   lateRTs: number[];
   earlyOmissions: number;
   lateOmissions: number;
+
+  // RECOVERY (BLE 단절 → 자동 재연결 회복 구간)
+  /** 누적 회복 구간 길이(ms) — 채점에서 제외된 시간 */
+  recoveryMs: number;
+  /** 회복 구간 발생 횟수 */
+  recoveryWindows: number;
 }
 
 function emptyAcc(): ModeAcc {
@@ -164,6 +170,7 @@ function emptyAcc(): ModeAcc {
     midHits: 0, midTotal: 0, midRTs: [],
     lateHits: 0, lateTotal: 0, lateRTs: [],
     earlyOmissions: 0, lateOmissions: 0,
+    recoveryMs: 0, recoveryWindows: 0,
   };
 }
 
@@ -225,6 +232,10 @@ export class TrainingEngine {
   private consumedTickIds = new Set<string>();
   /** -1: 아직 한 번도 송신 안 됨 (첫 세그먼트에서 무조건 writeSession 보내기 위함) */
   private currentBlePhase: -1 | 0 | 1 = -1;
+  /** BLE 단절 → 자동 재연결 회복 중 여부. 채점에서 새 자극을 잠시 멈춘다. */
+  private inRecoveryWindow = false;
+  /** 현재 회복 구간의 시작 시각(Date.now). 종료 시 누적해 acc.recoveryMs 에 더한다. */
+  private recoveryEnteredAt = 0;
 
   constructor(cfg: EngineConfig) {
     this.cfg = cfg;
@@ -298,6 +309,9 @@ export class TrainingEngine {
 
   destroy(): void {
     if (!this.destroyed) {
+      // 회복 구간이 열려 있으면 누적 시간을 마감해 메트릭에서 누락되지 않게 한다.
+      // (destroy 직후에도 누군가 buildMetrics 를 직접 호출할 수 있으므로 안전망)
+      if (this.inRecoveryWindow) this.endRecoveryWindow();
       // 중도 취소(언마운트/백그라운드 등) — 펌웨어 STOP 인지 시점에 의존하지 않도록
       // 1) 켜져 있던 Pod에 LED OFF 프레임을 먼저 보내 즉시 소등을 보장하고,
       // 2) 그 다음 CONTROL_STOP을 보낸다.
@@ -328,6 +342,43 @@ export class TrainingEngine {
    */
   endNow(): void {
     this.complete();
+  }
+
+  /**
+   * BLE 단절 → 자동 재연결 회복 구간 시작을 엔진에 알린다.
+   *
+   * 정책:
+   *   - 회복 중에는 새 자극을 점등하지 않는다 (LED 프레임이 디바이스에 도달하지
+   *     않을 가능성이 높고, 사용자도 입력할 수 없으므로).
+   *   - 분모(타겟 카운트 등)/누락(omission)이 발생하지 않아 점수에 불이익이
+   *     쌓이지 않는다.
+   *   - 켜져 있던 Pod는 즉시 OFF 처리해 화면을 정리한다 (BLE OFF 프레임은
+   *     소켓 단절 시 도달 보장이 없지만 UI 상태는 일관되게 유지).
+   *
+   * 같은 회복 구간이 여러 신호로 중복 통보되어도 최초 호출 시점만 유지한다
+   * (멱등). 엔진이 이미 종료됐으면 no-op.
+   */
+  beginRecoveryWindow(): void {
+    if (this.destroyed || this.inRecoveryWindow) return;
+    this.inRecoveryWindow = true;
+    this.recoveryEnteredAt = Date.now();
+    this.acc.recoveryWindows += 1;
+    // 켜져 있던 자극은 정리 — 사용자가 채점되지 않을 점등을 입력하려 시도하지
+    // 않게 한다. allOff 가 자체적으로 BLE OFF 프레임을 송신.
+    this.allOff();
+  }
+
+  /**
+   * 회복 구간 종료(재연결 성공 또는 그레이스 만료) 알림.
+   * - 누적 회복 시간을 acc.recoveryMs 에 더한다 → buildMetrics 가 채점 제외 시간으로 노출.
+   * - 회복 중이 아니면 no-op (멱등).
+   */
+  endRecoveryWindow(): void {
+    if (this.destroyed || !this.inRecoveryWindow) return;
+    const dur = Math.max(0, Date.now() - this.recoveryEnteredAt);
+    this.acc.recoveryMs += dur;
+    this.inRecoveryWindow = false;
+    this.recoveryEnteredAt = 0;
   }
 
   private schedule(fn: () => void, ms: number): void {
@@ -447,6 +498,14 @@ export class TrainingEngine {
       if (elapsedInPhase >= durationMs) {
         this.allOff();
         if (onPhaseEnd) onPhaseEnd();
+        return;
+      }
+      // BLE 단절 회복 중에는 새 자극을 점등하지 않는다 (Task #27).
+      // tick 스케줄러는 계속 돌아 회복이 끝나는 즉시 다음 박부터 다시 점등.
+      // 자연 종료(시간 경과)는 위 elapsedInPhase 가드에서 처리되므로 채점 제외
+      // 시간만큼 세션이 길어지지 않는다 (회복 중에도 phase clock 은 흘러간다).
+      if (this.inRecoveryWindow) {
+        this.tickTimer = window.setTimeout(fireTick, tickInterval);
         return;
       }
       this.acc.ticks += 1;
@@ -884,6 +943,8 @@ export class TrainingEngine {
 
   private complete(): void {
     if (this.destroyed) return;
+    // 종료 시점에 회복 구간이 열려 있으면 마감해 누적 시간이 메트릭에 반영되게 한다.
+    if (this.inRecoveryWindow) this.endRecoveryWindow();
     this.destroyed = true;
     if (this.rafId) window.cancelAnimationFrame(this.rafId);
     if (this.tickTimer) window.clearTimeout(this.tickTimer);
@@ -1016,6 +1077,10 @@ export class TrainingEngine {
         earlyReactionTime: Math.round(earlyRTm),
         lateReactionTime: Math.round(lateRTm),
         omissionIncrease: Math.max(0, a.lateOmissions - a.earlyOmissions),
+      },
+      recovery: {
+        excludedMs: Math.max(0, Math.round(a.recoveryMs)),
+        windows: a.recoveryWindows,
       },
     };
   }

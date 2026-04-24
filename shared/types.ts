@@ -248,6 +248,25 @@ export interface EnduranceRawMetrics {
   omissionIncrease: number;             // 놓침 증가분
 }
 
+/**
+ * BLE 단절 → 자동 재연결 회복 구간 메타.
+ *
+ * 정책: 짧은 BLE 단절 동안에는 디바이스 TOUCH 입력이 도달하지 않으므로,
+ * 그 시간 동안 새로 점등된 자극을 모두 '미반응'으로 채점하면 사용자가 부당하게
+ * 손해를 본다. 회복 구간(beginRecoveryWindow ~ endRecoveryWindow) 동안에는
+ * 새 자극을 점등하지 않고, 카운트/누락도 잡지 않는다 — 그 결과 사용자가 통제할
+ * 수 없는 시간이 점수에서 제외된다.
+ *
+ * 이 필드는 결과 화면에서 "BLE 단절 회복 X초가 채점에서 제외됨" 안내를 띄우거나
+ * 추후 분석에서 회복 구간이 잦은 세션을 식별하는 용도로 사용된다.
+ */
+export interface RecoveryRawMetrics {
+  /** 누적 회복 구간 길이(ms) — 채점에서 제외됐다 */
+  excludedMs: number;
+  /** 회복 구간 발생 횟수 */
+  windows: number;
+}
+
 /** 원시 메트릭 통합 */
 export interface RawMetrics {
   sessionId: string;                   // 세션 ID
@@ -265,6 +284,7 @@ export interface RawMetrics {
   judgment?: JudgmentRawMetrics;        // 판단력 메트릭
   agility?: AgilityRawMetrics;           // 순발력 메트릭 (기존 multitasking)
   endurance?: EnduranceRawMetrics;      // 지구력 메트릭
+  recovery?: RecoveryRawMetrics;        // BLE 단절·회복 구간 메타 (채점 제외 시간)
   createdAt: string;                    // 생성일시
 }
 
