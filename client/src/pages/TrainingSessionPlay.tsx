@@ -15,7 +15,7 @@ import { SESSION_MAX_MS } from '@noilink/shared';
 import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
 import { enqueuePendingRun } from '../utils/pendingTrainingRuns';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
-import { bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
+import { bleReconnectNow, bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import type { TrainingAbortReason } from './trainingAbortReason';
 
@@ -116,6 +116,12 @@ export default function TrainingSessionPlay() {
   // receivedAt 으로 nextDelayMs 만료까지 남은 시간을 계산한다.
   const [reconnectInfo, setReconnectInfo] = useState<ReconnectInfo | null>(null);
   const [secondsUntilNextAttempt, setSecondsUntilNextAttempt] = useState<number | null>(null);
+  // "지금 다시 시도" 버튼을 눌러 즉시 재시도 요청을 네이티브에 보낸 직후 일시적으로
+  // true. 다음 ble.reconnect 이벤트(=새 attempt 알림)가 도착하면 false로 자동 복귀.
+  // - 빠른 더블 클릭으로 동일 요청을 두 번 보내는 것을 막는다.
+  // - 카운트다운 0초 시점(=실제 connectToDevice 진행 중)도 별도로 비활성화 조건이지만,
+  //   이 플래그는 그 사이의 짧은 race(클릭 → 250ms 틱 갱신)도 함께 막아준다.
+  const [manualRetryInFlight, setManualRetryInFlight] = useState(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -274,6 +280,7 @@ export default function TrainingSessionPlay() {
           clearReconnectTimer();
           setBleReconnecting(false);
           setReconnectInfo(null);
+          setManualRetryInFlight(false);
           return;
         }
         if (detail.payload.reason === 'user') return;
@@ -282,6 +289,7 @@ export default function TrainingSessionPlay() {
           clearReconnectTimer();
           setBleReconnecting(false);
           setReconnectInfo(null);
+          setManualRetryInFlight(false);
           finalizeAndAbort('ble-disconnect');
           return;
         }
@@ -292,6 +300,7 @@ export default function TrainingSessionPlay() {
           reconnectTimerRef.current = null;
           setBleReconnecting(false);
           setReconnectInfo(null);
+          setManualRetryInFlight(false);
           finalizeAndAbort('ble-disconnect');
         }, BLE_RECONNECT_GRACE_MS);
         return;
@@ -299,6 +308,8 @@ export default function TrainingSessionPlay() {
       if (detail.type === 'ble.reconnect') {
         // 재연결 시도 알림 — 배너에 시도 회수와 다음 시도까지 남은 시간을 노출하기 위해
         // 페이로드를 그대로 보관한다. receivedAt 으로 nextDelayMs 카운트다운을 계산한다.
+        // 새 attempt 알림은 곧 진행할 시도이므로 "지금 다시 시도" 버튼을 다시 활성화한다
+        // (manualRetryInFlight는 직전 클릭 → 다음 attempt 알림까지의 짧은 잠금 용도).
         setBleReconnecting(true);
         setReconnectInfo({
           attempt: detail.payload.attempt,
@@ -306,6 +317,7 @@ export default function TrainingSessionPlay() {
           nextDelayMs: detail.payload.nextDelayMs,
           receivedAt: Date.now(),
         });
+        setManualRetryInFlight(false);
       }
     };
     window.addEventListener('noilink-native-bridge', onBridge as EventListener);
@@ -530,27 +542,63 @@ export default function TrainingSessionPlay() {
             "재연결 시도 2/3 · 4초 후 재시도" 처럼 진행 상황을 구체적으로 보여주고,
             마지막 시도(=nextDelayMs 없음 또는 attempt >= maxAttempts) 일 때는
             "마지막 시도 중…" 으로 알려준다. ble.reconnect 가 아직 도착하지 않은
-            짧은 단절 직후에는 기존의 일반 안내 문구를 그대로 노출한다. */}
-        {bleReconnecting && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="mb-3 px-3 py-2 rounded-lg text-xs text-center"
-            style={{ backgroundColor: '#3A2A00', color: '#FFD66B', border: '1px solid #5A4500' }}
-          >
-            {(() => {
-              if (!reconnectInfo) return '기기 연결 회복 중…';
-              const isLastAttempt =
-                reconnectInfo.nextDelayMs == null ||
-                reconnectInfo.attempt >= reconnectInfo.maxAttempts;
-              if (isLastAttempt) {
-                return `기기 연결 회복 중… 마지막 시도 중 (${reconnectInfo.attempt}/${reconnectInfo.maxAttempts})`;
-              }
-              const secs = secondsUntilNextAttempt ?? Math.ceil((reconnectInfo.nextDelayMs ?? 0) / 1000);
-              return `기기 연결 회복 중… 재연결 시도 ${reconnectInfo.attempt}/${reconnectInfo.maxAttempts} · ${secs}초 후 재시도`;
-            })()}
-          </div>
-        )}
+            짧은 단절 직후에는 기존의 일반 안내 문구를 그대로 노출한다.
+
+            "지금 다시 시도" 버튼은 사용자가 자동 백오프 카운트다운을 건너뛰고
+            네이티브에 즉시 다음 attempt 발사를 요청하기 위한 것. 다음 경우엔 비활성화:
+              - reconnectInfo 가 아직 도착하지 않음 (네이티브가 시도를 시작하기 전)
+              - 마지막 시도 중 (=nextDelayMs 없음/attempt가 max 도달) — 건너뛸 대기가 없음
+              - 카운트다운이 0 — 이미 connectToDevice 진행 중
+              - 직전 클릭 후 새 attempt 알림이 아직 도착하지 않음 (중복 송신 방지)
+         */}
+        {bleReconnecting && (() => {
+          const isLastAttempt = !!reconnectInfo && (
+            reconnectInfo.nextDelayMs == null ||
+            reconnectInfo.attempt >= reconnectInfo.maxAttempts
+          );
+          const countdownElapsed =
+            secondsUntilNextAttempt !== null && secondsUntilNextAttempt <= 0;
+          const retryDisabled =
+            !reconnectInfo || isLastAttempt || countdownElapsed || manualRetryInFlight;
+          const label = (() => {
+            if (!reconnectInfo) return '기기 연결 회복 중…';
+            if (isLastAttempt) {
+              return `기기 연결 회복 중… 마지막 시도 중 (${reconnectInfo.attempt}/${reconnectInfo.maxAttempts})`;
+            }
+            const secs = secondsUntilNextAttempt ?? Math.ceil((reconnectInfo.nextDelayMs ?? 0) / 1000);
+            return `기기 연결 회복 중… 재연결 시도 ${reconnectInfo.attempt}/${reconnectInfo.maxAttempts} · ${secs}초 후 재시도`;
+          })();
+          return (
+            <div
+              role="status"
+              aria-live="polite"
+              className="mb-3 px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-2"
+              style={{ backgroundColor: '#3A2A00', color: '#FFD66B', border: '1px solid #5A4500' }}
+            >
+              <span className="flex-1 text-center">{label}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (retryDisabled) return;
+                  setManualRetryInFlight(true);
+                  bleReconnectNow();
+                }}
+                disabled={retryDisabled}
+                aria-label="지금 다시 시도"
+                className="shrink-0 px-2 py-1 rounded-md text-xs font-semibold"
+                style={{
+                  backgroundColor: retryDisabled ? '#3A2A00' : '#FFD66B',
+                  color: retryDisabled ? '#7A6A30' : '#3A2A00',
+                  border: '1px solid #FFD66B',
+                  opacity: retryDisabled ? 0.5 : 1,
+                  cursor: retryDisabled ? 'not-allowed' : 'pointer',
+                }}
+              >
+                지금 다시 시도
+              </button>
+            </div>
+          );
+        })()}
 
         {/* 페이즈/모드 표시 */}
         <div className="flex items-center justify-center gap-2 mb-4">

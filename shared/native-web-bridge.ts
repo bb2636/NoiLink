@@ -8,6 +8,8 @@
  *  - `ble.error.code`가 구조화된 `BleErrorCode` enum
  *  - `ble.connection.reason`으로 종료 사유 구분
  *  - `ble.reconnect` 신규 (재연결 시도 진행 알림)
+ *  - `ble.reconnect.now` 신규 (사용자가 자동 백오프 카운트다운을 건너뛰고
+ *    네이티브에 즉시 재연결을 요청; 진행 중인 sleep을 깨워 다음 attempt를 즉시 발사)
  */
 
 import type { BleDisconnectReason, BleErrorAction, BleErrorCode, NoiPodCharacteristicKey } from './ble-constants.js';
@@ -152,6 +154,19 @@ export type WebToNativeMessage =
       v: BridgeVersion;
       id: string;
       type: 'ble.discoverGatt';
+      payload?: Record<string, never>;
+    }
+  | {
+      v: BridgeVersion;
+      id: string;
+      /**
+       * 사용자가 자동 재연결 백오프 카운트다운을 건너뛰고 즉시 재시도를 요청.
+       * - 네이티브가 이미 sleep(다음 attempt 대기) 중이면 sleep을 깨워 즉시 다음 attempt를 발사.
+       * - 재연결 루프가 진행 중이 아니지만 connectionMeta.shouldReconnect=true 이면 새 루프 시작.
+       * - 이미 connectToDevice 가 진행 중이거나(=마지막 시도/대기 0초) connect 상태이거나
+       *   더 이상 자동 재연결 의도가 없으면 no-op (idempotent).
+       */
+      type: 'ble.reconnect.now';
       payload?: Record<string, never>;
     }
   | {

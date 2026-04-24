@@ -456,6 +456,14 @@ async function handleWebMessage(msg: WebToNativeMessage): Promise<void> {
       return;
     }
 
+    case 'ble.reconnect.now': {
+      // 사용자가 자동 백오프를 기다리지 않고 즉시 재연결을 요청.
+      // BleManager 가 멱등성을 보장한다(이미 진행 중이거나 재연결 의도가 없으면 no-op).
+      bleManager.triggerImmediateReconnect();
+      ack(msg.id, true);
+      return;
+    }
+
     case 'push.requestPermission': {
       postNativeToWeb({
         v: NATIVE_BRIDGE_VERSION,

@@ -141,3 +141,16 @@ export function bleDiscoverGatt(): void {
     type: 'ble.discoverGatt',
   });
 }
+
+/**
+ * 자동 재연결의 백오프 카운트다운을 건너뛰고 즉시 다음 재시도를 트리거하도록 네이티브에 요청.
+ *
+ * 사용 시나리오: 단절 직후 사용자가 디바이스를 다시 켰거나 거리가 가까워졌을 때,
+ * 1s/2s/4s 백오프가 끝나길 기다리지 않고 바로 재연결을 시도해 회복 속도를 높인다.
+ *
+ * 멱등성: 네이티브 측이 이미 connectToDevice 중이거나 재연결 의도가 없으면 no-op.
+ * 네이티브 미연결(웹/Expo Go)이면 자동 no-op.
+ */
+export function bleReconnectNow(): void {
+  post({ v: NATIVE_BRIDGE_VERSION, id: newRequestId(), type: 'ble.reconnect.now' });
+}

@@ -398,6 +398,55 @@ export class NoiLinkBleController {
   }
 
   /**
+   * 사용자가 "지금 다시 시도" 버튼으로 자동 재연결 백오프를 건너뛰도록 요청.
+   *
+   * 동작 정의 (멱등):
+   *  1) connected 가 살아 있으면 할 일 없음.
+   *  2) connectionMeta 가 없거나 shouldReconnect=false 이면 할 일 없음
+   *     (사용자가 명시적으로 끊었거나 더 이상 자동 재연결할 대상이 없음).
+   *  3) reconnect 루프가 진행 중이고 sleep 대기 중이면 sleep 만 깨워
+   *     다음 attempt 가 즉시 발사되게 한다 (gen은 건드리지 않음 — 루프는 계속).
+   *     - reconnectTimer 가 비어 있다면 이미 connectToDevice 실행 중이므로 no-op.
+   *  4) reconnect 루프가 돌고 있지 않다면 (아직 시작 전 또는 onConnectionLost 후
+   *     dispatcher 초기화 시점) shouldReconnect 의도를 살려 새 루프를 시작한다.
+   *
+   * cancelReconnect() 와 다른 점: gen을 증가시키지 않으므로 in-flight 루프를
+   * 죽이지 않고, 단지 다음 attempt 까지의 대기 시간을 0 에 가깝게 만든다.
+   */
+  triggerImmediateReconnect(): void {
+    if (this.connected) {
+      console.log('[BLE] reconnect.now ignored — already connected');
+      return;
+    }
+    const meta = this.connectionMeta;
+    if (!meta || !meta.shouldReconnect) {
+      console.log('[BLE] reconnect.now ignored — no reconnect target');
+      return;
+    }
+    if (this.reconnecting) {
+      // 진행 중: sleep 중일 때만 깨운다. connectToDevice 실행 중이면 깨울 게 없다.
+      if (this.reconnectTimer || this.reconnectCancelResolver) {
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
+        if (this.reconnectCancelResolver) {
+          const r = this.reconnectCancelResolver;
+          this.reconnectCancelResolver = null;
+          try { r(); } catch (_e) { /* noop */ }
+        }
+        console.log('[BLE] reconnect.now — sleep cancelled, next attempt fires now');
+      } else {
+        console.log('[BLE] reconnect.now ignored — attempt already in flight');
+      }
+      return;
+    }
+    // 루프가 멈춰 있다 — 새로 시작.
+    console.log('[BLE] reconnect.now — starting fresh reconnect loop');
+    void this.runReconnect(meta.deviceId);
+  }
+
+  /**
    * 진행 중/예약된 재연결을 취소합니다.
    * 대기 중인 sleep promise도 즉시 resolve시켜 dangling 방지.
    * generation을 증가시켜 in-flight runReconnect 루프가 다음 체크포인트에서 빠져나오게 합니다.

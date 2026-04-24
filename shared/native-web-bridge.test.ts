@@ -145,6 +145,7 @@ const WEB_TO_NATIVE_TYPES = [
   'ble.writeSession',
   'ble.writeControl',
   'ble.discoverGatt',
+  'ble.reconnect.now',
   'push.requestPermission',
 ] as const;
 
