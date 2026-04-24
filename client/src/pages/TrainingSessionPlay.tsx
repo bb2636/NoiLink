@@ -106,6 +106,11 @@ export default function TrainingSessionPlay() {
       const key = `${podId}:${tickId}`;
       if (tapDedupRef.current.has(key)) return;
       tapDedupRef.current.add(key);
+      // 장시간 세션 메모리 보호 — 상한 초과 시 가장 오래된 항목부터 정리
+      if (tapDedupRef.current.size > 8192) {
+        const it = tapDedupRef.current.values().next();
+        if (!it.done) tapDedupRef.current.delete(it.value);
+      }
     }
     setTapCount((n) => n + 1);
   }, []);

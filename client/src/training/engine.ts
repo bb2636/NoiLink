@@ -633,6 +633,11 @@ export class TrainingEngine {
       const key = `${podId}:${expectedTickId}`;
       if (this.consumedTickIds.has(key)) return false;
       this.consumedTickIds.add(key);
+      // 장시간 세션에서 무한히 자라지 않도록 상한(8192) 초과 시 가장 오래된 키부터 prune
+      if (this.consumedTickIds.size > 8192) {
+        const it = this.consumedTickIds.values().next();
+        if (!it.done) this.consumedTickIds.delete(it.value);
+      }
     }
 
     const elapsedTotal = this.elapsedMs();
