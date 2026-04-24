@@ -10,6 +10,10 @@ import { placeholderImage, fallbackImg } from '../utils/imagePlaceholder';
 import { DEMO_PROFILE } from '../utils/demoProfile';
 import { api } from '../utils/api';
 import type { User } from '@noilink/shared';
+import {
+  shouldShowRecoveryCoaching,
+  type AggregatedRecoveryStats,
+} from '@noilink/shared';
 
 // 데모 프로필 단일 출처 — 리포트/랭킹과 동일한 수치를 사용
 // TODO: 실제 API 데이터로 교체
@@ -313,6 +317,9 @@ function StandardHome({ variant, home, user }: StandardProps) {
           </div>
         </div>
 
+        {/* BLE 재연결 회복 통계·코칭(Task #37) — 트레이닝 요약 직후 노출 */}
+        <RecoverySection stats={stats.recoveryStats} />
+
         {/* 나의 트렌드 */}
         <h2 className="text-white text-base font-semibold mb-3">나의 트렌드</h2>
         <div className="rounded-2xl p-4 mb-5" style={{ backgroundColor: '#1A1A1A' }}>
@@ -342,6 +349,69 @@ function StandardHome({ variant, home, user }: StandardProps) {
           </div>
           <MiniLineChart points={trendPoints} />
         </div>
+      </div>
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// 재연결 회복 통계·코칭(Task #37)
+// -----------------------------------------------------------------------------
+// - 한 번이라도 회복 구간이 있었던 사용자에게 누적 시간/회수를 가볍게 보여주고,
+// - 최근 N개 세션의 세션당 평균 회복 시간이 30초 이상이면 "환경 점검" 카드를
+//   띄운다(트리거 = 카드 카피와 1:1 일치). 단발성 outlier 만으로는 띄우지 않는다.
+// 회복이 한 번도 없었던 경우엔 카드를 통째로 숨겨 잡음을 만들지 않는다.
+function RecoverySection({ stats }: { stats: AggregatedRecoveryStats }) {
+  // 회복이 한 번도 없었던 사용자에게는 카드를 노출하지 않는다 — 잡음 방지.
+  if (stats.sessionsWithRecovery === 0) return null;
+  const totalSec = Math.round(stats.totalMs / 1000);
+  const avgSec = Math.round(stats.avgMsPerSession / 1000);
+  const showCoaching = shouldShowRecoveryCoaching(stats);
+
+  return (
+    <div className="mb-6">
+      <h2 className="text-white text-base font-semibold mb-3">기기 연결 안정성</h2>
+      <div className="rounded-2xl p-4" style={{ backgroundColor: '#1A1A1A' }}>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="text-gray-400 text-xs mb-1">최근 세션 누적 회복 시간</div>
+            <div className="flex items-baseline gap-1">
+              <span className="text-white text-2xl font-bold">{totalSec}</span>
+              <span className="text-gray-300 text-sm">초</span>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-gray-400 text-xs mb-1">회복 구간</div>
+            <div className="flex items-baseline gap-1 justify-end">
+              <span className="text-white text-2xl font-bold">{stats.windowsTotal}</span>
+              <span className="text-gray-300 text-sm">회</span>
+            </div>
+          </div>
+        </div>
+        <div className="text-gray-500 text-[11px]">
+          최근 {stats.sessionsCount}개 세션 중 {stats.sessionsWithRecovery}개에서
+          회복 발생 · 세션당 평균 ≈ {avgSec}초
+        </div>
+
+        {showCoaching && (
+          <div
+            role="status"
+            data-testid="recovery-coaching-card"
+            className="mt-3 rounded-xl px-3 py-3"
+            style={{
+              backgroundColor: '#3A2A00',
+              color: '#FFD66B',
+              border: '1px solid #5A4500',
+            }}
+          >
+            <div className="text-sm font-semibold mb-1">환경 점검을 권장해요</div>
+            <p className="text-[12px] leading-relaxed" style={{ color: '#F5E0A0' }}>
+              최근 {stats.sessionsCount}개 세션의 평균 회복 시간이 30초를 넘었어요.
+              기기와의 거리를 줄이거나 주변 블루투스 간섭(전자레인지·공유기 등)을
+              확인하면 점수에 반영되는 시간이 늘어납니다.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -8,8 +8,22 @@ import { db } from '../db.js';
 import { calculateAllMetrics } from '../services/score-calculator.js';
 import { generateAndSavePersonalReport } from '../services/personal-report.js';
 import type { RawMetrics, MetricsScore, Session, User } from '@noilink/shared';
+import { sanitizeRecoveryRawMetrics } from '@noilink/shared';
 import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
 import { userCanActOnTargetUserId } from '../utils/session-user-policy.js';
+
+/**
+ * 클라이언트가 보낸 recovery 페이로드를 안전한 모양(음수/NaN/누락 정규화)으로 덮어쓴다.
+ * 잘못된 모양이 통계·코칭 신호를 오염시키는 것을 막기 위해 저장 직전에 항상 한 번 호출한다.
+ */
+function normalizeRecoveryInPlace(rawMetrics: RawMetrics): void {
+  const sanitized = sanitizeRecoveryRawMetrics(rawMetrics.recovery);
+  if (sanitized) {
+    rawMetrics.recovery = sanitized;
+  } else {
+    delete rawMetrics.recovery;
+  }
+}
 
 const router = Router();
 
@@ -57,6 +71,7 @@ router.post('/raw', optionalAuth, async (req: Request, res: Response) => {
     }
     
     rawMetrics.createdAt = rawMetrics.createdAt || new Date().toISOString();
+    normalizeRecoveryInPlace(rawMetrics);
     
     const rawMetricsList = await db.get('rawMetrics') || [];
     rawMetricsList.push(rawMetrics);
@@ -95,8 +110,10 @@ router.post('/calculate', optionalAuth, async (req: Request, res: Response) => {
     // 점수 계산
     const metricsScore = await calculateAllMetrics(rawMetrics);
     
-    // 원시 메트릭 저장
+    // 원시 메트릭 저장 — recovery 메타는 사용자 통계·코칭 신호의 입력값이므로
+    // 음수·NaN·누락 케이스를 항상 정규화한 뒤 영속화한다.
     rawMetrics.createdAt = rawMetrics.createdAt || new Date().toISOString();
+    normalizeRecoveryInPlace(rawMetrics);
     const rawMetricsList = await db.get('rawMetrics') || [];
     rawMetricsList.push(rawMetrics);
     await db.set('rawMetrics', rawMetricsList);

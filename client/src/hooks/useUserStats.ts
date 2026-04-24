@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react';
 import { api } from '../utils/api';
-import type { Session, MetricsScore, TrainingMode } from '@noilink/shared';
+import type {
+  Session,
+  MetricsScore,
+  RawMetrics,
+  RecoveryRawMetrics,
+  TrainingMode,
+} from '@noilink/shared';
+import {
+  aggregateRecoveryStats,
+  type AggregatedRecoveryStats,
+} from '@noilink/shared';
 
 export interface DerivedUserStats {
   hasData: boolean;
@@ -11,6 +21,11 @@ export interface DerivedUserStats {
   brainIndex: number | null;
   topTrainings: string[];
   checkedDays: boolean[];
+  /**
+   * 최근 세션들의 BLE 재연결 회복 누적 통계.
+   * 사용자 대시보드 안내(누적 N초 / N회) 및 "환경 점검" 코칭 신호의 단일 출처로 사용.
+   */
+  recoveryStats: AggregatedRecoveryStats;
   loading: boolean;
 }
 
@@ -38,7 +53,11 @@ function startOfWeekMon(d: Date): Date {
   return out;
 }
 
-function deriveStats(sessions: Session[], metrics: (MetricsScore | null)[]): DerivedUserStats {
+function deriveStats(
+  sessions: Session[],
+  metrics: (MetricsScore | null)[],
+  recoveries: (RecoveryRawMetrics | null | undefined)[],
+): DerivedUserStats {
   // 시간순 정렬 (오래된→최신)
   const indexed = sessions
     .map((s, i) => ({ s, m: metrics[i] }))
@@ -104,6 +123,10 @@ function deriveStats(sessions: Session[], metrics: (MetricsScore | null)[]): Der
     if (diffDays >= 0 && diffDays < 7) checkedDays[diffDays] = true;
   }
 
+  // 회복 통계: 세션 1개당 recoveries 1개 항목(없으면 null)을 그대로 넘긴다 —
+  // aggregateRecoveryStats 는 입력 길이를 분모로 써 "최근 전체 세션 평균" 을 계산한다.
+  const recoveryStats = aggregateRecoveryStats(recoveries);
+
   return {
     hasData: scored.length > 0,
     trendPoints,
@@ -113,6 +136,7 @@ function deriveStats(sessions: Session[], metrics: (MetricsScore | null)[]): Der
     brainIndex,
     topTrainings,
     checkedDays,
+    recoveryStats,
     loading: false,
   };
 }
@@ -126,6 +150,13 @@ const EMPTY: DerivedUserStats = {
   brainIndex: null,
   topTrainings: [],
   checkedDays: [false, false, false, false, false, false, false],
+  recoveryStats: {
+    sessionsCount: 0,
+    sessionsWithRecovery: 0,
+    totalMs: 0,
+    windowsTotal: 0,
+    avgMsPerSession: 0,
+  },
   loading: true,
 };
 
@@ -152,18 +183,21 @@ export function useUserStats(userId: string | null): DerivedUserStats {
           return;
         }
         const sessions: Session[] = sessRes.data;
-        // 메트릭 동시 로드
+        // 메트릭 동시 로드 — score 와 raw(recovery 메타) 를 한 번에 받아온다.
         const metricsResults = await Promise.all(
           sessions.map((s) =>
             api
-              .get<{ raw: unknown; score: MetricsScore | null }>(`/metrics/session/${s.id}`)
+              .get<{ raw: RawMetrics | null; score: MetricsScore | null }>(`/metrics/session/${s.id}`)
               .catch(() => ({ success: false, data: null }) as any),
           ),
         );
         const metrics: (MetricsScore | null)[] = metricsResults.map((r: any) =>
           r?.success && r?.data?.score ? (r.data.score as MetricsScore) : null,
         );
-        const derived = deriveStats(sessions, metrics);
+        const recoveries: (RecoveryRawMetrics | null | undefined)[] = metricsResults.map(
+          (r: any) => (r?.success && r?.data?.raw?.recovery) || null,
+        );
+        const derived = deriveStats(sessions, metrics, recoveries);
         cache.set(userId, derived);
         setStats(derived);
       } catch (e) {
