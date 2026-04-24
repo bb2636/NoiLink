@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
+import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import PodGrid from '../components/PodGrid/PodGrid';
 import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noilink/shared';
 import { SESSION_MAX_MS } from '@noilink/shared';
@@ -16,6 +17,19 @@ import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training
 import { bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import type { TrainingAbortReason } from './trainingAbortReason';
+
+/**
+ * 백그라운드 중단 시 부분 결과 저장을 제안하는 진행률 임계값.
+ * 0.8 = 전체 시간의 80% 이상 진행한 세션은 사용자에게 결과 저장 선택지를 제시한다.
+ *
+ * 근거:
+ *  - 너무 낮으면 표본이 부족해 산출 점수의 신뢰도가 떨어진다(특히 ENDURANCE의
+ *    Late 구간 점수, COMPOSITE의 마지막 사이클 모드 등은 후반부에 누적된다).
+ *  - 너무 높으면 "거의 끝났는데 아무것도 안 남았다"는 사용자 불만이 그대로 남는다.
+ *  - 80%는 RHYTHM/COGNITIVE 페이즈가 한 번씩 돌아 6대 지표 중 다수가 산출되는
+ *    실용적 하한선이다 (COMPOSITE 5사이클 기준 4사이클 완료 직전).
+ */
+const PARTIAL_RESULT_THRESHOLD = 0.8;
 
 export type TrainingRunState = {
   catalogId: string;
@@ -67,8 +81,17 @@ export default function TrainingSessionPlay() {
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // 백그라운드 중단이 임계값 이상에서 발생했을 때만 띄우는 "부분 결과 저장" 모달.
+  // partialProgressPct는 모달에 노출하는 안내용 진행률(반올림된 정수 %).
+  const [partialFinishOpen, setPartialFinishOpen] = useState(false);
+  const [partialProgressPct, setPartialProgressPct] = useState(0);
+
   const engineRef = useRef<TrainingEngine | null>(null);
   const submitLock = useRef(false);
+  // finalizeNow는 visibilitychange/pagehide 콜백 안에서 호출되므로 React 클로저가
+  // 캡처한 elapsedMs가 stale할 수 있다. 가장 최근 진행 시간을 ref로 동기 추적해
+  // 임계값 판정에 사용한다.
+  const elapsedMsRef = useRef(0);
 
   // ── 가드: 잘못된 진입은 목록으로 ──
   useEffect(() => {
@@ -88,7 +111,10 @@ export default function TrainingSessionPlay() {
       podCount: 4,
       isComposite: state.isComposite || state.apiMode === 'COMPOSITE',
       onPodStates: (s) => setPods(s),
-      onElapsedMs: (ms) => setElapsedMs(ms),
+      onElapsedMs: (ms) => {
+        elapsedMsRef.current = ms;
+        setElapsedMs(ms);
+      },
       onPhaseChange: (info) => setPhaseInfo(info),
       onComplete: (m) => setEngineMetrics(m),
     });
@@ -107,6 +133,12 @@ export default function TrainingSessionPlay() {
   //   - LED OFF + CONTROL_STOP을 즉시 보내고 (배터리 보호 + 사용자 직관)
   //   - 결과 화면(/result)으로 가지 않도록 aborted ref가 runSubmit을 차단
   //   - 사유를 navigate state로 전달해 목록 화면이 사유별 1회성 배너를 노출
+  //
+  // 백그라운드 사유에 한해 추가 분기(Task #16):
+  //   거의 끝났던 세션(진행률 ≥ PARTIAL_RESULT_THRESHOLD, 점수 산출 모드)은
+  //   곧장 목록으로 돌려보내지 않고 "결과 보러가기 / 그만두기" 모달을 띄워
+  //   부분 결과를 살릴 기회를 준다. 이 경로는 finalizeAndAbort 를 호출하지
+  //   않고 직접 aborted ref + engine.endNow() 만 처리한다.
   //
   // 가드:
   //   - 이미 결과 흐름(engineMetrics 산출 완료 또는 submitting 중)이면 간섭하지 않는다.
@@ -135,7 +167,38 @@ export default function TrainingSessionPlay() {
   useEffect(() => {
     if (!state) return;
     if (!isNoiLinkNativeShell()) return;
-    const onBackground = () => finalizeAndAbort('background');
+    // 백그라운드 진입은 두 갈래로 분기한다:
+    //   (1) 거의 끝났던 점수 산출 세션 (진행률 ≥ PARTIAL_RESULT_THRESHOLD)
+    //       → engine.endNow()로 부분 메트릭만 산출해두고, 화면을 유지한 채
+    //         "결과 보러가기 / 그만두기" 모달을 띄운다. finalizeAndAbort 는
+    //         호출하지 않으므로 navigate 가 발생하지 않고, aborted ref 가
+    //         자동 제출 useEffect 를 막아 사용자 선택을 기다린다.
+    //   (2) 그 외 (짧게 끊긴 세션 / 자유 / 점수 비산출 모드)
+    //       → 기존 정책대로 finalizeAndAbort('background') 가 LED OFF + 목록
+    //         화면 + abortReason 배너 흐름을 일괄 처리한다.
+    const onBackground = () => {
+      if (aborted.current) return;
+      if (engineMetrics || submitting) return;
+
+      // 백그라운드 진입 시점의 진행률을 ref에서 직접 읽어 stale 클로저를 회피.
+      const elapsedAtAbort = elapsedMsRef.current;
+      const progressRatio = totalMs > 0 ? Math.min(1, elapsedAtAbort / totalMs) : 0;
+      const scorable = state.yieldsScore && state.apiMode !== 'FREE';
+
+      if (scorable && progressRatio >= PARTIAL_RESULT_THRESHOLD) {
+        // 부분 결과 모달 경로: aborted 만 직접 set 하여 자동 제출을 차단하고,
+        // 엔진을 즉시 종료해 부분 메트릭(setEngineMetrics)을 산출해둔다.
+        aborted.current = true;
+        const eng = engineRef.current;
+        if (eng) eng.endNow();
+        setPartialProgressPct(Math.round(progressRatio * 100));
+        setPartialFinishOpen(true);
+        return;
+      }
+
+      // 짧게 끊긴 세션: 기존 공통 종료 흐름.
+      finalizeAndAbort('background');
+    };
     const onVisibility = () => {
       if (typeof document !== 'undefined' && !document.hidden) return;
       onBackground();
@@ -147,7 +210,7 @@ export default function TrainingSessionPlay() {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', onBackground);
     };
-  }, [state, finalizeAndAbort]);
+  }, [state, totalMs, engineMetrics, submitting, finalizeAndAbort]);
 
   // ── BLE(NoiPod) 연결이 끊기면 즉시 세션 종료 (네이티브 셸에서만) ──
   // 정책: 디바이스 입력 채널이 사라지면 더 이상 정상 채점이 불가능하므로 명확한 사유와 함께
@@ -224,7 +287,8 @@ export default function TrainingSessionPlay() {
   // ── 엔진 종료 후 서버 제출 ──
   const runSubmit = useCallback(async (metrics: Omit<RawMetrics, 'sessionId' | 'userId'> | null) => {
     if (!state || submitLock.current) return;
-    // 백그라운드로 중단된 세션은 결과 화면으로 보내지 않는다.
+    // 백그라운드로 중단된 세션은 (사용자가 부분 결과 저장을 선택해 aborted 게이트를
+    // 해제하지 않은 한) 결과 화면으로 보내지 않는다.
     // 사용자는 트레이닝 목록에서 안내 배너를 보고 다시 시작하게 된다.
     if (aborted.current) return;
     submitLock.current = true;
@@ -263,6 +327,28 @@ export default function TrainingSessionPlay() {
       void runSubmit(engineMetrics);
     }
   }, [engineMetrics, runSubmit]);
+
+  // 부분 결과 저장 모달 액션 핸들러.
+  // - 결과 보러가기: aborted 게이트를 해제해 정상 종료와 동일한 제출 흐름을 탄다.
+  //   submitLock 덕분에 중복 호출은 안전하고, 실패 시에는 본문의 "저장 재시도"
+  //   버튼으로 동일하게 다시 시도할 수 있다.
+  // - 그만두기: 기존 백그라운드 중단 흐름과 동일하게 트레이닝 목록으로 돌려보낸다.
+  const handlePartialConfirm = useCallback(() => {
+    // engineMetrics 가 null 인 상태로는 절대 제출하지 않는다 — submitTrainingRun
+    // 의 합성 메트릭 fallback 으로 빠지면 부분 결과의 정합성이 깨진다.
+    // 모달 isOpen 가드(engineMetrics !== null)와 이 가드를 모두 두어 이중 안전망.
+    if (!engineMetrics) return;
+    setPartialFinishOpen(false);
+    aborted.current = false;
+    void runSubmit(engineMetrics);
+  }, [engineMetrics, runSubmit]);
+  const handlePartialDismiss = useCallback(() => {
+    setPartialFinishOpen(false);
+    navigate('/training', {
+      replace: true,
+      state: { abortReason: 'background' as const },
+    });
+  }, [navigate]);
 
   if (!state) return null;
 
@@ -383,6 +469,22 @@ export default function TrainingSessionPlay() {
           <p className="text-center text-sm mt-3 text-gray-400">결과 저장 중…</p>
         )}
       </div>
+
+      {/* 백그라운드 중단이 임계값(80%) 이상에서 발생했을 때만 표시.
+          진행률을 그대로 보여주고, 사용자가 "결과 보러가기" / "그만두기" 중 선택.
+          engineMetrics 가 실제로 산출되기 전에는 모달을 띄우지 않는다 — 그래야
+          "결과 보러가기" 클릭 시 합성 메트릭(submitTrainingRun 의 fallback)이
+          아니라 항상 진짜 부분 메트릭이 서버로 제출된다. endNow()는 동기적으로
+          onComplete 를 호출하므로 모달이 닫혀 있는 시간은 사실상 1 렌더 미만이다. */}
+      <ConfirmModal
+        isOpen={partialFinishOpen && engineMetrics !== null}
+        title="거의 다 끝났던 세션이에요"
+        message={`화면을 가린 동안 트레이닝이 멈췄지만 ${partialProgressPct}% 까지 진행됐어요. 지금까지의 결과를 저장하고 결과 화면으로 이동할까요?`}
+        confirmText="결과 보러가기"
+        cancelText="그만두기"
+        onConfirm={handlePartialConfirm}
+        onCancel={handlePartialDismiss}
+      />
     </MobileLayout>
   );
 }
