@@ -31,6 +31,17 @@ import type { TrainingAbortReason } from './trainingAbortReason';
  */
 const PARTIAL_RESULT_THRESHOLD = 0.8;
 
+/**
+ * 재연결 진행 상황 스냅샷 — 네이티브의 ble.reconnect 페이로드 + 수신 시각.
+ * receivedAt 은 nextDelayMs 만료까지 남은 시간을 카운트다운하는 데 사용한다.
+ */
+type ReconnectInfo = {
+  attempt: number;
+  maxAttempts: number;
+  nextDelayMs?: number;
+  receivedAt: number;
+};
+
 export type TrainingRunState = {
   catalogId: string;
   apiMode: TrainingMode;
@@ -99,6 +110,11 @@ export default function TrainingSessionPlay() {
   // 'retry-failed' 사유로 최종 실패가 통보되면 즉시 종료한다.
   const BLE_RECONNECT_GRACE_MS = 8000;
   const [bleReconnecting, setBleReconnecting] = useState(false);
+  // 네이티브가 보내는 ble.reconnect 페이로드(시도 회수/총 시도/다음 시도까지 대기시간)를
+  // 그대로 보관해 배너에 "재연결 시도 2/3 · 4초 후 재시도" 같은 구체 안내를 노출한다.
+  // receivedAt 으로 nextDelayMs 만료까지 남은 시간을 계산한다.
+  const [reconnectInfo, setReconnectInfo] = useState<ReconnectInfo | null>(null);
+  const [secondsUntilNextAttempt, setSecondsUntilNextAttempt] = useState<number | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -246,9 +262,10 @@ export default function TrainingSessionPlay() {
       if (!detail) return;
       if (detail.type === 'ble.connection') {
         if (detail.payload.connected !== null) {
-          // 재연결 성공 — 그레이스 중이면 배너/타이머를 정리하고 트레이닝을 계속 진행한다.
+          // 재연결 성공 — 그레이스 중이면 배너/타이머/진행정보를 정리하고 트레이닝을 계속 진행한다.
           clearReconnectTimer();
           setBleReconnecting(false);
+          setReconnectInfo(null);
           return;
         }
         if (detail.payload.reason === 'user') return;
@@ -256,6 +273,7 @@ export default function TrainingSessionPlay() {
           // 자동 재연결이 모두 실패 — 즉시 종료.
           clearReconnectTimer();
           setBleReconnecting(false);
+          setReconnectInfo(null);
           finalizeAndAbort('ble-disconnect');
           return;
         }
@@ -265,13 +283,21 @@ export default function TrainingSessionPlay() {
         reconnectTimerRef.current = setTimeout(() => {
           reconnectTimerRef.current = null;
           setBleReconnecting(false);
+          setReconnectInfo(null);
           finalizeAndAbort('ble-disconnect');
         }, BLE_RECONNECT_GRACE_MS);
         return;
       }
       if (detail.type === 'ble.reconnect') {
-        // 재연결 시도 알림 — 배너 상태만 보장.
+        // 재연결 시도 알림 — 배너에 시도 회수와 다음 시도까지 남은 시간을 노출하기 위해
+        // 페이로드를 그대로 보관한다. receivedAt 으로 nextDelayMs 카운트다운을 계산한다.
         setBleReconnecting(true);
+        setReconnectInfo({
+          attempt: detail.payload.attempt,
+          maxAttempts: detail.payload.maxAttempts,
+          nextDelayMs: detail.payload.nextDelayMs,
+          receivedAt: Date.now(),
+        });
       }
     };
     window.addEventListener('noilink-native-bridge', onBridge as EventListener);
@@ -280,6 +306,26 @@ export default function TrainingSessionPlay() {
       clearReconnectTimer();
     };
   }, [state, finalizeAndAbort, clearReconnectTimer]);
+
+  // ── 다음 재연결 시도까지 남은 초 카운트다운 ──
+  // 배너에 "4초 후 재시도" 같은 안내를 보여주기 위해 nextDelayMs 만료까지의 잔여 시간을
+  // 1초보다 잦은 주기(250ms)로 계산해 어색한 멈춤 없이 부드럽게 줄어들게 한다.
+  // - bleReconnecting 가 꺼지거나 reconnectInfo 가 비면 즉시 정리한다.
+  // - nextDelayMs 가 없는 경우(=마지막 시도 중)는 카운트다운을 표시하지 않는다.
+  useEffect(() => {
+    if (!bleReconnecting || !reconnectInfo || reconnectInfo.nextDelayMs == null) {
+      setSecondsUntilNextAttempt(null);
+      return;
+    }
+    const target = reconnectInfo.receivedAt + reconnectInfo.nextDelayMs;
+    const tick = () => {
+      const remainingMs = Math.max(0, target - Date.now());
+      setSecondsUntilNextAttempt(Math.ceil(remainingMs / 1000));
+    };
+    tick();
+    const id = setInterval(tick, 250);
+    return () => clearInterval(id);
+  }, [bleReconnecting, reconnectInfo]);
 
   // 동일 자극(pod, tickId)에 UI tap과 BLE TOUCH가 둘 다 와도 카운트는 1회만.
   const tapDedupRef = useRef<Set<string>>(new Set());
@@ -432,7 +478,12 @@ export default function TrainingSessionPlay() {
           <h1 className="text-lg font-semibold">{state.title}</h1>
         </div>
 
-        {/* BLE 재연결 회복 중 임시 안내 — 그레이스 기간 동안만 노출 */}
+        {/* BLE 재연결 회복 중 임시 안내 — 그레이스 기간 동안만 노출.
+            네이티브가 ble.reconnect 로 보내준 attempt/maxAttempts/nextDelayMs 가 있으면
+            "재연결 시도 2/3 · 4초 후 재시도" 처럼 진행 상황을 구체적으로 보여주고,
+            마지막 시도(=nextDelayMs 없음 또는 attempt >= maxAttempts) 일 때는
+            "마지막 시도 중…" 으로 알려준다. ble.reconnect 가 아직 도착하지 않은
+            짧은 단절 직후에는 기존의 일반 안내 문구를 그대로 노출한다. */}
         {bleReconnecting && (
           <div
             role="status"
@@ -440,7 +491,17 @@ export default function TrainingSessionPlay() {
             className="mb-3 px-3 py-2 rounded-lg text-xs text-center"
             style={{ backgroundColor: '#3A2A00', color: '#FFD66B', border: '1px solid #5A4500' }}
           >
-            기기 연결 회복 중…
+            {(() => {
+              if (!reconnectInfo) return '기기 연결 회복 중…';
+              const isLastAttempt =
+                reconnectInfo.nextDelayMs == null ||
+                reconnectInfo.attempt >= reconnectInfo.maxAttempts;
+              if (isLastAttempt) {
+                return `기기 연결 회복 중… 마지막 시도 중 (${reconnectInfo.attempt}/${reconnectInfo.maxAttempts})`;
+              }
+              const secs = secondsUntilNextAttempt ?? Math.ceil((reconnectInfo.nextDelayMs ?? 0) / 1000);
+              return `기기 연결 회복 중… 재연결 시도 ${reconnectInfo.attempt}/${reconnectInfo.maxAttempts} · ${secs}초 후 재시도`;
+            })()}
           </div>
         )}
 
