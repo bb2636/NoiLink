@@ -1,4 +1,4 @@
-import type { Level, MetricsScore, TrainingMode } from '@noilink/shared';
+import type { Level, MetricsScore, RawMetrics, TrainingMode } from '@noilink/shared';
 import {
   buildSyntheticRawMetrics,
   buildTrainingPhases,
@@ -21,6 +21,9 @@ function avgMetricScore(m: MetricsScore): number | undefined {
 
 /**
  * 세션 저장 → (점수 모드) 원시 메트릭 산출·저장 → 서버가 세션 score·리포트 갱신
+ *
+ * `engineMetrics` 가 있으면 게임 엔진이 실제 측정한 값으로 제출,
+ * 없으면 종전처럼 합성 값으로 제출(자유 모드/엔진 미사용 케이스용).
  */
 export async function submitCompletedTraining(input: {
   userId: string;
@@ -31,6 +34,8 @@ export async function submitCompletedTraining(input: {
   yieldsScore: boolean;
   isComposite: boolean;
   tapCount: number;
+  /** 게임 엔진이 산출한 실제 원시 메트릭(있으면 우선) */
+  engineMetrics?: Omit<RawMetrics, 'sessionId' | 'userId'>;
 }): Promise<{ sessionId: string; displayScore?: number; error?: string }> {
   const durationMs = input.totalDurationSec * 1000;
   const q = inferQualityFromTaps(input.tapCount, input.totalDurationSec);
@@ -67,7 +72,9 @@ export async function submitCompletedTraining(input: {
     return { sessionId };
   }
 
-  const raw = buildSyntheticRawMetrics({ sessionId, userId: input.userId, quality: q });
+  const raw: RawMetrics = input.engineMetrics
+    ? { ...input.engineMetrics, sessionId, userId: input.userId }
+    : buildSyntheticRawMetrics({ sessionId, userId: input.userId, quality: q });
   const calcRes = await api.calculateMetrics(raw);
   if (!calcRes.success || !calcRes.data) {
     return {
