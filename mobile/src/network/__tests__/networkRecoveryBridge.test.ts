@@ -13,6 +13,9 @@
  * - throttle 윈도우 안에 누락된 false → true 마지막 상태는 윈도우 만료 직후
  *   정확히 한 번 deferred emit 으로 전달되고, 그 사이 offline 으로 돌아가면
  *   취소된다.
+ * - 매 발사 payload 에 진단 카운터 (path / immediateFires / deferredFires /
+ *   deferredCancels) 가 동봉된다 — 운영 로그에서 hole-closer 발사 빈도를
+ *   추적하는 단일 소스. 카운터는 모듈 시작 시 0 으로 초기화된다.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -33,6 +36,7 @@ vi.mock('@react-native-community/netinfo', () => ({
 import {
   startNetworkRecoveryBridge,
   stopNetworkRecoveryBridge,
+  getNetworkRecoveryBridgeCounters,
   __resetNetworkRecoveryBridgeForTest,
 } from '../networkRecoveryBridge';
 import { NATIVE_BRIDGE_VERSION } from '@noilink/shared';
@@ -127,7 +131,11 @@ describe('startNetworkRecoveryBridge — dedupe/throttle', () => {
     h.emit({ isConnected: true, isInternetReachable: true });
 
     expect(posted.list).toHaveLength(1);
-    expect(posted.list[0]).toEqual({ v: NATIVE_BRIDGE_VERSION, type: 'network.online' });
+    expect(posted.list[0]).toEqual({
+      v: NATIVE_BRIDGE_VERSION,
+      type: 'network.online',
+      payload: { path: 'immediate', immediateFires: 1, deferredFires: 0, deferredCancels: 0 },
+    });
     h.stop();
   });
 
@@ -276,9 +284,16 @@ describe('startNetworkRecoveryBridge — throttle 윈도우 만료 후 deferred 
     // 윈도우 끝 직후로 시간 진행
     h.advance(5_000);
 
-    // deferred 가 정확히 한 번 발사
+    // deferred 가 정확히 한 번 발사 — payload 의 path 는 'deferred' 로,
+    // 카운터는 immediateFires=1 (앞선 emit #1) + deferredFires=1 (지금) 로 와야 한다.
+    // deferredCancels 는 immediate fire 직전 정리에서 0→0 (예약된 게 없었음) 이고,
+    // 이번 deferred 콜백 내부에서는 cancel 이 발생하지 않았으므로 0 그대로.
     expect(posted.list).toHaveLength(2);
-    expect(posted.list[1]).toEqual({ v: NATIVE_BRIDGE_VERSION, type: 'network.online' });
+    expect(posted.list[1]).toEqual({
+      v: NATIVE_BRIDGE_VERSION,
+      type: 'network.online',
+      payload: { path: 'deferred', immediateFires: 1, deferredFires: 1, deferredCancels: 0 },
+    });
     expect(h.pendingTimers()).toBe(0);
     h.stop();
   });
@@ -417,5 +432,199 @@ describe('startNetworkRecoveryBridge — throttle 윈도우 만료 후 deferred 
     }
     // stop 이후이므로 발사하지 않아야 함
     expect(posted2).toHaveLength(1);
+  });
+});
+
+describe('startNetworkRecoveryBridge — 진단 카운터 (hole-closer 발사 빈도 추적)', () => {
+  it('immediate 발사가 누적되어 매 payload 의 immediateFires 와 동일하게 흐른다', () => {
+    const h = setup({ minIntervalMs: 1_000 });
+    h.emit({ isConnected: false }); // baseline
+    h.fakeNow += 100;
+    h.emit({ isConnected: true, isInternetReachable: true }); // immediate #1
+    h.fakeNow += 5_000;
+    h.emit({ isConnected: false });
+    h.fakeNow += 100;
+    h.emit({ isConnected: true, isInternetReachable: true }); // immediate #2
+    h.fakeNow += 5_000;
+    h.emit({ isConnected: false });
+    h.fakeNow += 100;
+    h.emit({ isConnected: true, isInternetReachable: true }); // immediate #3
+
+    expect(posted.list).toHaveLength(3);
+    expect(posted.list[0]).toMatchObject({
+      payload: { path: 'immediate', immediateFires: 1, deferredFires: 0 },
+    });
+    expect(posted.list[1]).toMatchObject({
+      payload: { path: 'immediate', immediateFires: 2, deferredFires: 0 },
+    });
+    expect(posted.list[2]).toMatchObject({
+      payload: { path: 'immediate', immediateFires: 3, deferredFires: 0 },
+    });
+    expect(getNetworkRecoveryBridgeCounters()).toEqual({
+      immediateFires: 3,
+      deferredFires: 0,
+      deferredCancels: 0,
+    });
+    h.stop();
+  });
+
+  it('deferred 발사 카운터는 throttle 윈도우 hole 을 한 번 닫을 때마다 1 씩 오른다', () => {
+    const h = setup({ minIntervalMs: 2_000 });
+    // cycle 1: immediate #1 (t=100) → throttle 안 깜빡임 → deferred #1 발사 (t=2100)
+    h.emit({ isConnected: false });
+    h.fakeNow += 100;
+    h.emit({ isConnected: true, isInternetReachable: true }); // immediate #1
+    h.fakeNow += 200;
+    h.emit({ isConnected: false });
+    h.fakeNow += 200;
+    h.emit({ isConnected: true, isInternetReachable: true }); // deferred 예약 (fireAt=2100)
+    h.advance(1_700); // h.fakeNow → 2100, deferred #1 발사 (lastEmittedAt=2100)
+
+    // cycle 2: 새 throttle 윈도우(만료 t=4100) 안에서 다시 깜빡 → deferred #2
+    // advance 직후 h.fakeNow=2100 → 100ms 뒤 offline, 200ms 뒤 online 으로
+    // 윈도우 안에서 hole 을 한 번 더 만든다.
+    h.fakeNow += 100;
+    h.emit({ isConnected: false });
+    h.fakeNow += 100;
+    h.emit({ isConnected: true, isInternetReachable: true }); // deferred 예약 (fireAt=4100)
+    h.advance(2_000); // → deferred #2 발사
+
+    expect(posted.list).toHaveLength(3);
+    expect(posted.list[0]).toMatchObject({
+      payload: { path: 'immediate', immediateFires: 1, deferredFires: 0 },
+    });
+    expect(posted.list[1]).toMatchObject({
+      payload: { path: 'deferred', immediateFires: 1, deferredFires: 1 },
+    });
+    expect(posted.list[2]).toMatchObject({
+      payload: { path: 'deferred', immediateFires: 1, deferredFires: 2 },
+    });
+    expect(getNetworkRecoveryBridgeCounters()).toMatchObject({
+      immediateFires: 1,
+      deferredFires: 2,
+    });
+    h.stop();
+  });
+
+  it('윈도우 안에서 다시 offline 이 되어 deferred 가 취소되면 deferredCancels 가 증가한다', () => {
+    const h = setup({ minIntervalMs: 2_000 });
+    h.emit({ isConnected: false });
+    h.fakeNow += 100;
+    h.emit({ isConnected: true, isInternetReachable: true }); // immediate #1
+    h.fakeNow += 200;
+    h.emit({ isConnected: false });
+    h.fakeNow += 200;
+    h.emit({ isConnected: true, isInternetReachable: true }); // deferred 예약
+    h.fakeNow += 100;
+    h.emit({ isConnected: false }); // ← 취소: deferredCancels=1
+
+    // 시간이 지나도 deferred 는 발사되지 않으므로 발사 카운터는 그대로.
+    h.advance(10_000);
+    expect(posted.list).toHaveLength(1);
+    expect(getNetworkRecoveryBridgeCounters()).toEqual({
+      immediateFires: 1,
+      deferredFires: 0,
+      deferredCancels: 1,
+    });
+    h.stop();
+  });
+
+  it('deferredCancels 가 누적되어 그 이후의 immediate 발사 payload 에 반영된다', () => {
+    const h = setup({ minIntervalMs: 2_000 });
+    // 시나리오: 한 번의 throttle cycle 에서 deferred 가 예약됐다가 offline 으로
+    // 취소되고 (deferredCancels=1), 그 뒤 다음 false→true 전환이 throttle 밖에서
+    // 일어나 immediate 로 발사되면 그 payload 의 deferredCancels 에 누적값이
+    // 그대로 실려 흘러간다 — 운영 로그에서 cancel 빈도를 immediate 발사와 함께
+    // 한눈에 보기 위함.
+    h.emit({ isConnected: false });
+    h.fakeNow += 100;
+    h.emit({ isConnected: true, isInternetReachable: true }); // immediate #1 @ t=100
+    h.fakeNow += 200; // t=300
+    h.emit({ isConnected: false });
+    h.fakeNow += 200; // t=500
+    h.emit({ isConnected: true, isInternetReachable: true }); // deferred 예약 (만료 t=2100)
+    expect(h.pendingTimers()).toBe(1);
+
+    // 윈도우가 충분히 지났지만 deferred 타이머는 advance 없이 발사 안 됨.
+    h.fakeNow = 10_000;
+    h.emit({ isConnected: false });
+    h.fakeNow += 100; // t=10_100
+    h.emit({ isConnected: true, isInternetReachable: true }); // immediate #2 — 살아있던 deferred 를 정리하며 발사
+
+    // immediate #2 의 payload 에는 deferredCancels=1 이 반영되어 있어야 한다.
+    expect(posted.list).toHaveLength(2);
+    expect(posted.list[1]).toMatchObject({
+      payload: {
+        path: 'immediate',
+        immediateFires: 2,
+        deferredFires: 0,
+        deferredCancels: 1,
+      },
+    });
+    h.stop();
+  });
+
+  it('start 가 카운터를 0 으로 초기화하므로 stop → start 후 새 세션은 즉시 카운터 1 부터 시작한다', () => {
+    const h1 = setup({ minIntervalMs: 1_000 });
+    h1.emit({ isConnected: false });
+    h1.fakeNow += 100;
+    h1.emit({ isConnected: true, isInternetReachable: true }); // immediate #1
+    expect(posted.list).toHaveLength(1);
+    expect(getNetworkRecoveryBridgeCounters()).toMatchObject({ immediateFires: 1 });
+
+    h1.stop();
+    // stop 직후 카운터는 0 으로 정리되어 있다 (모듈이 죽은 동안 노출되는 값은 의미 없음).
+    expect(getNetworkRecoveryBridgeCounters()).toEqual({
+      immediateFires: 0,
+      deferredFires: 0,
+      deferredCancels: 0,
+    });
+
+    posted.list.length = 0;
+    const h2 = setup({ minIntervalMs: 1_000 });
+    h2.emit({ isConnected: false });
+    h2.fakeNow += 100;
+    h2.emit({ isConnected: true, isInternetReachable: true });
+
+    expect(posted.list[0]).toMatchObject({
+      payload: { path: 'immediate', immediateFires: 1, deferredFires: 0, deferredCancels: 0 },
+    });
+    h2.stop();
+  });
+
+  it('웹 측 진단 로그를 위해 path 와 카운터가 모두 같은 payload 안에 들어 있다 (forward-compatible 형태)', () => {
+    // 운영 회수 경로는 매 발사 payload 한 줄 (`[network-online] path=... immediate=N
+    // deferred=N cancelled=N`) 을 만든다. payload 모양이 깨지면 로그 라인이 비어
+    // 운영 데이터가 통째로 누락되므로, 4 개 키가 모두 존재하는지 회귀로 잠근다.
+    const h = setup({ minIntervalMs: 500 });
+    h.emit({ isConnected: false });
+    h.fakeNow += 50;
+    h.emit({ isConnected: true, isInternetReachable: true });
+
+    expect(posted.list).toHaveLength(1);
+    const payload = (posted.list[0] as { payload?: Record<string, unknown> }).payload;
+    expect(payload).toBeDefined();
+    expect(payload).toMatchObject({
+      path: 'immediate',
+      immediateFires: 1,
+      deferredFires: 0,
+      deferredCancels: 0,
+    });
+    // 누락 회귀 잠금 — 키 자체의 존재.
+    expect(Object.keys(payload!).sort()).toEqual([
+      'deferredCancels',
+      'deferredFires',
+      'immediateFires',
+      'path',
+    ]);
+    h.stop();
+  });
+
+  it('getNetworkRecoveryBridgeCounters: 미시작 상태에서는 모두 0 이다 (회귀: 누적값 leak 방지)', () => {
+    expect(getNetworkRecoveryBridgeCounters()).toEqual({
+      immediateFires: 0,
+      deferredFires: 0,
+      deferredCancels: 0,
+    });
   });
 });

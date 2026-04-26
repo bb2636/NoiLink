@@ -57,6 +57,75 @@ describe('initNativeBridge: network.online → noilink-native-network-online 이
     window.removeEventListener('noilink-native-network-online', listener);
   });
 
+  it('진단 카운터가 실린 payload 는 detail 로 그대로 전달되고 운영 로그에 한 줄을 남긴다', () => {
+    const listener = vi.fn();
+    window.addEventListener('noilink-native-network-online', listener);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    getReceiver()({
+      v: NATIVE_BRIDGE_VERSION,
+      type: 'network.online',
+      payload: { path: 'deferred', immediateFires: 7, deferredFires: 2, deferredCancels: 1 },
+    });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    const ev = listener.mock.calls[0][0] as CustomEvent<unknown>;
+    expect(ev.detail).toEqual({
+      path: 'deferred',
+      immediateFires: 7,
+      deferredFires: 2,
+      deferredCancels: 1,
+    });
+
+    // 운영 로그 한 줄 — hole-closer 빈도 추적의 단일 진입점이므로 포맷이 깨지면
+    // 누적 데이터가 통째로 의미를 잃는다. 회귀로 잠가둔다.
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(info.mock.calls[0][0]).toBe(
+      '[network-online] path=deferred immediate=7 deferred=2 cancelled=1',
+    );
+
+    info.mockRestore();
+    window.removeEventListener('noilink-native-network-online', listener);
+  });
+
+  it('payload 가 없으면 진단 로그 줄을 만들지 않는다 (잡음 방지) — drain 이벤트는 그대로 발화', () => {
+    const listener = vi.fn();
+    window.addEventListener('noilink-native-network-online', listener);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    getReceiver()({ v: NATIVE_BRIDGE_VERSION, type: 'network.online' });
+    getReceiver()({ v: NATIVE_BRIDGE_VERSION, type: 'network.online', payload: {} });
+
+    // drain 트리거는 두 번 모두 발화 — 옛 native 셸과 새 native 셸 모두에서
+    // 큐 drain 이 같은 동작으로 진행되어야 한다.
+    expect(listener).toHaveBeenCalledTimes(2);
+    // path 가 없으므로 진단 로그는 한 줄도 없어야 한다.
+    expect(info).not.toHaveBeenCalled();
+
+    info.mockRestore();
+    window.removeEventListener('noilink-native-network-online', listener);
+  });
+
+  it('알 수 없는 path 값은 진단 로그를 만들지 않는다 (forward-compatible — 미래 path 추가에 대한 안전망)', () => {
+    const listener = vi.fn();
+    window.addEventListener('noilink-native-network-online', listener);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    getReceiver()({
+      v: NATIVE_BRIDGE_VERSION,
+      type: 'network.online',
+      // path 가 알려진 두 값 (immediate / deferred) 이 아닌 새 값으로 들어와도
+      // 옛 웹은 잡음 줄을 남기지 말아야 한다 — 운영 로그가 깨지면 안 됨.
+      payload: { path: 'something-new', immediateFires: 1 },
+    });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(info).not.toHaveBeenCalled();
+
+    info.mockRestore();
+    window.removeEventListener('noilink-native-network-online', listener);
+  });
+
   it('잘못된 v 의 network.online 은 무시되어 이벤트가 발화되지 않는다', () => {
     const listener = vi.fn();
     window.addEventListener('noilink-native-network-online', listener);

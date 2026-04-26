@@ -50,11 +50,42 @@ function dispatchNativeMessage(msg: NativeToWebMessage): void {
       // 별도 이벤트로 브로드캐스트한다. 수신 측(useDrainPendingTrainingRuns)은
       // 브라우저 `online` 이벤트와 동일한 throttle/in-flight 가드를 통과시켜
       // MAX_TOTAL_ATTEMPTS 폭주와 outcome 중복 안내를 막는다.
-      window.dispatchEvent(new CustomEvent('noilink-native-network-online'));
+      //
+      // payload 가 있으면 진단 카운터(immediate vs deferred 발사 비율)를 운영 로그에
+      // 한 줄 남긴다. detail 로도 그대로 흘려보내, 향후 hook 측이 trigger 별 카운터를
+      // 같이 기록하고 싶을 때 활용 지점을 마련한다 (현재 hook 은 detail 을 무시).
+      window.dispatchEvent(
+        new CustomEvent('noilink-native-network-online', { detail: msg.payload ?? null }),
+      );
+      logNetworkOnlineDiagnostics(msg.payload);
       break;
     default:
       break;
   }
+}
+
+/**
+ * 네이티브 네트워크 복구 브리지의 진단 카운터를 운영 로그에 한 줄 남긴다.
+ *
+ * 목적:
+ *  - throttle 윈도우 만료 직후 deferred emit (hole-closer) 이 실제로 얼마나
+ *    자주 살리는지 운영 데이터로 추적해, throttle 파라미터(`minIntervalMs`,
+ *    웹 측 `MIN_DRAIN_INTERVAL_MS`) 조정 근거를 만든다.
+ *  - 운영자는 며칠치 로그에서 `path=immediate` vs `path=deferred` 발사 수의
+ *    비율, 그리고 `cancelled` 누적값을 한눈에 본다.
+ *
+ * 옛 native 셸이거나 broadcast payload 가 비어 있는 경우에는 카운터가 없으므로
+ * 진단 줄을 남기지 않는다 (잡음 줄이기). drain 트리거 자체는 그대로 발화된다.
+ */
+function logNetworkOnlineDiagnostics(payload: { path?: string; immediateFires?: number; deferredFires?: number; deferredCancels?: number } | undefined): void {
+  if (!payload || (payload.path !== 'immediate' && payload.path !== 'deferred')) return;
+  const immediate = typeof payload.immediateFires === 'number' ? payload.immediateFires : 0;
+  const deferred = typeof payload.deferredFires === 'number' ? payload.deferredFires : 0;
+  const cancelled = typeof payload.deferredCancels === 'number' ? payload.deferredCancels : 0;
+  // eslint-disable-next-line no-console
+  console.info(
+    `[network-online] path=${payload.path} immediate=${immediate} deferred=${deferred} cancelled=${cancelled}`,
+  );
 }
 
 function onIncomingFromNative(raw: unknown): void {

@@ -25,6 +25,16 @@
  *    (다른 트리거 — 브라우저 online / visibility / 앱 진입 — 가 모두 누락된
  *    환경에서 마지막 복구 신호가 모듈 상태 안에만 갇히는 hole 을 닫기 위함.)
  *
+ * 운영 진단 (hole-closer 발사 빈도 추적):
+ *  - 모듈 시작 후 누적된 immediate 발사 / deferred 발사 / deferred 취소 횟수를
+ *    가벼운 카운터로 들고, 매 발사마다 `network.online` payload 에 함께 실어
+ *    웹 측이 운영 로그로 남길 수 있게 한다. 별도 진단 채널을 새로 만들지 않고
+ *    기존 발사 채널에 묻어가는 형태이므로 추가 브리지 트래픽은 0 이다.
+ *  - `path` 필드로 이번 발사가 immediate 인지 deferred 인지 구분 — 운영 측에서
+ *    두 경로의 비율을 한눈에 본다. deferred 경로가 거의 안 발사되면 hole-closer
+ *    는 과보수, 자주 발사되면 throttle 파라미터(`minIntervalMs`, 웹 측
+ *    `MIN_DRAIN_INTERVAL_MS`) 조정 근거가 된다.
+ *
  * 멱등성:
  *  - `startNetworkRecoveryBridge` 가 이미 실행 중이면 새 구독을 만들지 않고
  *    기존 stop 함수를 그대로 돌려준다 (StrictMode 등으로 effect 가 두 번 실행되어도
@@ -70,6 +80,14 @@ interface InternalState {
    * null 이면 예약된 deferred emit 이 없다.
    */
   cancelDeferred: (() => void) | null;
+  /**
+   * 운영 진단용 누적 카운터. 모듈 시작 (start) 시 0 으로 초기화되며, 매 발사
+   * payload 에 그대로 실려 웹 측 운영 로그로 흘러간다 — 운영 측에서 immediate
+   * vs deferred 발사 비율을 추적해 throttle 파라미터 조정 근거로 쓴다.
+   */
+  immediateFires: number;
+  deferredFires: number;
+  deferredCancels: number;
 }
 
 const moduleState: InternalState = {
@@ -77,6 +95,9 @@ const moduleState: InternalState = {
   lastConnected: null,
   lastEmittedAt: Number.NEGATIVE_INFINITY,
   cancelDeferred: null,
+  immediateFires: 0,
+  deferredFires: 0,
+  deferredCancels: 0,
 };
 
 function isOnline(state: NetInfoState): boolean {
@@ -95,6 +116,7 @@ function clearDeferred(): void {
     console.warn('[NoiLink network] deferred cancel warn', e);
   }
   moduleState.cancelDeferred = null;
+  moduleState.deferredCancels += 1;
 }
 
 /**
@@ -119,10 +141,27 @@ export function startNetworkRecoveryBridge(
   moduleState.lastConnected = null;
   moduleState.lastEmittedAt = Number.NEGATIVE_INFINITY;
   moduleState.cancelDeferred = null;
+  moduleState.immediateFires = 0;
+  moduleState.deferredFires = 0;
+  moduleState.deferredCancels = 0;
 
-  const fire = (): void => {
+  // 한 번의 fire 동작 = lastEmittedAt 갱신 + 카운터 누적 + payload 동봉.
+  // path 별로 카운터가 다르므로 한 함수에 묶어 두 호출 지점이 같은 모양으로
+  // payload 를 만들도록 한다 (운영 로그 파싱 회귀 방지).
+  const fire = (path: 'immediate' | 'deferred'): void => {
     moduleState.lastEmittedAt = now();
-    post({ v: NATIVE_BRIDGE_VERSION, type: 'network.online' });
+    if (path === 'immediate') moduleState.immediateFires += 1;
+    else moduleState.deferredFires += 1;
+    post({
+      v: NATIVE_BRIDGE_VERSION,
+      type: 'network.online',
+      payload: {
+        path,
+        immediateFires: moduleState.immediateFires,
+        deferredFires: moduleState.deferredFires,
+        deferredCancels: moduleState.deferredCancels,
+      },
+    });
   };
 
   const sub = subscribe((state) => {
@@ -158,7 +197,7 @@ export function startNetworkRecoveryBridge(
         // 브리지가 stop 됐다면 발사하지 않는다.
         if (!moduleState.unsubscribe) return;
         if (moduleState.lastConnected !== true) return;
-        fire();
+        fire('deferred');
       }, wait);
       moduleState.cancelDeferred = () => clearTimer(handle);
       return;
@@ -166,7 +205,7 @@ export function startNetworkRecoveryBridge(
 
     // 정상 발사. 혹시 남아있던 deferred 가 있다면 정리 (이중 발사 방지).
     clearDeferred();
-    fire();
+    fire('immediate');
   });
 
   moduleState.unsubscribe = typeof sub === 'function' ? sub : () => {};
@@ -184,6 +223,30 @@ export function stopNetworkRecoveryBridge(): void {
   moduleState.unsubscribe = null;
   moduleState.lastConnected = null;
   moduleState.lastEmittedAt = Number.NEGATIVE_INFINITY;
+  // 카운터는 모듈이 죽어 있는 동안 의미가 없으므로 stop 시점에 0 으로 정리한다.
+  // 다음 start 가 다시 0 으로 초기화하므로 여기서는 안 정리해도 같은 값이지만,
+  // stop 후 진단 getter 가 잘못된 누적값을 노출하는 것을 막기 위해 명시적으로 0 으로.
+  moduleState.immediateFires = 0;
+  moduleState.deferredFires = 0;
+  moduleState.deferredCancels = 0;
+}
+
+/**
+ * 운영/테스트 진단용 — 현재 모듈 시작 후 누적 카운터의 스냅샷.
+ * 발사 시점에 payload 로도 동일한 값이 흐르므로 일반 운영에서는 굳이 필요하지
+ * 않지만, 장애 시 콘솔에서 즉석으로 들여다보거나 회귀 테스트가 카운터 누적
+ * 로직을 검증할 때 쓴다. 모듈 stop 상태에서는 모두 0.
+ */
+export function getNetworkRecoveryBridgeCounters(): {
+  immediateFires: number;
+  deferredFires: number;
+  deferredCancels: number;
+} {
+  return {
+    immediateFires: moduleState.immediateFires,
+    deferredFires: moduleState.deferredFires,
+    deferredCancels: moduleState.deferredCancels,
+  };
 }
 
 /** 테스트 전용 — 모듈 상태를 리셋한다. */
@@ -199,4 +262,7 @@ export function __resetNetworkRecoveryBridgeForTest(): void {
   moduleState.lastConnected = null;
   moduleState.lastEmittedAt = Number.NEGATIVE_INFINITY;
   moduleState.cancelDeferred = null;
+  moduleState.immediateFires = 0;
+  moduleState.deferredFires = 0;
+  moduleState.deferredCancels = 0;
 }

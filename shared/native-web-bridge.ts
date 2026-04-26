@@ -311,11 +311,35 @@ export type NativeToWebMessage =
        * 브라우저의 `window 'online'` 이벤트는 WebView 환경에서 신뢰성이 낮을 수 있어,
        * 네이티브가 추가로 이 채널을 통해 결과 전송 큐의 즉시 drain 트리거를 유도한다.
        *
-       * 페이로드 없음(브로드캐스트). 수신 측은 throttle/in-flight 가드를 거쳐 큐를 비운다.
+       * payload 는 broadcast 형태이므로 모두 optional (옛 native 셸은 payload 자체를
+       * 보내지 않는다). 진단 카운터는 운영 로그에서 hole-closer (deferred) 발사 빈도를
+       * immediate 발사 빈도와 비교하기 위한 가벼운 신호이며, 수신 측은 모르는 필드는
+       * 무시하고 알려진 필드만 사용한다 (forward-compatible).
+       *
+       * 수신 측 동작은 path / 카운터 유무와 무관하게 동일 — throttle/in-flight 가드를
+       * 거쳐 결과 전송 큐를 비운다. 카운터는 운영 로그/지표 회수 용도로만 쓴다.
        */
       v: BridgeVersion;
       type: 'network.online';
-      payload?: Record<string, never>;
+      payload?: {
+        /**
+         * 이번 발사가 throttle 통과 직후의 정상(immediate) 경로인지, throttle 윈도우
+         * 만료 직후 hole-closer 가 살린(deferred) 경로인지. 옛 native 셸이거나 단순
+         * broadcast 인 경우 생략될 수 있다.
+         */
+        path?: 'immediate' | 'deferred';
+        /** 모듈 시작 후 누적 immediate 경로 발사 횟수. */
+        immediateFires?: number;
+        /** 모듈 시작 후 누적 deferred 경로 발사 횟수 (= hole-closer 가 실제로 살린 횟수). */
+        deferredFires?: number;
+        /**
+         * 모듈 시작 후 deferred 가 예약됐다가 취소된 누적 횟수.
+         * 예약 후 다시 offline 으로 돌아가거나, 정상 경로로 발사되면서 superseded
+         * 된 경우를 모두 포함한다 — `deferredFires` 와의 비율로 hole-closer 가
+         * 얼마나 자주 "정말로" 살렸는지 추정한다.
+         */
+        deferredCancels?: number;
+      };
     };
 
 // -----------------------------------------------------------------------------

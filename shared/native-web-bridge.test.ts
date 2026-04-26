@@ -921,6 +921,23 @@ const VALID_NATIVE_TO_WEB: ValidCase[] = [
     label: 'network.online (빈 payload 객체 — forward-compatible)',
     msg: { ...baseNativeEnv('network.online'), payload: {} },
   },
+  {
+    // hole-closer 발사 빈도 운영 추적용 진단 카운터가 함께 실린 형태.
+    // 검증기가 reject 하면 새 native 셸의 모든 발사가 통째로 무시되어 결과
+    // 전송 큐 즉시 drain 트리거가 침묵하게 된다.
+    label: 'network.online (진단 카운터 payload — immediate 경로)',
+    msg: {
+      ...baseNativeEnv('network.online'),
+      payload: { path: 'immediate', immediateFires: 12, deferredFires: 3, deferredCancels: 1 },
+    },
+  },
+  {
+    label: 'network.online (진단 카운터 payload — deferred 경로 / hole-closer 가 살린 경우)',
+    msg: {
+      ...baseNativeEnv('network.online'),
+      payload: { path: 'deferred', immediateFires: 12, deferredFires: 4, deferredCancels: 1 },
+    },
+  },
 ];
 
 const INVALID_NATIVE_TO_WEB: InvalidCase[] = [
