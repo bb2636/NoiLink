@@ -31,6 +31,12 @@
  *    않는다. 간격이 차지 않은 상태에서 트리거가 들어오면 한 번의 follow-up 으로
  *    합쳐서 예약한다.
  *  - StrictMode 등으로 마운트 effect 가 두 번 실행되어도 위 가드 덕분에 안전하다.
+ *
+ * 운영 로그:
+ *  - cycle 이 끝날 때 트리거 종류와 결과 요약(성공/실패 수, 큐 잔여)을
+ *    한 줄(`[drain] ...`)로 남겨, 어느 트리거가 큐를 가장 많이 비우는지
+ *    운영 데이터로 추적할 수 있게 한다. 사용자 식별 정보(userId 등)는 포함하지
+ *    않는다. 큐가 비어 cycle 이 시작되지 않은 경우는 로그도 남기지 않는다.
  */
 import { useEffect } from 'react';
 import { useAuth } from './useAuth';
@@ -69,10 +75,18 @@ interface DrainOptions {
 // userId 단위로 충분).
 // ───────────────────────────────────────────────────────────
 
+/** drain cycle 을 시작시킨 트리거 종류. 운영 로그/디버깅용. */
+export type DrainTrigger = 'mount' | 'online' | 'visibility' | 'pageshow';
+
 interface UserDrainState {
   inFlight: Promise<void> | null;
   lastStartedAt: number;
   followUpTimer: ReturnType<typeof setTimeout> | null;
+  /**
+   * follow-up 으로 예약된 cycle 이 사용할 트리거 종류. throttle/in-flight 동안
+   * 흡수된 트리거 중 가장 마지막으로 들어온 트리거를 보존한다.
+   */
+  pendingTrigger: DrainTrigger | null;
 }
 
 const drainStates = new Map<string, UserDrainState>();
@@ -80,7 +94,7 @@ const drainStates = new Map<string, UserDrainState>();
 function getDrainState(userId: string): UserDrainState {
   let s = drainStates.get(userId);
   if (!s) {
-    s = { inFlight: null, lastStartedAt: 0, followUpTimer: null };
+    s = { inFlight: null, lastStartedAt: 0, followUpTimer: null, pendingTrigger: null };
     drainStates.set(userId, s);
   }
   return s;
@@ -91,6 +105,7 @@ function clearPendingFollowUp(state: UserDrainState): void {
     clearTimeout(state.followUpTimer);
     state.followUpTimer = null;
   }
+  state.pendingTrigger = null;
 }
 
 /**
@@ -102,18 +117,22 @@ function clearPendingFollowUp(state: UserDrainState): void {
  *   예약한다. 이미 예약되어 있으면 그대로 둔다(중복 예약 X).
  * - 큐가 비어 있으면 아무 일도 하지 않는다(예약도 하지 않는다).
  */
-function tryTriggerDrain(userId: string, options: DrainPendingRunsOptions = {}): void {
+function tryTriggerDrain(
+  userId: string,
+  trigger: DrainTrigger,
+  options: DrainPendingRunsOptions = {},
+): void {
   const state = getDrainState(userId);
 
   if (state.inFlight) {
-    schedulePostDrainFollowUp(userId, options);
+    schedulePostDrainFollowUp(userId, trigger, options);
     return;
   }
 
   const now = Date.now();
   const elapsed = now - state.lastStartedAt;
   if (state.lastStartedAt > 0 && elapsed < MIN_DRAIN_INTERVAL_MS) {
-    schedulePostDrainFollowUp(userId, options, MIN_DRAIN_INTERVAL_MS - elapsed);
+    schedulePostDrainFollowUp(userId, trigger, options, MIN_DRAIN_INTERVAL_MS - elapsed);
     return;
   }
 
@@ -121,15 +140,25 @@ function tryTriggerDrain(userId: string, options: DrainPendingRunsOptions = {}):
   const mine = getPendingRuns().filter((r) => r.input.userId === userId);
   if (mine.length === 0) return;
 
-  startDrainCycle(userId, options);
+  startDrainCycle(userId, trigger, options);
 }
 
-function startDrainCycle(userId: string, options: DrainPendingRunsOptions): void {
+function startDrainCycle(
+  userId: string,
+  trigger: DrainTrigger,
+  options: DrainPendingRunsOptions,
+): void {
   const state = getDrainState(userId);
   state.lastStartedAt = Date.now();
   state.inFlight = drainPendingRuns(userId, options)
+    .then((summary) => {
+      logDrainCycle(trigger, summary, userId);
+    })
     .catch(() => {
       // 백그라운드 흐름이므로 예외를 삼킨다. 개별 항목의 실패는 drainOne 내에서 처리됨.
+      // cycle 자체가 예외로 끝난 경우에도 운영 추적이 끊기지 않도록 잔여 큐 길이만 남긴다.
+      const remaining = getPendingRuns().filter((r) => r.input.userId === userId).length;
+      logDrainCycle(trigger, { succeeded: 0, failed: 0 }, userId, remaining);
     })
     .finally(() => {
       state.inFlight = null;
@@ -138,25 +167,67 @@ function startDrainCycle(userId: string, options: DrainPendingRunsOptions): void
 
 function schedulePostDrainFollowUp(
   userId: string,
+  trigger: DrainTrigger,
   options: DrainPendingRunsOptions,
   delayMs?: number,
 ): void {
   const state = getDrainState(userId);
+  // 가장 최근에 흡수된 트리거를 follow-up cycle 의 트리거로 사용한다.
+  state.pendingTrigger = trigger;
   if (state.followUpTimer != null) return; // 이미 한 번 예약됨 — 추가 트리거는 흡수.
 
   const wait = delayMs ?? MIN_DRAIN_INTERVAL_MS;
   state.followUpTimer = setTimeout(() => {
     state.followUpTimer = null;
+    const followUpTrigger: DrainTrigger = state.pendingTrigger ?? trigger;
+    state.pendingTrigger = null;
     // 현재 cycle 이 아직 끝나지 않았다면 끝난 뒤에 다시 한 번 시도한다.
     if (state.inFlight) {
       state.inFlight.finally(() => {
         // throttle 잔여 시간이 남았다면 한 번 더 예약될 수 있다(자기 자신 호출 X — tryTrigger 가 처리).
-        tryTriggerDrain(userId, options);
+        tryTriggerDrain(userId, followUpTrigger, options);
       });
       return;
     }
-    tryTriggerDrain(userId, options);
+    tryTriggerDrain(userId, followUpTrigger, options);
   }, Math.max(0, wait));
+}
+
+/**
+ * cycle 한 건의 결과를 운영 로그로 1줄 남긴다.
+ *
+ * - 사용자 식별 정보(userId 원문)는 절대 포함하지 않는다. 어떤 사용자 군에서
+ *   문제가 몰리는지를 거칠게 추적할 수 있도록 짧은 결정적 해시만 남긴다.
+ * - cycle 당 정확히 한 줄을 남긴다. 호출자가 한 cycle 의 종료/예외 경로 중
+ *   하나에서만 호출하도록 보장한다.
+ */
+function logDrainCycle(
+  trigger: DrainTrigger,
+  summary: DrainCycleSummary,
+  userId: string,
+  remainingOverride?: number,
+): void {
+  const remaining =
+    remainingOverride ?? getPendingRuns().filter((r) => r.input.userId === userId).length;
+  const userBucket = anonymizeUserId(userId);
+  // eslint-disable-next-line no-console
+  console.info(
+    `[drain] trigger=${trigger} succeeded=${summary.succeeded} failed=${summary.failed} remaining=${remaining} user=${userBucket}`,
+  );
+}
+
+/**
+ * userId 를 짧은 결정적 비식별 토큰으로 변환한다. 운영 로그에서 같은 사용자가
+ * 여러 cycle 에 등장하는지를 거칠게 추적할 수 있게 하면서도 원문은 노출하지
+ * 않는다. 암호학적 강도가 필요한 용도가 아니다.
+ */
+function anonymizeUserId(userId: string): string {
+  let hash = 5381;
+  for (let i = 0; i < userId.length; i += 1) {
+    hash = (hash * 33) ^ userId.charCodeAt(i);
+  }
+  // 32-bit 부호 없는 정수로 정규화 후 36진수 문자열.
+  return (hash >>> 0).toString(36);
 }
 
 export function useDrainPendingTrainingRuns(options: DrainOptions = {}): void {
@@ -170,23 +241,25 @@ export function useDrainPendingTrainingRuns(options: DrainOptions = {}): void {
     const userId = user.id;
 
     // 마운트 직후 한 번 시도(throttle/in-flight 가드가 중복 실행을 방지).
-    tryTriggerDrain(userId);
+    tryTriggerDrain(userId, 'mount');
 
     // 앱이 켜진 채 네트워크가 재연결되면 즉시 다시 시도한다.
     // 두 트리거(브라우저 `online` + 네이티브 셸 `network.online` 메시지)는 동일한
     // tryTriggerDrain 경로를 통과한다 — 두 신호가 같은 시점에 동시에 들어와도
-    // in-flight/throttle 가드 덕분에 cycle 이 중복 실행되지 않는다.
-    const onOnline = () => tryTriggerDrain(userId);
+    // in-flight/throttle 가드 덕분에 cycle 이 중복 실행되지 않는다. 운영 로그에서는
+    // 두 신호 모두 trigger=online 으로 합쳐지며, 네이티브 vs 브라우저 분리 추적은
+    // 별도 태스크에서 다룬다.
+    const onOnline = () => tryTriggerDrain(userId, 'online');
     // 앱이 다시 화면에 보일 때(visibilitychange → visible, pageshow)에도 한 번
     // 더 시도한다. 백그라운드에서 발생한 짧은 네트워크 단절로 `online` 이벤트가
     // 누락된 경우에도 사용자가 앱을 다시 보는 순간 큐가 비워진다. throttle/in-flight
     // 가드를 그대로 통과하므로 마운트/online 트리거와 합쳐져 시도 폭주는 없다.
     const onVisibilityChange = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        tryTriggerDrain(userId);
+        tryTriggerDrain(userId, 'visibility');
       }
     };
-    const onPageShow = () => tryTriggerDrain(userId);
+    const onPageShow = () => tryTriggerDrain(userId, 'pageshow');
     window.addEventListener('online', onOnline);
     window.addEventListener('noilink-native-network-online', onOnline);
     if (typeof document !== 'undefined') {
@@ -209,6 +282,14 @@ export interface DrainPendingRunsOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/** drain cycle 한 건의 처리 결과 요약. 운영 로그용. */
+export interface DrainCycleSummary {
+  /** 이번 cycle 에서 결과 저장에 성공해 큐에서 제거된 항목 수. */
+  succeeded: number;
+  /** 이번 cycle 에서 final-failure 로 정리되어 큐에서 제거된 항목 수. */
+  failed: number;
+}
+
 /**
  * 외부에서 호출 가능한 drain 함수. 테스트 또는 명시적 트리거에 사용.
  * 현재 로그인한 userId 의 항목만 처리한다.
@@ -220,18 +301,25 @@ export interface DrainPendingRunsOptions {
 export async function drainPendingRuns(
   userId: string,
   options: DrainPendingRunsOptions = {},
-): Promise<void> {
+): Promise<DrainCycleSummary> {
   const all = getPendingRuns();
   const mine = all.filter((r) => r.input.userId === userId);
+  const summary: DrainCycleSummary = { succeeded: 0, failed: 0 };
   for (const run of mine) {
-    await drainOne(run, options);
+    const outcome = await drainOne(run, options);
+    if (outcome === 'success') summary.succeeded += 1;
+    else if (outcome === 'final-failure') summary.failed += 1;
   }
+  return summary;
 }
+
+/** drainOne 의 단일 항목 결과. 'pending' 은 다음 cycle 에서 재시도. */
+type DrainOneOutcome = 'success' | 'final-failure' | 'pending';
 
 async function drainOne(
   run: PendingTrainingRun,
   options: DrainPendingRunsOptions,
-): Promise<void> {
+): Promise<DrainOneOutcome> {
   // 이미 시도가 가득 찬 항목은 final-failure 로 정리.
   if (hasExhaustedAttempts(run)) {
     pushOutcomeNotice({
@@ -242,7 +330,7 @@ async function drainOne(
       at: Date.now(),
     });
     removePendingRun(run.localId);
-    return;
+    return 'final-failure';
   }
 
   // 남은 시도 한도 안에서 한 번의 drain 사이클을 실행.
@@ -282,7 +370,7 @@ async function drainOne(
       at: Date.now(),
     });
     removePendingRun(run.localId);
-    return;
+    return 'success';
   }
 
   if (newAttempts >= MAX_TOTAL_ATTEMPTS) {
@@ -294,7 +382,7 @@ async function drainOne(
       at: Date.now(),
     });
     removePendingRun(run.localId);
-    return;
+    return 'final-failure';
   }
 
   // 아직 시도가 남았으면 attempts/마지막 에러만 갱신해 다음 trigger 시 다시 시도.
@@ -303,6 +391,7 @@ async function drainOne(
     lastError: result.error,
     partialSessionId: observedSessionId,
   });
+  return 'pending';
 }
 
 /**
