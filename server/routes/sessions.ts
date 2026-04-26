@@ -6,6 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
 import type { Session, SessionMeta, PhaseMeta, TrainingMode, Level, MetricsScore, User } from '@noilink/shared';
+import { isoToKstLocalDate, KST_TIME_ZONE } from '@noilink/shared';
 import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
 import { userCanActOnTargetUserId, canAccessOrganizationResource } from '../utils/session-user-policy.js';
 import { withIdempotency } from '../utils/idempotency.js';
@@ -213,6 +214,98 @@ router.get('/user/:userId', optionalAuth, async (req: Request, res: Response) =>
     });
   }
 });
+
+/**
+ * GET /api/sessions/user/:userId/previous-score?excluding=:sid
+ * 비교 카드용 직전 점수 한 건만 가볍게 돌려준다 (Task #124).
+ *
+ * 배경:
+ *  - 결과 화면(Result.tsx) 재진입과 트레이닝 종료 직후(TrainingSessionPlay.tsx) 모두
+ *    "직전 점수 한 개" 만을 위해 `/sessions/user/:userId?limit=50` 으로 세션 목록
+ *    전체를 받아오고 있었다. 사용자 세션이 늘수록 응답 페이로드 대부분이 버려지고,
+ *    서버는 매번 정렬·필터를 수행한다.
+ *  - 이 엔드포인트는 직전 점수 한 건만 골라 `previousScore` /
+ *    `previousSessionId` / `previousCreatedAt` 만 담아 돌려준다.
+ *
+ * 정책:
+ *  - 같은 userId 의 세션 중 `id !== excluding` 이고 `score` 가 숫자인 항목을
+ *    createdAt 내림차순으로 정렬해 첫 항목을 직전 점수로 본다.
+ *  - excluding 쿼리 파라미터가 없으면 사용자 전체 이력 중 가장 최신 점수 세션을
+ *    돌려준다 (자기 자신을 제외하지 않는다).
+ *  - 직전 세션이 없으면(첫 세션·점수 산출 세션 부재) 200 + 모든 필드 null.
+ *    클라이언트는 이 신호로 비교 카드를 자연스럽게 숨긴다 (가짜 비교 금지).
+ *  - 인증·인가는 같은 라우터의 `/user/:userId` 와 동일 (본인 또는 권한 보유자만).
+ *  - Task #132: 라벨이 디바이스 시간대로 흔들리지 않도록 KST(`Asia/Seoul`)
+ *    기준 `YYYY-MM-DD` 표시용 문자열(`previousScoreLocalDate`) 과 기준 시간대
+ *    (`timeZone`) 도 함께 회신한다. 자정 근처(UTC 15:00 ↔ KST 다음 날 00:00)
+ *    케이스도 항상 KST 의 같은 날짜로 떨어진다. 직전이 없으면
+ *    `previousScoreLocalDate: null`. `timeZone` 은 응답 형태가 일정하도록
+ *    항상 포함된다.
+ */
+router.get(
+  '/user/:userId/previous-score',
+  optionalAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const authReq = req as AuthRequest;
+      if (!authReq.user) {
+        return res
+          .status(401)
+          .json({ success: false, error: 'Authentication required' });
+      }
+      const { userId } = req.params;
+      const users: User[] = (await db.get('users')) || [];
+      if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
+        return res.status(403).json({ success: false, error: 'Forbidden' });
+      }
+
+      const excludingRaw = req.query.excluding;
+      const excluding =
+        typeof excludingRaw === 'string' && excludingRaw.length > 0
+          ? excludingRaw
+          : null;
+
+      const sessions: Session[] = (await db.get('sessions')) || [];
+      const candidates = sessions
+        .filter(
+          (s) =>
+            s.userId === userId &&
+            (excluding === null || s.id !== excluding) &&
+            typeof s.score === 'number',
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        );
+
+      const top = candidates[0];
+      const data = top
+        ? {
+            previousScore: top.score as number,
+            previousSessionId: top.id,
+            previousCreatedAt: top.createdAt,
+            // Task #132: 비교 카드 라벨이 디바이스 시간대로 흔들리지 않도록
+            // KST 기준 `YYYY-MM-DD` 표시용 문자열도 한 쌍으로 함께 회신한다.
+            previousScoreLocalDate: isoToKstLocalDate(top.createdAt),
+            timeZone: KST_TIME_ZONE,
+          }
+        : {
+            previousScore: null,
+            previousSessionId: null,
+            previousCreatedAt: null,
+            previousScoreLocalDate: null,
+            timeZone: KST_TIME_ZONE,
+          };
+
+      res.json({ success: true, data });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+);
 
 function avgMetric(list: MetricsScore[], key: keyof MetricsScore): number | undefined {
   const vals = list

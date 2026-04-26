@@ -16,8 +16,6 @@ import type {
   User,
 } from '@noilink/shared';
 import {
-  isoToKstLocalDate,
-  KST_TIME_ZONE,
   sanitizeAckBannerEventInput,
   sanitizeBleAbortEventInput,
   sanitizeRecoveryRawMetrics,
@@ -306,87 +304,6 @@ router.get('/session/:sessionId', optionalAuth, async (req: Request, res: Respon
       data: {
         raw: rawMetrics || null,
         score: metricsScore || null,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-/**
- * GET /api/metrics/session/:sessionId/previous-score
- * 주어진 세션 직전(과거)의 점수 있는 세션 점수를 한 번에 조회한다 (Task #114).
- *
- * 배경:
- *  결과 화면은 재진입 시 직전 점수를 비교 카드에 채워야 하는데, 클라이언트가
- *  `/sessions/user/:userId?limit=50` 으로 받아 페이징 안에서 직접 찾는 구현은
- *  사용자가 50회 이상 트레이닝한 뒤 옛날 세션을 다시 열면 현재 세션이 목록에
- *  들지 못해 "직전 점수 미상" 회귀를 일으켰다.
- *  이 엔드포인트는 세션 단건만 받으면 서버에서 같은 사용자의 모든 세션을 보고
- *  직전 점수를 한 값으로 돌려준다 — 페이징/정렬을 클라이언트가 다루지 않는다.
- *
- * 정책:
- *  - 같은 userId 의 세션 중 createdAt 가 현재 세션보다 같거나 빠른(=과거) 것 중
- *    score 가 숫자인 첫 항목(최신순)을 직전 점수로 본다. 동일 createdAt 충돌이
- *    있어도 sessionId 자체로 현재 세션은 제외해 자기 자신과 비교하지 않는다.
- *  - 직전 세션이 없거나(첫 세션) 모두 점수 미산출이면 `previousScore: null` 로
- *    돌려보낸다 — 클라이언트는 이 신호로 비교 카드를 숨긴다(가짜 비교 금지).
- *  - 직전 세션이 있으면 그 세션의 `createdAt` 도 함께(`previousScoreCreatedAt`)
- *    돌려보낸다(Task #123). 클라이언트는 비교 카드의 직전 날짜 라벨을 가짜
- *    "오늘 - 2일" 이 아니라 이 실제 세션 날짜로 표시한다 — 점수와 날짜가
- *    한 쌍으로 어긋나지 않게 한다. 직전이 없으면 `previousScoreCreatedAt: null`.
- *  - Task #132: 라벨이 디바이스 시간대로 흔들리지 않도록 KST(`Asia/Seoul`) 기준
- *    `YYYY-MM-DD` 표시용 문자열(`previousScoreLocalDate`) 과 기준 시간대
- *    (`timeZone`) 도 함께 회신한다. 클라이언트는 ISO 가 아니라 이 표시용 문자열을
- *    우선 사용해 라벨을 만든다. 자정 근처(UTC 15:00 ↔ KST 다음 날 00:00) 케이스도
- *    항상 KST 의 같은 날짜로 떨어진다. 직전 점수가 없으면 둘 다 null.
- */
-router.get('/session/:sessionId/previous-score', optionalAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    if (!authReq.user) {
-      return res.status(401).json({ success: false, error: 'Authentication required' });
-    }
-    const { sessionId } = req.params;
-
-    const sessions: Session[] = (await db.get('sessions')) || [];
-    const current = sessions.find((s) => s.id === sessionId);
-    if (!current) {
-      return res.status(404).json({ success: false, error: 'Session not found' });
-    }
-    const users: User[] = (await db.get('users')) || [];
-    if (!userCanActOnTargetUserId(authReq.user, current.userId, users)) {
-      return res.status(403).json({ success: false, error: 'Forbidden' });
-    }
-
-    const currentTime = new Date(current.createdAt).getTime();
-    const candidates = sessions
-      .filter(
-        (s) =>
-          s.userId === current.userId &&
-          s.id !== current.id &&
-          typeof s.score === 'number' &&
-          new Date(s.createdAt).getTime() <= currentTime,
-      )
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-    const previousScore = candidates.length > 0 ? (candidates[0].score as number) : null;
-    const previousScoreCreatedAt =
-      candidates.length > 0 ? candidates[0].createdAt : null;
-    // Task #132: 비교 카드 라벨이 디바이스 시간대로 흔들리지 않도록 KST 기준
-    // `YYYY-MM-DD` 표시용 문자열도 한 쌍으로 함께 회신한다. 직전이 없으면
-    // 둘 다 null 로 잠가 라벨만 새어 나가는 어긋남을 방지.
-    const previousScoreLocalDate = isoToKstLocalDate(previousScoreCreatedAt);
-    res.json({
-      success: true,
-      data: {
-        previousScore,
-        previousScoreCreatedAt,
-        previousScoreLocalDate,
-        timeZone: KST_TIME_ZONE,
       },
     });
   } catch (error) {

@@ -145,15 +145,19 @@ export default function Result() {
     };
   }, [needsServerFetch, sessionIdForFetch]);
 
-  // 재진입 시 직전 점수 채우기 (Task #95 → Task #114):
+  // 재진입 시 직전 점수 채우기 (Task #95 → Task #114 → Task #124):
   // navigate state 가 displayScore 를 이미 들고 있는 정상 완료 흐름에선 추가
-  // 호출을 하지 않는다. 재진입 흐름에서만 세션 단건 직전 점수 엔드포인트
-  // (`GET /metrics/session/:sessionId/previous-score`) 를 호출해 받은 값을
-  // 그대로 채운다. 클라이언트가 페이징·정렬을 다루지 않으므로 사용자가 50회
-  // 이상 트레이닝한 뒤 옛날 세션을 다시 열어도 직전 점수가 빠지지 않는다.
+  // 호출을 하지 않는다. 재진입 흐름에서만 비교 카드 전용 직전 점수 엔드포인트
+  // (`GET /sessions/user/:userId/previous-score?excluding=:sid`) 를 호출해 받은
+  // 값을 그대로 채운다. 클라이언트가 페이징·정렬을 다루지 않으므로 사용자가
+  // 50회 이상 트레이닝한 뒤 옛날 세션을 다시 열어도 직전 점수가 빠지지 않고,
+  // 응답 페이로드가 (점수 1건 + sessionId + createdAt) 으로 줄어 데이터 비용도 가볍다.
   // 직전 세션이 없으면(첫 세션) 응답이 `previousScore: null` → 비교 카드는 숨긴다.
-  // Task #123: 응답에 `previousScoreCreatedAt` 도 함께 들어와, 비교 카드의 직전
-  // 날짜 라벨을 실제 세션 날짜로 표시한다(가짜 "오늘 - 2일" 폴백 제거).
+  // Task #123 / Task #132: 응답에 `previousCreatedAt` 과 KST 기준 표시용
+  // `previousScoreLocalDate` 가 함께 들어와, 비교 카드의 직전 날짜 라벨을
+  // 실제 세션 날짜로 표시한다(가짜 "오늘 - 2일" 폴백 제거, 디바이스 시간대
+  // 무관). userId 가 없으면(미인증 등) 호출하지 않는다.
+  const userIdForFetch = user?.id;
   const [serverPreviousScore, setServerPreviousScore] = useState<number | null>(null);
   const [serverPreviousScoreCreatedAt, setServerPreviousScoreCreatedAt] =
     useState<string | null>(null);
@@ -163,10 +167,11 @@ export default function Result() {
     useState<string | null>(null);
   const needsPreviousScoreFetch =
     Boolean(sessionIdForFetch) &&
+    Boolean(userIdForFetch) &&
     !stateProvidedDisplayScore &&
     state?.previousScore == null;
   useEffect(() => {
-    if (!needsPreviousScoreFetch || !sessionIdForFetch) return;
+    if (!needsPreviousScoreFetch || !sessionIdForFetch || !userIdForFetch) return;
     // sessionId 가 바뀌어 새로 조회가 필요해지면 이전 결과를 비워
     // 다른 세션의 직전 점수/날짜가 잠깐 노출되는 것을 막는다.
     setServerPreviousScore(null);
@@ -177,9 +182,12 @@ export default function Result() {
       const res = await api
         .get<{
           previousScore: number | null;
-          previousScoreCreatedAt?: string | null;
+          previousSessionId: string | null;
+          previousCreatedAt: string | null;
           previousScoreLocalDate?: string | null;
-        }>(`/metrics/session/${sessionIdForFetch}/previous-score`)
+        }>(
+          `/sessions/user/${userIdForFetch}/previous-score?excluding=${encodeURIComponent(sessionIdForFetch)}`,
+        )
         .catch(() => null);
       if (cancelled) return;
       if (!res || !res.success || !res.data) return;
@@ -188,7 +196,7 @@ export default function Result() {
         setServerPreviousScore(prev);
         // 점수와 날짜를 한 쌍으로만 채택 — 점수만 들어오는 응답에 라벨이
         // 어긋나지 않게 한다(점수 없으면 카드가 숨겨지므로 라벨도 무의미).
-        const createdAt = res.data.previousScoreCreatedAt;
+        const createdAt = res.data.previousCreatedAt;
         if (typeof createdAt === 'string') {
           setServerPreviousScoreCreatedAt(createdAt);
         }
@@ -203,7 +211,7 @@ export default function Result() {
     return () => {
       cancelled = true;
     };
-  }, [needsPreviousScoreFetch, sessionIdForFetch]);
+  }, [needsPreviousScoreFetch, sessionIdForFetch, userIdForFetch]);
 
   // 서버 score 로부터 종합 점수(6대 지표 평균) 산출. 정의돼 있는 항목만
   // 평균에 포함한다 — server/routes/metrics.ts 의 세션 점수 갱신 로직과 동일.
