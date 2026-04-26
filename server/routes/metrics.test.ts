@@ -1,9 +1,12 @@
 /**
- * `POST /api/metrics/calculate` 회복 페이로드 정규화 회귀 테스트.
+ * `POST /api/metrics/calculate` 및 `POST /api/metrics/raw` 회복 페이로드 정규화 회귀 테스트.
  *
  * 잘못된 모양(음수·NaN·누락)의 recovery 가 들어와도 저장 직전에
  * sanitizeRecoveryRawMetrics 가 항상 한 번 적용되어 통계·코칭 신호의
- * 입력값이 오염되지 않음을 보호한다 (task #46).
+ * 입력값이 오염되지 않음을 보호한다 (task #46, #58).
+ *
+ * `/raw` 와 `/calculate` 양쪽 모두 동일한 정규화를 거치므로, 두 라우트가
+ * 같은 음수/NaN/누락/well-formed 케이스에 대해 같은 결과를 내는지 잠근다.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
@@ -178,5 +181,90 @@ describe('POST /api/metrics/calculate — recovery 페이로드 정규화', () =
     expect(res.status).toBe(401);
     expect(store.rawMetrics).toHaveLength(0);
     expect(store.metricsScores).toHaveLength(0);
+  });
+});
+
+describe('POST /api/metrics/raw — recovery 페이로드 정규화', () => {
+  it('음수·NaN 으로 들어온 recovery 를 저장 직전에 0 으로 정규화하고 (양 끝이 모두 0이면) 필드를 제거한다', async () => {
+    const app = buildApp();
+    const payload = baseRawMetrics({
+      // @ts-expect-error - 잘못된 모양을 의도적으로 보냄
+      recovery: { excludedMs: -500, windows: Number.NaN },
+    });
+
+    const res = await request(app).post('/api/metrics/raw').send(payload);
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(store.rawMetrics).toHaveLength(1);
+    // 양 필드가 모두 0으로 클램프되면 sanitize 결과는 undefined → recovery 자체가 삭제되어야 한다.
+    expect(store.rawMetrics[0]).not.toHaveProperty('recovery');
+  });
+
+  it('한쪽 필드만 살아있는 부분 손상 페이로드는 유효 부분을 보존하면서 음수·NaN 만 정규화한다', async () => {
+    const app = buildApp();
+    const payload = baseRawMetrics({
+      // @ts-expect-error - excludedMs 는 정상, windows 는 음수
+      recovery: { excludedMs: 12_345.7, windows: -3 },
+    });
+
+    const res = await request(app).post('/api/metrics/raw').send(payload);
+
+    expect(res.status).toBe(201);
+    expect(store.rawMetrics).toHaveLength(1);
+    expect(store.rawMetrics[0].recovery).toEqual({ excludedMs: 12_346, windows: 0 });
+  });
+
+  it('recovery 필드가 누락된 페이로드는 그대로 누락 상태로 저장된다 (정규화 단계에서 추가하지 않는다)', async () => {
+    const app = buildApp();
+    const payload = baseRawMetrics();
+    expect(payload.recovery).toBeUndefined();
+
+    const res = await request(app).post('/api/metrics/raw').send(payload);
+
+    expect(res.status).toBe(201);
+    expect(store.rawMetrics).toHaveLength(1);
+    expect(store.rawMetrics[0]).not.toHaveProperty('recovery');
+  });
+
+  it('정상 모양의 recovery 는 반올림된 정수 값으로 보존된다', async () => {
+    const app = buildApp();
+    const payload = baseRawMetrics({
+      recovery: { excludedMs: 7_500.4, windows: 2 },
+    });
+
+    const res = await request(app).post('/api/metrics/raw').send(payload);
+
+    expect(res.status).toBe(201);
+    expect(store.rawMetrics[0].recovery).toEqual({ excludedMs: 7_500, windows: 2 });
+  });
+
+  it('actor 가 인증되어 있지 않으면 401 로 차단되어 raw 가 저장되지 않는다', async () => {
+    currentActor.user = null;
+    const app = buildApp();
+    const payload = baseRawMetrics({ recovery: { excludedMs: 9_000, windows: 1 } });
+
+    const res = await request(app).post('/api/metrics/raw').send(payload);
+
+    expect(res.status).toBe(401);
+    expect(store.rawMetrics).toHaveLength(0);
+  });
+
+  it('sessionId / userId 가 비어 있으면 400 으로 거절되고 정규화 단계까지 도달하지 않는다', async () => {
+    const app = buildApp();
+
+    const missingSession = await request(app)
+      .post('/api/metrics/raw')
+      .send({ userId: 'u1', recovery: { excludedMs: -1, windows: -1 } });
+    expect(missingSession.status).toBe(400);
+    expect(missingSession.body.success).toBe(false);
+
+    const missingUser = await request(app)
+      .post('/api/metrics/raw')
+      .send({ sessionId: 'sess-1', recovery: { excludedMs: -1, windows: -1 } });
+    expect(missingUser.status).toBe(400);
+    expect(missingUser.body.success).toBe(false);
+
+    expect(store.rawMetrics).toHaveLength(0);
   });
 });
