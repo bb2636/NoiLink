@@ -114,8 +114,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const checkAuthRef = useRef(checkAuth);
   checkAuthRef.current = checkAuth;
 
+  // Task #142 — 부트 useEffect 는 마운트당 정확히 한 번만 돌아야 한다.
+  // 과거에는 deps 에 `checkAuth` 를 두었는데, `checkAuth = useCallback(fn, [navigate])`
+  // 이고 react-router 의 `useNavigate()` 는 위치 변경 후 새 참조를 돌려주는
+  // 구간이 있어 같은 마운트 안에서도 `checkAuth` 가 다시 만들어져 effect 가
+  // 한 번 더 돌았다. 결과적으로:
+  //   - `api.getMe()` 가 콜드 스타트마다 두 번 불려 서버 트래픽이 낭비되고,
+  //   - `cleanupExpiredDismissals` / `cleanupExpiredReplayedHintSeen` 의
+  //     localStorage 스캔도 두 번 도는(기능 영향은 없으나) 비용이 발생했다.
+  // 호출은 ref 로 우회해 항상 최신 `checkAuth` 를 부르되, 트리거는 마운트 1회로
+  // 잠근다(다른 화면에서 인증 재확인이 필요하면 별도 트리거가 이미 존재한다).
   useEffect(() => {
-    void checkAuth();
+    void checkAuthRef.current();
     // Task #98 — 앱 부트시 한 번 prefix 스캔으로 오래 방치된 회복 코칭 닫힘
     // 기억(기본 30일 초과)을 정리한다. 인증 흐름과 독립적이므로 실패해도 무시.
     cleanupRecoveryCoachingDismissals();
@@ -123,7 +133,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // LRU-by-write 만으로는 결과 화면을 자주 안 보는 사용자의 오래된 sessionId
     // 가 자리를 차지할 수 있어, 너그러운 시간 만료(기본 30일) 안전망을 둔다.
     cleanupExpiredReplayedHintSeen();
-  }, [checkAuth]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const onNativeSession = () => {

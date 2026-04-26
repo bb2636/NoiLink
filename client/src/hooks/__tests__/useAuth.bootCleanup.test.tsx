@@ -118,13 +118,13 @@ afterEach(async () => {
   globalThis.fetch = originalFetch;
 });
 
-describe('useAuth × 부트 청소 안전망 호출 (Task #137)', () => {
-  // 호출 횟수를 정확히 N 으로 잠그지는 않는다 — react-router 의 useNavigate
-  // 가 위치 변경에 따라 새 참조를 돌려주면 checkAuth(useCallback) 가 다시 만들어져
-  // 같은 마운트 안에서도 부트 useEffect 가 두 번 돌 수 있다(현재 노출되는 동작).
-  // 이 테스트의 회귀 보호 목적은 "두 함수가 모두 호출되는지" 이므로 ≥1 호출만
-  // 검증한다. useEffect 에서 어느 한쪽 호출이 빠지면 0 회로 떨어져 실패한다.
-  it('비로그인 상태로 부트해도 두 청소 함수가 모두 호출된다', async () => {
+describe('useAuth × 부트 청소 안전망 호출 (Task #137 / Task #142)', () => {
+  // Task #142 — 부트 useEffect 는 마운트당 정확히 한 번만 돌아야 한다.
+  // 과거에는 `checkAuth = useCallback(fn, [navigate])` 가 react-router 의
+  // `useNavigate()` 새 참조에 따라 다시 만들어지면서 같은 마운트 안에서도
+  // effect 가 두 번 돌았고, 그 결과 두 청소 함수와 `api.getMe()` 가 두 번씩
+  // 불렸다. 회귀를 막기 위해 호출 횟수를 정확히 1 로 잠근다.
+  it('비로그인 상태로 부트해도 두 청소 함수가 정확히 한 번씩만 호출된다', async () => {
     await act(async () => {
       root.render(
         <MemoryRouter initialEntries={['/login']}>
@@ -136,11 +136,13 @@ describe('useAuth × 부트 청소 안전망 호출 (Task #137)', () => {
       await flushMicrotasks();
     });
 
-    expect(cleanupDismissalsSpy).toHaveBeenCalled();
-    expect(cleanupReplayedHintSpy).toHaveBeenCalled();
+    expect(cleanupDismissalsSpy).toHaveBeenCalledTimes(1);
+    expect(cleanupReplayedHintSpy).toHaveBeenCalledTimes(1);
+    // 비로그인 부트(토큰 없음)에서는 getMe 자체가 불리지 않는 게 맞다.
+    expect(mockedApi.getMe).not.toHaveBeenCalled();
   });
 
-  it('세션 복원으로 로그인 상태로 부트해도 두 청소 함수가 모두 호출된다', async () => {
+  it('세션 복원으로 로그인 상태로 부트해도 두 청소 함수와 getMe 가 정확히 한 번씩만 호출된다', async () => {
     localStorage.setItem(STORAGE_KEYS.TOKEN, 'tok-restored');
     mockedApi.getMe.mockResolvedValueOnce({
       success: true,
@@ -158,7 +160,9 @@ describe('useAuth × 부트 청소 안전망 호출 (Task #137)', () => {
       await flushMicrotasks();
     });
 
-    expect(cleanupDismissalsSpy).toHaveBeenCalled();
-    expect(cleanupReplayedHintSpy).toHaveBeenCalled();
+    expect(cleanupDismissalsSpy).toHaveBeenCalledTimes(1);
+    expect(cleanupReplayedHintSpy).toHaveBeenCalledTimes(1);
+    // Task #142 — 콜드 스타트의 getMe 도 정확히 1회만 흐른다.
+    expect(mockedApi.getMe).toHaveBeenCalledTimes(1);
   });
 });
