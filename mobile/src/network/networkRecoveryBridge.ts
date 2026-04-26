@@ -19,6 +19,11 @@
  *    `MIN_DRAIN_INTERVAL_MS` throttle 이 최종 보호선으로 작동한다).
  *  - `isInternetReachable === false` 이면 online 으로 간주하지 않는다 (Wi-Fi 는
  *    잡혔지만 인터넷이 안 되는 captive portal/혼잡 상태).
+ *  - throttle 로 누락된 false → true 전환이 있으면 윈도우가 끝난 직후 단 한 번
+ *    deferred emit 을 예약해 "마지막 복구 상태" 를 반드시 한 번 더 흘려보낸다.
+ *    이 사이에 사용자가 다시 offline 으로 돌아가면 deferred emit 은 취소된다.
+ *    (다른 트리거 — 브라우저 online / visibility / 앱 진입 — 가 모두 누락된
+ *    환경에서 마지막 복구 신호가 모듈 상태 안에만 갇히는 hole 을 닫기 위함.)
  *
  * 멱등성:
  *  - `startNetworkRecoveryBridge` 가 이미 실행 중이면 새 구독을 만들지 않고
@@ -48,6 +53,10 @@ export interface NetworkRecoveryBridgeOptions {
   subscribe?: (listener: (state: NetInfoState) => void) => NetInfoSubscription;
   /** 발사 함수 (테스트 주입용). 기본 `postNativeToWeb`. */
   post?: typeof postNativeToWeb;
+  /** setTimeout 주입 (테스트용). 기본 글로벌 setTimeout. */
+  setTimer?: (cb: () => void, ms: number) => unknown;
+  /** clearTimeout 주입 (테스트용). 기본 글로벌 clearTimeout. */
+  clearTimer?: (handle: unknown) => void;
 }
 
 const DEFAULT_MIN_INTERVAL_MS = 2000;
@@ -56,12 +65,18 @@ interface InternalState {
   unsubscribe: (() => void) | null;
   lastConnected: boolean | null;
   lastEmittedAt: number;
+  /**
+   * throttle 윈도우 끝에서 한 번만 마지막 복구 상태를 더 흘려보내기 위한 취소 함수.
+   * null 이면 예약된 deferred emit 이 없다.
+   */
+  cancelDeferred: (() => void) | null;
 }
 
 const moduleState: InternalState = {
   unsubscribe: null,
   lastConnected: null,
   lastEmittedAt: Number.NEGATIVE_INFINITY,
+  cancelDeferred: null,
 };
 
 function isOnline(state: NetInfoState): boolean {
@@ -70,6 +85,16 @@ function isOnline(state: NetInfoState): boolean {
   // null/undefined 는 "아직 모름" 이므로 isConnected 만 신뢰한다.
   if (state.isInternetReachable === false) return false;
   return true;
+}
+
+function clearDeferred(): void {
+  if (!moduleState.cancelDeferred) return;
+  try {
+    moduleState.cancelDeferred();
+  } catch (e) {
+    console.warn('[NoiLink network] deferred cancel warn', e);
+  }
+  moduleState.cancelDeferred = null;
 }
 
 /**
@@ -88,9 +113,17 @@ export function startNetworkRecoveryBridge(
   const minInterval = opts.minIntervalMs ?? DEFAULT_MIN_INTERVAL_MS;
   const subscribe = opts.subscribe ?? NetInfo.addEventListener;
   const post = opts.post ?? postNativeToWeb;
+  const setTimer = opts.setTimer ?? ((cb, ms) => setTimeout(cb, ms));
+  const clearTimer = opts.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
 
   moduleState.lastConnected = null;
   moduleState.lastEmittedAt = Number.NEGATIVE_INFINITY;
+  moduleState.cancelDeferred = null;
+
+  const fire = (): void => {
+    moduleState.lastEmittedAt = now();
+    post({ v: NATIVE_BRIDGE_VERSION, type: 'network.online' });
+  };
 
   const sub = subscribe((state) => {
     const connected = isOnline(state);
@@ -101,17 +134,39 @@ export function startNetworkRecoveryBridge(
     // "복구" 로 오해하지 않도록.)
     if (prev === null) return;
 
-    // online → online: 복구 전환이 아님. 무시.
-    // offline → offline: 무시.
-    if (!connected) return;
+    if (!connected) {
+      // 다시 offline 으로 돌아갔다면, throttle 로 미뤄둔 마지막 복구 신호를
+      // 더 보낼 이유가 없다. 예약된 deferred emit 을 취소.
+      clearDeferred();
+      return;
+    }
+
+    // online → online: 복구 전환이 아님. 무시 (단, 이미 예약된 deferred 는 유지).
     if (prev === true) return;
 
-    // 진짜 false → true 전환. 그러나 minIntervalMs 안에 또 들어오면 합쳐서 한 번만.
+    // 진짜 false → true 전환.
     const t = now();
-    if (t - moduleState.lastEmittedAt < minInterval) return;
-    moduleState.lastEmittedAt = t;
+    if (t - moduleState.lastEmittedAt < minInterval) {
+      // throttle 윈도우 안에 들어왔다. 이미 deferred 가 예약돼 있다면 그대로 두고
+      // (같은 만료 시점), 없으면 윈도우 끝 직후 한 번 발사하도록 예약.
+      if (moduleState.cancelDeferred) return;
+      const wait = Math.max(0, minInterval - (t - moduleState.lastEmittedAt));
+      const handle = setTimer(() => {
+        // 타이머 발사 시점에 우리는 더 이상 예약 상태가 아니다.
+        moduleState.cancelDeferred = null;
+        // 발사 직전 한 번 더 확인: 그 사이에 다시 offline 으로 돌아갔거나
+        // 브리지가 stop 됐다면 발사하지 않는다.
+        if (!moduleState.unsubscribe) return;
+        if (moduleState.lastConnected !== true) return;
+        fire();
+      }, wait);
+      moduleState.cancelDeferred = () => clearTimer(handle);
+      return;
+    }
 
-    post({ v: NATIVE_BRIDGE_VERSION, type: 'network.online' });
+    // 정상 발사. 혹시 남아있던 deferred 가 있다면 정리 (이중 발사 방지).
+    clearDeferred();
+    fire();
   });
 
   moduleState.unsubscribe = typeof sub === 'function' ? sub : () => {};
@@ -120,6 +175,7 @@ export function startNetworkRecoveryBridge(
 
 export function stopNetworkRecoveryBridge(): void {
   if (!moduleState.unsubscribe) return;
+  clearDeferred();
   try {
     moduleState.unsubscribe();
   } catch (e) {
@@ -132,7 +188,15 @@ export function stopNetworkRecoveryBridge(): void {
 
 /** 테스트 전용 — 모듈 상태를 리셋한다. */
 export function __resetNetworkRecoveryBridgeForTest(): void {
+  if (moduleState.cancelDeferred) {
+    try {
+      moduleState.cancelDeferred();
+    } catch {
+      // ignore
+    }
+  }
   moduleState.unsubscribe = null;
   moduleState.lastConnected = null;
   moduleState.lastEmittedAt = Number.NEGATIVE_INFINITY;
+  moduleState.cancelDeferred = null;
 }

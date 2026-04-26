@@ -10,6 +10,9 @@
  * - `isInternetReachable === false` 면 online 으로 보지 않는다.
  * - stop 후에는 더 이상 발사하지 않고, 다시 start 할 수 있다.
  * - start 가 멱등하다 (이중 마운트에도 구독이 두 번 생기지 않음).
+ * - throttle 윈도우 안에 누락된 false → true 마지막 상태는 윈도우 만료 직후
+ *   정확히 한 번 deferred emit 으로 전달되고, 그 사이 offline 으로 돌아가면
+ *   취소된다.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -36,22 +39,52 @@ import { NATIVE_BRIDGE_VERSION } from '@noilink/shared';
 
 type Listener = (state: { isConnected: boolean | null; isInternetReachable?: boolean | null }) => void;
 
+interface FakeTimer {
+  id: number;
+  cb: () => void;
+  fireAt: number;
+  cancelled: boolean;
+}
+
 interface Harness {
   emit: Listener;
   unsubscribed: boolean;
   fakeNow: number;
+  /** 시간을 ms 만큼 진행시키며 그 사이 만료된 deferred 타이머를 순서대로 발사한다. */
+  advance: (ms: number) => void;
+  /** 현재 살아있는 deferred 타이머 수. */
+  pendingTimers: () => number;
   stop: () => void;
 }
 
 function setup(opts: { minIntervalMs?: number } = {}): Harness {
+  const timers: FakeTimer[] = [];
+  let nextId = 1;
+
   const h: Harness = {
     emit: () => {
       throw new Error('subscribe not yet called');
     },
     unsubscribed: false,
     fakeNow: 0,
+    advance: (ms: number) => {
+      const target = h.fakeNow + ms;
+      // 만료 순서대로 발사. 콜백이 새 타이머를 만들 수도 있으므로 루프.
+      for (;;) {
+        const due = timers
+          .filter((t) => !t.cancelled && t.fireAt <= target)
+          .sort((a, b) => a.fireAt - b.fireAt)[0];
+        if (!due) break;
+        h.fakeNow = due.fireAt;
+        due.cancelled = true;
+        due.cb();
+      }
+      h.fakeNow = target;
+    },
+    pendingTimers: () => timers.filter((t) => !t.cancelled).length,
     stop: () => {},
   };
+
   h.stop = startNetworkRecoveryBridge({
     minIntervalMs: opts.minIntervalMs,
     now: () => h.fakeNow,
@@ -60,6 +93,15 @@ function setup(opts: { minIntervalMs?: number } = {}): Harness {
       return () => {
         h.unsubscribed = true;
       };
+    },
+    setTimer: (cb, ms) => {
+      const id = nextId++;
+      timers.push({ id, cb, fireAt: h.fakeNow + ms, cancelled: false });
+      return id;
+    },
+    clearTimer: (handle) => {
+      const t = timers.find((x) => x.id === handle);
+      if (t) t.cancelled = true;
     },
   });
   return h;
@@ -113,9 +155,11 @@ describe('startNetworkRecoveryBridge — dedupe/throttle', () => {
     h.fakeNow += 200;
     h.emit({ isConnected: true, isInternetReachable: true }); // throttled
     h.fakeNow += 200;
-    h.emit({ isConnected: false });
+    h.emit({ isConnected: false }); // 다시 offline → deferred 취소
     h.fakeNow += 200;
-    h.emit({ isConnected: true, isInternetReachable: true }); // throttled
+    h.emit({ isConnected: true, isInternetReachable: true }); // throttled (재예약)
+    h.fakeNow += 200;
+    h.emit({ isConnected: false }); // 마지막은 offline → deferred 취소
 
     expect(posted.list).toHaveLength(1);
     h.stop();
@@ -208,5 +252,170 @@ describe('startNetworkRecoveryBridge — dedupe/throttle', () => {
     expect(posted.list).toHaveLength(1);
 
     h.stop();
+  });
+});
+
+describe('startNetworkRecoveryBridge — throttle 윈도우 만료 후 deferred emit', () => {
+  it('throttle 로 누락된 마지막 false → true 는 윈도우 만료 직후 한 번 더 발사된다', () => {
+    const h = setup({ minIntervalMs: 2_000 });
+    h.emit({ isConnected: false }); // baseline
+    h.fakeNow += 100;
+    h.emit({ isConnected: true, isInternetReachable: true }); // emit #1 @ t=100
+    expect(posted.list).toHaveLength(1);
+
+    // 200ms 뒤 깜빡임 — throttle 안 (100 → 500, lastEmittedAt=100, interval 2000)
+    h.fakeNow += 200;
+    h.emit({ isConnected: false });
+    h.fakeNow += 200;
+    h.emit({ isConnected: true, isInternetReachable: true }); // throttled, deferred 예약
+
+    // 윈도우 만료까지는 발사되지 않음
+    expect(posted.list).toHaveLength(1);
+    expect(h.pendingTimers()).toBe(1);
+
+    // 윈도우 끝 직후로 시간 진행
+    h.advance(5_000);
+
+    // deferred 가 정확히 한 번 발사
+    expect(posted.list).toHaveLength(2);
+    expect(posted.list[1]).toEqual({ v: NATIVE_BRIDGE_VERSION, type: 'network.online' });
+    expect(h.pendingTimers()).toBe(0);
+    h.stop();
+  });
+
+  it('윈도우 안에서 다시 offline 으로 돌아가면 deferred emit 은 취소되어 발사되지 않는다', () => {
+    const h = setup({ minIntervalMs: 2_000 });
+    h.emit({ isConnected: false }); // baseline
+    h.fakeNow += 100;
+    h.emit({ isConnected: true, isInternetReachable: true }); // emit #1
+    expect(posted.list).toHaveLength(1);
+
+    h.fakeNow += 200;
+    h.emit({ isConnected: false });
+    h.fakeNow += 200;
+    h.emit({ isConnected: true, isInternetReachable: true }); // throttled, deferred 예약
+    expect(h.pendingTimers()).toBe(1);
+
+    // 윈도우 만료 전에 다시 offline → deferred 취소되어야 함
+    h.fakeNow += 100;
+    h.emit({ isConnected: false });
+    expect(h.pendingTimers()).toBe(0);
+
+    // 시간을 진행해도 더 이상 발사되지 않는다
+    h.advance(10_000);
+    expect(posted.list).toHaveLength(1);
+    h.stop();
+  });
+
+  it('윈도우 안에서 false→true 가 여러 번 깜빡여도 deferred emit 은 한 번뿐이다', () => {
+    const h = setup({ minIntervalMs: 2_000 });
+    h.emit({ isConnected: false });
+    h.fakeNow += 100;
+    h.emit({ isConnected: true, isInternetReachable: true }); // emit #1 @ t=100
+
+    // 윈도우 안 (lastEmittedAt=100, interval=2000 → 만료 t=2100) 의 여러 깜빡임
+    for (let i = 0; i < 4; i += 1) {
+      h.fakeNow += 100;
+      h.emit({ isConnected: false });
+      h.fakeNow += 100;
+      h.emit({ isConnected: true, isInternetReachable: true });
+    }
+    // 마지막 상태는 online → deferred 한 개가 살아있어야 함
+    expect(h.pendingTimers()).toBe(1);
+    expect(posted.list).toHaveLength(1);
+
+    h.advance(5_000);
+
+    // 정확히 한 번만 추가 발사
+    expect(posted.list).toHaveLength(2);
+    expect(h.pendingTimers()).toBe(0);
+    h.stop();
+  });
+
+  it('deferred 발사 후에도 다음 throttle cycle 에서 또 deferred 를 예약할 수 있다', () => {
+    const h = setup({ minIntervalMs: 2_000 });
+    h.emit({ isConnected: false });
+    h.fakeNow += 100;
+    h.emit({ isConnected: true, isInternetReachable: true }); // emit #1 @ t=100
+
+    h.fakeNow += 200; // t=300
+    h.emit({ isConnected: false });
+    h.fakeNow += 200; // t=500
+    h.emit({ isConnected: true, isInternetReachable: true }); // deferred #1 예약 @ fireAt=2100
+    h.advance(2_000); // → fakeNow=2500, deferred #1 발사 → emit #2 @ t=2100, lastEmittedAt=2100
+    expect(posted.list).toHaveLength(2);
+
+    // 다음 깜빡임 사이클: lastEmittedAt=2100, 윈도우는 t=4100 까지.
+    // t=2500 에서 offline, t=2600 에서 online → 500ms < 2000 → throttled, deferred #2 예약.
+    h.emit({ isConnected: false });
+    h.fakeNow += 100; // t=2600
+    h.emit({ isConnected: true, isInternetReachable: true }); // throttled, deferred #2 예약
+    expect(h.pendingTimers()).toBe(1);
+    h.advance(5_000); // deferred #2 발사 → emit #3
+    expect(posted.list).toHaveLength(3);
+    h.stop();
+  });
+
+  it('stop 호출 시 예약된 deferred emit 도 취소된다', () => {
+    const h = setup({ minIntervalMs: 2_000 });
+    h.emit({ isConnected: false });
+    h.fakeNow += 100;
+    h.emit({ isConnected: true, isInternetReachable: true }); // emit #1
+    h.fakeNow += 200;
+    h.emit({ isConnected: false });
+    h.fakeNow += 200;
+    h.emit({ isConnected: true, isInternetReachable: true }); // deferred 예약
+    expect(h.pendingTimers()).toBe(1);
+
+    h.stop();
+    expect(h.pendingTimers()).toBe(0);
+
+    // 시간을 진행해도 발사되지 않는다
+    h.advance(10_000);
+    expect(posted.list).toHaveLength(1);
+  });
+
+  it('stop 직후 race 로 deferred 콜백이 늦게 실행돼도 발사하지 않는다', () => {
+    // 이 케이스는 clearTimer 가 약간 늦게 처리되는 호스트(예: 일부 RN 환경)에서
+    // 이미 발사 예약된 콜백이 그대로 실행될 수 있는 상황을 가정한다.
+    const timers: Array<{ cb: () => void; cancelled: boolean }> = [];
+    let posted2: Array<Record<string, unknown>> = [];
+    posted.list.length = 0;
+
+    const stop = startNetworkRecoveryBridge({
+      minIntervalMs: 2_000,
+      now: () => 0,
+      subscribe: (listener) => {
+        listener({ isConnected: false, isInternetReachable: null } as never);
+        listener({ isConnected: true, isInternetReachable: true } as never);
+        // throttle 안의 두 번째 false→true 를 하나 더 보내 deferred 를 예약시킨다.
+        listener({ isConnected: false, isInternetReachable: null } as never);
+        listener({ isConnected: true, isInternetReachable: true } as never);
+        return () => {};
+      },
+      post: (m) => {
+        posted2.push(m as Record<string, unknown>);
+      },
+      setTimer: (cb) => {
+        const t = { cb, cancelled: false };
+        timers.push(t);
+        return t;
+      },
+      clearTimer: (h) => {
+        // 일부러 cancelled 만 표시 — 이후 강제로 cb 를 호출해본다.
+        (h as { cancelled: boolean }).cancelled = true;
+      },
+    });
+
+    expect(posted2).toHaveLength(1);
+    // 호스트가 stop 시점에 clearTimer 를 호출하지만, 우리가 가진 cb 참조는
+    // 살아있으므로 강제로 실행해본다 (race 시뮬레이션).
+    stop();
+    for (const t of timers) {
+      // cancelled 표시와 무관하게 강제로 실행 — race 시 발사 가드가 작동해야 함
+      t.cb();
+    }
+    // stop 이후이므로 발사하지 않아야 함
+    expect(posted2).toHaveLength(1);
   });
 });
