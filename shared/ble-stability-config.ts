@@ -145,6 +145,15 @@ export interface BleStabilityRemoteConfig {
 }
 
 /**
+ * 원격 설정 캐시(localStorage 등) 의 스키마 버전 (Task #69).
+ *
+ * `BleStabilityRemoteConfig` 의 모양이 바뀌면 이 상수를 올려서 이전 버전으로
+ * 저장된 캐시를 자동으로 무효화한다. 클라이언트 부트스트랩은 캐시 envelope 의
+ * `version` 이 이 값과 다르면 캐시를 폐기하고 기본값 폴백으로 돌아간다.
+ */
+export const BLE_STABILITY_REMOTE_CONFIG_SCHEMA_VERSION = 1;
+
+/**
  * 원격 설정을 오버라이드 훅으로 변환한다.
  *
  * 비어 있거나 모양이 잘못되어 적용할 규칙이 하나도 없으면 `null` 을 반환한다.
