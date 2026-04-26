@@ -80,6 +80,9 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
     `allOff`가 모든 점등 Pod에 OFF + CTRL_STOP 을 보내며 두 번째 호출에는
     멱등하게 동작함을 검증한다. (jsdom + vi.useFakeTimers)
   - `npm test` (root)는 shared → client 순으로 vitest 를 실행한다.
+- BLE 단절 안내 토스트 임계값 튜닝 가이드: `docs/operations/ble-stability-threshold-tuning.md`
+  - `shared/ble-stability-config.ts` 의 기본값을 그대로 둘지, 모델별 오버라이드를
+    등록할지에 대한 분석 절차·결정 규칙·1차 결정(2026-04 기준 기본값 유지) 기록.
 
 ## Deployment
 
