@@ -289,15 +289,19 @@ export default function Result() {
   // useState 의 lazy initializer 로 마운트 시점에 한 번만 판단해, 첫 렌더에서
   // 보였다가 effect 가 실행되며 사라지는 깜빡임을 만들지 않는다.
   // sessionId 가 비어 있으면(추적 불가) 기존 동작대로 그대로 노출한다.
+  // Task #133 — 사용자별 prefix 키로 분리되어 같은 기기에서 다른 계정이 로그인해도
+  // 안내가 1회 정상 노출되고, 같은 사용자가 다시 로그인해도 직전에 본 sessionId 의
+  // 안내는 다시 뜨지 않는다. user 가 아직 로딩 중(=null)이면 추적이 비활성화돼
+  // 안내가 한 번 더 노출될 수 있으나(폴백) 사용자 흐름은 막지 않는다.
   const [showReplayedHint] = useState(() => {
     if (state?.replayed !== true) return false;
-    return !hasSeenReplayedHint(state?.sessionId);
+    return !hasSeenReplayedHint(user?.id, state?.sessionId);
   });
   useEffect(() => {
     if (!showReplayedHint) return;
     if (!state?.sessionId) return;
-    markReplayedHintSeen(state.sessionId);
-  }, [showReplayedHint, state?.sessionId]);
+    markReplayedHintSeen(user?.id, state.sessionId);
+  }, [showReplayedHint, state?.sessionId, user?.id]);
 
   // 반짝이 입자 (랜덤 시드 안정화)
   const particles = useMemo(
