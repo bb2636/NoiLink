@@ -84,6 +84,20 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
   - `shared/ble-stability-config.ts` 의 기본값을 그대로 둘지, 모델별 오버라이드를
     등록할지에 대한 분석 절차·결정 규칙·1차 결정(2026-04 기준 기본값 유지) 기록.
 
+## Remote Config (BLE Stability Thresholds — Task #48)
+
+- 서버: `GET /api/config/ble-stability` 가 `BLE_STABILITY_REMOTE_CONFIG` 환경 변수의 JSON 을
+  그대로 내려준다. 미설정/파싱 실패 → `{ rules: [] }` 빈 설정.
+- 클라이언트: `client/src/main.tsx` 부트스트랩에서 `loadBleStabilityRemoteConfig()` 가
+  응답을 `makeBleStabilityResolverFromRemoteConfig()` 로 변환해
+  `setBleStabilityOverrideResolver()` 에 등록한다. 응답이 비어 있으면
+  기본값(`DEFAULT_BLE_STABILITY_*`) 이 그대로 쓰인다.
+- 응답 스키마: `BleStabilityRemoteConfig { rules?: { match?, thresholds }[]; default? }` —
+  자세한 의미와 회귀 테스트는 `shared/ble-stability-config.ts` /
+  `shared/ble-stability-config.test.ts` 와
+  `client/src/utils/__tests__/bleStabilityRemoteConfig.test.ts`.
+- 운영 튜닝: 환경 변수만 갱신하면 앱 재배포 없이 모델/사용자별 임계값 A/B 가능.
+
 ## Deployment
 
 - Target: autoscale

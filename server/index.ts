@@ -51,6 +51,7 @@ import rankingRoutes from './routes/rankings.js';
 import homeRoutes from './routes/home.js';
 import adminRoutes from './routes/admin.js';
 import termsRoutes from './routes/terms.js';
+import configRoutes from './routes/config.js';
 
 app.use('/api/training', trainingRoutes);
 app.use('/api/scores', scoreRoutes);
@@ -62,6 +63,7 @@ app.use('/api/rankings', rankingRoutes);
 app.use('/api/home', homeRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/terms', termsRoutes);
+app.use('/api/config', configRoutes);
 
 const isBuilt = __dirname.endsWith('dist');
 const serverRoot = isBuilt ? join(__dirname, '..') : __dirname;
