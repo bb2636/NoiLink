@@ -16,6 +16,7 @@ import {
   type RecoveryRawMetrics,
   type TrainingMode,
 } from '@noilink/shared';
+import type { Session } from '@noilink/shared';
 import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
@@ -73,27 +74,29 @@ export default function Result() {
       state.yieldsScore !== undefined ||
       state.displayScore != null);
 
-  // 점수 데이터 (실데이터 없으면 데모 프로필 점수 사용 → 다른 화면과 일치)
-  const todayScore = state?.displayScore ?? DEMO_PROFILE.brainIndex;
-  // TODO: 서버에서 직전 점수 받아오기 — 현재는 임시로 todayScore - 12
-  const prevScore = state?.previousScore ?? Math.max(0, todayScore - 12);
-  const diff = todayScore - prevScore;
-  const pctChange = prevScore > 0 ? Math.round((diff / prevScore) * 1000) / 10 : 0;
-  const nextMilestone = Math.ceil((todayScore + 5) / 5) * 5;
   const nickname = user?.nickname || user?.name || '회원';
 
-  // 결과 화면 재진입(기록·홈에서 같은 세션) 대응 (Task #75):
-  // 트레이닝 직후엔 navigate state 로 회복 정보가 함께 넘어오지만, 사용자가
+  // 결과 화면 재진입(기록·홈에서 같은 세션) 대응 (Task #75 / Task #95):
+  // 트레이닝 직후엔 navigate state 로 점수·회복 정보가 함께 넘어오지만, 사용자가
   // 결과 화면을 떠났다 다시 들어오면 state 가 sessionId 만 남는다(또는 비어 있다).
-  // 그 경우 서버에 저장된 raw.recovery 를 한 번 받아와 카드를 동일하게 그린다.
-  // navigate state 가 회복 데이터를 이미 들고 있으면 호출하지 않는다 — 정상
-  // 완료 흐름의 추가 네트워크/지연 비용을 만들지 않기 위함.
+  // 그 경우 서버에 저장된 raw.recovery 와 score 를 한 번 받아와 카드와 점수 원을
+  // 동일하게 그린다. navigate state 가 회복·점수 데이터를 이미 들고 있으면
+  // 호출하지 않는다 — 정상 완료 흐름의 추가 네트워크/지연 비용을 만들지 않기 위함.
   const [serverRecovery, setServerRecovery] = useState<RecoveryRawMetrics | null>(null);
+  const [serverScore, setServerScore] = useState<MetricsScore | null>(null);
   const sessionIdForFetch = state?.sessionId;
   const stateProvidedRecovery = state?.recoverySegments !== undefined;
+  const stateProvidedDisplayScore = state?.displayScore != null;
+  // 한쪽이라도 누락되면 같은 응답으로 둘 다 채우므로 묶어서 한 번만 호출한다.
+  const needsServerFetch =
+    Boolean(sessionIdForFetch) &&
+    (!stateProvidedRecovery || !stateProvidedDisplayScore);
   useEffect(() => {
-    if (!sessionIdForFetch) return;
-    if (stateProvidedRecovery) return;
+    if (!needsServerFetch || !sessionIdForFetch) return;
+    // sessionId 가 바뀌어 다시 fetch 가 필요해지면 이전 응답 잔재로 점수/회복이
+    // 잠깐 잘못 보이지 않도록 먼저 비워둔다 (컴포넌트 인스턴스 재사용 안전망).
+    setServerRecovery(null);
+    setServerScore(null);
     let cancelled = false;
     (async () => {
       const res = await api
@@ -106,11 +109,101 @@ export default function Result() {
       // 응답에 recovery 가 없으면(과거 세션) 그대로 폴백한다 — 기존
       // recoveryStats.hasSegments 폴백이 빈 카드를 자연스럽게 처리한다.
       setServerRecovery(recovery ?? null);
+      // score 가 없으면(아직 계산 전이거나 과거 누락) null 로 둔다 — 점수 원은
+      // 데모 프로필 폴백을 사용한다.
+      setServerScore(res.data?.score ?? null);
     })();
     return () => {
       cancelled = true;
     };
-  }, [sessionIdForFetch, stateProvidedRecovery]);
+  }, [needsServerFetch, sessionIdForFetch]);
+
+  // 재진입 시 직전 점수 채우기 (Task #95):
+  // navigate state 가 displayScore 를 이미 들고 있는 정상 완료 흐름에선 추가
+  // 호출을 하지 않는다. 재진입 흐름에서만 사용자의 세션 이력을 한 번 받아와,
+  // 현재 세션 직전의 점수 있는 세션을 직전 점수로 사용한다. 이력에 직전 세션이
+  // 없으면(첫 세션) null 로 남기고, 비교 카드는 숨긴다.
+  const [serverPreviousScore, setServerPreviousScore] = useState<number | null>(null);
+  const userId = user?.id;
+  const needsPreviousScoreFetch =
+    Boolean(sessionIdForFetch) &&
+    !stateProvidedDisplayScore &&
+    state?.previousScore == null &&
+    Boolean(userId);
+  useEffect(() => {
+    if (!needsPreviousScoreFetch || !sessionIdForFetch || !userId) return;
+    // sessionId/userId 가 바뀌어 새로 조회가 필요해지면 이전 결과를 비워
+    // 다른 세션의 직전 점수가 잠깐 노출되는 것을 막는다.
+    setServerPreviousScore(null);
+    let cancelled = false;
+    (async () => {
+      const res = await api
+        .get<Session[]>(`/sessions/user/${userId}?limit=50`)
+        .catch(() => null);
+      if (cancelled) return;
+      if (!res || !res.success || !res.data) return;
+      // 응답은 createdAt desc 정렬. 현재 세션을 찾아 그 다음(과거) 항목 중
+      // score 가 있는 첫 세션을 직전 점수로 채택한다.
+      const list = res.data;
+      const idx = list.findIndex((s) => s.id === sessionIdForFetch);
+      if (idx === -1) return;
+      for (let i = idx + 1; i < list.length; i++) {
+        const s = list[i];
+        if (typeof s.score === 'number') {
+          setServerPreviousScore(s.score);
+          break;
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [needsPreviousScoreFetch, sessionIdForFetch, userId]);
+
+  // 서버 score 로부터 종합 점수(6대 지표 평균) 산출. 정의돼 있는 항목만
+  // 평균에 포함한다 — server/routes/metrics.ts 의 세션 점수 갱신 로직과 동일.
+  const serverComputedDisplayScore = useMemo(() => {
+    if (!serverScore) return undefined;
+    const scores = [
+      serverScore.memory,
+      serverScore.comprehension,
+      serverScore.focus,
+      serverScore.judgment,
+      serverScore.agility,
+      serverScore.endurance,
+    ].filter((s): s is number => typeof s === 'number');
+    if (scores.length === 0) return undefined;
+    return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+  }, [serverScore]);
+
+  // 점수 데이터 우선순위: navigate state(정상 완료) → 서버 응답(재진입) →
+  // 데모 프로필. 마지막 폴백은 어떤 경로로도 점수를 못 받았을 때만 노출된다.
+  const todayScore =
+    state?.displayScore ?? serverComputedDisplayScore ?? DEMO_PROFILE.brainIndex;
+  // 직전 점수 결정 (Task #95):
+  // - navigate state.previousScore 가 있으면 그대로 사용 (테스트·향후 확장 대비).
+  // - 재진입 흐름(state.displayScore 미존재)에서는 서버 이력 결과만 신뢰한다.
+  //   직전 세션이 없으면(첫 세션) 비교 카드를 숨긴다 — 가짜 비교를 보여
+  //   사용자를 오인시키지 않기 위함.
+  // - 정상 완료 흐름(state.displayScore 존재, state.previousScore 미존재)은
+  //   기존 가짜 폴백(todayScore - 12) 을 유지해 화면 구성 회귀를 만들지 않는다.
+  let resolvedPreviousScore: number | undefined;
+  if (state?.previousScore != null) {
+    resolvedPreviousScore = state.previousScore;
+  } else if (stateProvidedDisplayScore) {
+    // 정상 완료 흐름 — 추가 네트워크 호출을 하지 않고 기존 fallback 유지.
+    resolvedPreviousScore = Math.max(0, todayScore - 12);
+  } else if (serverPreviousScore != null) {
+    resolvedPreviousScore = serverPreviousScore;
+  }
+  const hasPreviousScore = resolvedPreviousScore !== undefined;
+  const prevScore = resolvedPreviousScore ?? 0;
+  const diff = hasPreviousScore ? todayScore - prevScore : 0;
+  const pctChange =
+    hasPreviousScore && prevScore > 0
+      ? Math.round((diff / prevScore) * 1000) / 10
+      : 0;
+  const nextMilestone = Math.ceil((todayScore + 5) / 5) * 5;
 
   // BLE 단절 회복 안내(Task #27, Task #36): 회복 구간이 1초 이상 누적된 세션에만 노출.
   // 1초 미만은 사용자가 인지하지도 못한 일시적 신호 흔들림이므로 굳이 알리지 않는다.
@@ -460,30 +553,35 @@ export default function Result() {
             </motion.div>
           )}
 
-          {/* 비교 카드 */}
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
-            className="rounded-2xl p-3 mb-3"
-            style={{ backgroundColor: '#1A1A1A' }}
-          >
-            <div className="flex items-center justify-around">
-              {/* 직전 */}
-              <ScoreMini score={prevScore} label={formatPastDate()} accent="#888" />
-              {/* 화살표 + 차이 */}
-              <div className="flex flex-col items-center">
-                <span className="text-sm mb-1" style={{ color: '#AAED10' }}>
-                  {diff >= 0 ? `+${diff}` : diff}
-                </span>
-                <span className="text-2xl text-gray-500">→</span>
+          {/* 비교 카드 — 직전 점수를 모를 때(첫 세션이거나 이력 조회 실패)는
+              가짜 비교를 그려 사용자를 오인시키지 않도록 카드 자체를 숨긴다 (Task #95). */}
+          {hasPreviousScore && (
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.3 }}
+              data-testid="prev-vs-today-card"
+              className="rounded-2xl p-3 mb-3"
+              style={{ backgroundColor: '#1A1A1A' }}
+            >
+              <div className="flex items-center justify-around">
+                {/* 직전 */}
+                <ScoreMini score={prevScore} label={formatPastDate()} accent="#888" />
+                {/* 화살표 + 차이 */}
+                <div className="flex flex-col items-center">
+                  <span className="text-sm mb-1" style={{ color: '#AAED10' }}>
+                    {diff >= 0 ? `+${diff}` : diff}
+                  </span>
+                  <span className="text-2xl text-gray-500">→</span>
+                </div>
+                {/* 오늘 */}
+                <ScoreMini score={todayScore} label="오늘" accent="#AAED10" highlight />
               </div>
-              {/* 오늘 */}
-              <ScoreMini score={todayScore} label="오늘" accent="#AAED10" highlight />
-            </div>
-          </motion.div>
+            </motion.div>
+          )}
 
-          {/* 코칭 메시지 */}
+          {/* 코칭 메시지 — 직전 점수를 모를 땐 "직전 대비" 문장은 빼고, 다음
+              마일스톤 안내만 노출해 의미 없는 비교 수치를 보여주지 않는다 (Task #95). */}
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -491,15 +589,22 @@ export default function Result() {
             className="rounded-2xl p-3 mb-4"
             style={{ backgroundColor: '#1A1A1A' }}
           >
-            <p className="text-xs text-gray-300 leading-relaxed">
-              💡 직전 대비{' '}
-              <span className="font-bold" style={{ color: '#AAED10' }}>
-                {pctChange > 0 ? '+' : ''}
-                {pctChange}% 향상
-              </span>
-              됐어요. 꾸준한 훈련이 효과를 내고 있습니다. 이 추세라면 다음 회차에서{' '}
-              <span className="font-bold text-white">{nextMilestone}점 돌파</span>도 기대할 수 있어요.
-            </p>
+            {hasPreviousScore ? (
+              <p className="text-xs text-gray-300 leading-relaxed">
+                💡 직전 대비{' '}
+                <span className="font-bold" style={{ color: '#AAED10' }}>
+                  {pctChange > 0 ? '+' : ''}
+                  {pctChange}% 향상
+                </span>
+                됐어요. 꾸준한 훈련이 효과를 내고 있습니다. 이 추세라면 다음 회차에서{' '}
+                <span className="font-bold text-white">{nextMilestone}점 돌파</span>도 기대할 수 있어요.
+              </p>
+            ) : (
+              <p className="text-xs text-gray-300 leading-relaxed">
+                💡 오늘 점수가 기록됐어요. 다음 회차에서{' '}
+                <span className="font-bold text-white">{nextMilestone}점 돌파</span>를 노려봐요.
+              </p>
+            )}
           </motion.div>
 
           {/* 완료 버튼 */}
