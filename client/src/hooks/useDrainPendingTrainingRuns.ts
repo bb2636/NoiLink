@@ -10,6 +10,10 @@
  *    `online` 이벤트가 누락되더라도 사용자가 앱을 다시 보는 순간 큐가 비워지도록
  *    한 번 더 기회를 만든다. throttle/in-flight 가드를 그대로 통과하므로 시도
  *    폭주는 발생하지 않는다.
+ *  - 네이티브 셸(noilink-native)이 OS 단에서 네트워크 복구를 감지해
+ *    `network.online` 메시지를 보낼 때(WebView 의 `online` 이벤트가 누락/지연될 수
+ *    있는 환경 보강). 같은 trigger 경로를 통과하므로 throttle/in-flight 가드가
+ *    동일하게 적용된다.
  *
  * 정책:
  *  - 사용자가 직접 트리거하지 않는 백그라운드 흐름이므로, UI 를 막거나 에러를 화면에
@@ -169,6 +173,9 @@ export function useDrainPendingTrainingRuns(options: DrainOptions = {}): void {
     tryTriggerDrain(userId);
 
     // 앱이 켜진 채 네트워크가 재연결되면 즉시 다시 시도한다.
+    // 두 트리거(브라우저 `online` + 네이티브 셸 `network.online` 메시지)는 동일한
+    // tryTriggerDrain 경로를 통과한다 — 두 신호가 같은 시점에 동시에 들어와도
+    // in-flight/throttle 가드 덕분에 cycle 이 중복 실행되지 않는다.
     const onOnline = () => tryTriggerDrain(userId);
     // 앱이 다시 화면에 보일 때(visibilitychange → visible, pageshow)에도 한 번
     // 더 시도한다. 백그라운드에서 발생한 짧은 네트워크 단절로 `online` 이벤트가
@@ -181,12 +188,14 @@ export function useDrainPendingTrainingRuns(options: DrainOptions = {}): void {
     };
     const onPageShow = () => tryTriggerDrain(userId);
     window.addEventListener('online', onOnline);
+    window.addEventListener('noilink-native-network-online', onOnline);
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', onVisibilityChange);
     }
     window.addEventListener('pageshow', onPageShow);
     return () => {
       window.removeEventListener('online', onOnline);
+      window.removeEventListener('noilink-native-network-online', onOnline);
       if (typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', onVisibilityChange);
       }

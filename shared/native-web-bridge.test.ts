@@ -736,6 +736,17 @@ const VALID_NATIVE_TO_WEB: ValidCase[] = [
     label: 'push.state (granted)',
     msg: { ...baseNativeEnv('push.state'), payload: { status: 'granted' } },
   },
+  {
+    // 네이티브 셸의 네트워크 복구 알림 — payload 없이 broadcast 형태로 와도 통과.
+    // 결과 전송 큐의 즉시 drain 트리거 진입점이므로, validator 가 reject 하면
+    // WebView 환경에서 trigger 가 통째로 무시된다.
+    label: 'network.online (payload 없음)',
+    msg: { ...baseNativeEnv('network.online') },
+  },
+  {
+    label: 'network.online (빈 payload 객체 — forward-compatible)',
+    msg: { ...baseNativeEnv('network.online'), payload: {} },
+  },
 ];
 
 const INVALID_NATIVE_TO_WEB: InvalidCase[] = [

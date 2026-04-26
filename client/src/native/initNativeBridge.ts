@@ -45,6 +45,13 @@ function dispatchNativeMessage(msg: NativeToWebMessage): void {
     case 'push.state':
       window.dispatchEvent(new CustomEvent('noilink-native-bridge', { detail: msg }));
       break;
+    case 'network.online':
+      // 네이티브 셸이 OS 단의 네트워크 복구를 알릴 때, 결과 전송 큐가 즉시 drain 되도록
+      // 별도 이벤트로 브로드캐스트한다. 수신 측(useDrainPendingTrainingRuns)은
+      // 브라우저 `online` 이벤트와 동일한 throttle/in-flight 가드를 통과시켜
+      // MAX_TOTAL_ATTEMPTS 폭주와 outcome 중복 안내를 막는다.
+      window.dispatchEvent(new CustomEvent('noilink-native-network-online'));
+      break;
     default:
       break;
   }

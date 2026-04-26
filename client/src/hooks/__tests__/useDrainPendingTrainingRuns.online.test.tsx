@@ -220,6 +220,31 @@ describe('useDrainPendingTrainingRuns: online 이벤트 트리거', () => {
     expect(outcomes[0].outcome).toBe('success');
   });
 
+  it('네이티브 셸의 `noilink-native-network-online` 이벤트도 즉시 drain 을 트리거한다', async () => {
+    renderHook(() => useDrainPendingTrainingRuns());
+    await act(async () => {
+      await flushMicrotasks();
+    });
+    // 마운트 직후엔 큐가 비어 있어 호출이 없었다는 사전 조건.
+    expect(mockedApi.createSession).not.toHaveBeenCalled();
+
+    enqueuePendingRun({ input: baseInput(), title: '집중력' });
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 's-native' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 80 } });
+
+    await act(async () => {
+      // 브라우저 `online` 이 아니라 네이티브 셸 → WebView 의 복구 알림이 들어왔다고 가정.
+      window.dispatchEvent(new CustomEvent('noilink-native-network-online'));
+      await flushMicrotasks();
+    });
+
+    expect(mockedApi.createSession).toHaveBeenCalledTimes(1);
+    expect(getPendingRuns()).toEqual([]);
+    const outcomes = popOutcomeNotices();
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0].outcome).toBe('success');
+  });
+
   it('visibilitychange 가 hidden 으로 들어오면 drain 트리거가 발생하지 않는다', async () => {
     renderHook(() => useDrainPendingTrainingRuns());
     await act(async () => {
@@ -266,7 +291,7 @@ describe('useDrainPendingTrainingRuns: online 이벤트 트리거', () => {
     expect(outcomes[0].outcome).toBe('success');
   });
 
-  it('online + visibilitychange + pageshow 가 짧은 시간에 함께 들어와도 throttle 로 합쳐진다', async () => {
+  it('online + visibilitychange + pageshow + 네이티브 `network.online` 이 짧은 시간에 함께 들어와도 throttle 로 합쳐진다', async () => {
     enqueuePendingRun({ input: baseInput() });
     // 모든 시도 실패 — 큐에 항목이 남아 throttle 효과를 검증하기 쉬움.
     mockedApi.createSession.mockResolvedValue({ success: false, error: 'down' });
@@ -282,7 +307,9 @@ describe('useDrainPendingTrainingRuns: online 이벤트 트리거', () => {
     const callsAfterMount = mockedApi.createSession.mock.calls.length;
     expect(callsAfterMount).toBeGreaterThan(0);
 
-    // throttle 안에서 여러 종류의 트리거가 섞여 들어와도 즉시 추가 cycle 은 시작되지 않는다.
+    // throttle 안에서 여러 종류의 트리거(브라우저 online, visibilitychange, pageshow,
+    // 네이티브 셸의 `noilink-native-network-online`)가 섞여 들어와도 즉시 추가
+    // cycle 은 시작되지 않는다 — 모두 같은 tryTriggerDrain 경로를 통과한다.
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
       get: () => 'visible',
@@ -291,22 +318,26 @@ describe('useDrainPendingTrainingRuns: online 이벤트 트리거', () => {
       window.dispatchEvent(new Event('online'));
       document.dispatchEvent(new Event('visibilitychange'));
       window.dispatchEvent(new Event('pageshow'));
+      window.dispatchEvent(new CustomEvent('noilink-native-network-online'));
       document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new CustomEvent('noilink-native-network-online'));
       await flushMicrotasks();
     });
     expect(mockedApi.createSession.mock.calls.length).toBe(callsAfterMount);
 
-    // throttle 만료 후 한 번의 follow-up cycle 만 실행된다.
+    // throttle 만료 후엔 한 번의 follow-up cycle 만 실행된다 — 네이티브 신호든
+    // 브라우저/포그라운드 신호든 별도 cycle 을 만들지 않는다.
     await act(async () => {
       vi.advanceTimersByTime(MIN_DRAIN_INTERVAL_MS + 2_000);
       await flushMicrotasks();
     });
     const callsAfterFollowUp = mockedApi.createSession.mock.calls.length;
     expect(callsAfterFollowUp).toBeGreaterThan(callsAfterMount);
+    // 한 follow-up 의 in-screen 백오프 포함 시도 수 상한(2회) 을 넘지 않는다.
     expect(callsAfterFollowUp - callsAfterMount).toBeLessThanOrEqual(2);
   });
 
-  it('cycle 진행 중에 visibilitychange/pageshow 가 들어와도 in-flight 가드로 outcome 이 중복되지 않는다', async () => {
+  it('cycle 진행 중에 visibilitychange/pageshow/네이티브 `network.online` 이 들어와도 in-flight 가드로 outcome 이 중복되지 않는다', async () => {
     enqueuePendingRun({ input: baseInput(), title: '판단력' });
 
     // createSession 을 의도적으로 지연시켜 in-flight 상태를 만든다.
@@ -325,8 +356,8 @@ describe('useDrainPendingTrainingRuns: online 이벤트 트리거', () => {
     });
     expect(mockedApi.createSession).toHaveBeenCalledTimes(1);
 
-    // in-flight 도중에 visibility/pageshow 가 들어와도 createSession 이 추가로
-    // 호출되지 않아야 한다.
+    // in-flight 도중에 visibility/pageshow/네이티브 신호가 여러 번 들어와도
+    // createSession 이 추가로 호출되지 않아야 한다.
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
       get: () => 'visible',
@@ -334,13 +365,15 @@ describe('useDrainPendingTrainingRuns: online 이벤트 트리거', () => {
     await act(async () => {
       document.dispatchEvent(new Event('visibilitychange'));
       window.dispatchEvent(new Event('pageshow'));
+      window.dispatchEvent(new CustomEvent('noilink-native-network-online'));
+      window.dispatchEvent(new CustomEvent('noilink-native-network-online'));
       await flushMicrotasks();
     });
     expect(mockedApi.createSession).toHaveBeenCalledTimes(1);
 
     // 첫 cycle 이 끝난 뒤 항목은 정리되고 outcome 은 정확히 하나여야 한다.
     await act(async () => {
-      resolveCreate({ success: true, data: { id: 's-vis-inflight' } });
+      resolveCreate({ success: true, data: { id: 's-inflight' } });
       await flushMicrotasks();
     });
     expect(getPendingRuns()).toEqual([]);

@@ -301,6 +301,18 @@ export type NativeToWebMessage =
       v: BridgeVersion;
       type: 'push.state';
       payload: { status: 'unconfigured' | 'granted' | 'denied' | 'unavailable'; detail?: string };
+    }
+  | {
+      /**
+       * 네이티브 셸이 OS 단의 네트워크 상태 변화를 감지해 "복구"를 알릴 때 보낸다.
+       * 브라우저의 `window 'online'` 이벤트는 WebView 환경에서 신뢰성이 낮을 수 있어,
+       * 네이티브가 추가로 이 채널을 통해 결과 전송 큐의 즉시 drain 트리거를 유도한다.
+       *
+       * 페이로드 없음(브로드캐스트). 수신 측은 throttle/in-flight 가드를 거쳐 큐를 비운다.
+       */
+      v: BridgeVersion;
+      type: 'network.online';
+      payload?: Record<string, never>;
     };
 
 // -----------------------------------------------------------------------------
@@ -931,6 +943,10 @@ function validateNativeToWebPayload(type: string, payload: unknown): BridgeValid
       if (!r.ok) return r.error;
       return reqEnum(r.payload, 'status', type, PUSH_STATUS_VALUES) ?? optString(r.payload, 'detail', type);
     }
+
+    case 'network.online':
+      // payload 없는 broadcast — 객체로 와도 통과 (forward-compatible).
+      return optionalPayloadShape(payload, type);
 
     default:
       return makeError(type, 'unknown-type', undefined, `Unknown NativeToWeb type: ${type}`);
