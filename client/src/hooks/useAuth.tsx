@@ -11,8 +11,10 @@ import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { STORAGE_KEYS } from '../utils/constants';
 import type { User } from '@noilink/shared';
+import { setBleStabilityOverrideResolver } from '@noilink/shared';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { notifyNativeClearSession, notifyNativePersistSession } from '../native/nativeBridgeClient';
+import { loadBleStabilityRemoteConfig } from '../utils/bleStabilityRemoteConfig';
 
 /**
  * 인증 상태를 앱 전역에서 공유하기 위한 컨텍스트.
@@ -118,6 +120,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.addEventListener('noilink-native-session', onNativeSession);
     return () => window.removeEventListener('noilink-native-session', onNativeSession);
   }, []);
+
+  // Task #70: 사용자 컨텍스트가 바뀌면 BLE 안내 임계값 원격 설정을 다시 받아
+  // 사용자별 A/B 그룹(`match.userId`)이 즉시 반영되게 한다.
+  // - main.tsx 의 부트스트랩은 보통 비로그인 상태에서 한 번만 일어나므로,
+  //   로그인/세션 복원 직후 한 번 더 받아 사용자별 규칙을 적용한다.
+  // - 로그아웃 시에는 직전 사용자의 오버라이드가 익명 컨텍스트에 잘못
+  //   적용되지 않도록 등록을 비운다.
+  // - 첫 마운트(prev=null, curr=null) 에서는 main.tsx 부트스트랩과의 경합을
+  //   피하기 위해 아무 것도 하지 않는다.
+  // - 직전 호출의 응답이 늦게 도착해 새 컨텍스트의 오버라이드를 덮어쓰는
+  //   race 를 막기 위해 단조 증가 epoch 를 함께 넘긴다.
+  const prevUserIdRef = useRef<string | null>(null);
+  const bleConfigEpochRef = useRef(0);
+  useEffect(() => {
+    const prev = prevUserIdRef.current;
+    const curr = user?.id ?? null;
+    if (prev === curr) return;
+    prevUserIdRef.current = curr;
+    bleConfigEpochRef.current += 1;
+    const epoch = bleConfigEpochRef.current;
+    if (curr) {
+      void loadBleStabilityRemoteConfig({
+        isStale: () => bleConfigEpochRef.current !== epoch,
+      });
+    } else if (prev) {
+      setBleStabilityOverrideResolver(null);
+    }
+  }, [user?.id]);
 
   const login = async (email: string, password: string) => {
     try {

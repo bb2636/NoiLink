@@ -54,12 +54,21 @@ export interface LoadBleStabilityRemoteConfigOptions {
    * 기본값은 환경의 `globalThis.localStorage` (없으면 캐시 비활성).
    */
   storage?: Storage | null;
+  /**
+   * 응답이 도착했을 때 호출되어 `true` 를 돌려주면 오버라이드 적용을 건너뛴다 (Task #70).
+   * 예: 로그인 직후 트리거된 호출이 늦게 도착했는데 그 사이 사용자가 로그아웃했다면,
+   * 직전 사용자 오버라이드가 익명 컨텍스트에 잘못 덮어써지는 것을 막는다.
+   * 캐시 fallback (네트워크 실패 분기) 에는 영향을 주지 않는다 — 캐시 적용은
+   * `applyCacheIfAny` 가 안전하게 해석한다.
+   */
+  isStale?: () => boolean;
 }
 
 /**
  * 원격 설정을 한 번 받아 오버라이드를 등록한다.
  * - 성공 시: 응답을 캐시에 저장하고 오버라이드를 등록한다.
  * - 실패 시: 캐시가 있으면 그것으로 오버라이드를 등록하고, 없으면 조용히 기본값을 유지한다.
+ * - `isStale` 가드 (Task #70): 응답 도착 시점에 컨텍스트가 바뀌었으면 적용을 건너뛴다.
  */
 export async function loadBleStabilityRemoteConfig(
   options: LoadBleStabilityRemoteConfigOptions = {},
@@ -95,6 +104,10 @@ export async function loadBleStabilityRemoteConfig(
     applyCacheIfAny(storage);
     return;
   }
+
+  // 응답 도착 후 컨텍스트가 바뀌었으면 적용을 건너뛴다 — 직전 epoch 의
+  // 결과로 새 epoch 의 오버라이드가 덮이는 race 를 방지.
+  if (options.isStale?.()) return;
 
   const config = payload?.data ?? null;
   // 성공 응답은 비어 있더라도 캐시에 반영한다 — 운영자가 의도적으로 규칙을

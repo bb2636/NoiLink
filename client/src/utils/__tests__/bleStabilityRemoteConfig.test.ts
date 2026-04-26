@@ -140,6 +140,26 @@ describe('loadBleStabilityRemoteConfig', () => {
     expect(warnSpy).toHaveBeenCalled();
   });
 
+  it('isStale() 가 true 면 응답을 받았어도 오버라이드를 적용하지 않는다 (Task #70 race 가드)', async () => {
+    // 사전: 깨끗한 상태(오버라이드 없음).
+    expect(resolveBleStabilityThresholds().windowThreshold).toBe(
+      DEFAULT_BLE_STABILITY_WINDOW_THRESHOLD,
+    );
+    const fetcher = makeFetchOk({
+      success: true,
+      data: {
+        rules: [
+          { match: { userId: 'u-x' }, thresholds: { windowThreshold: 7 } },
+        ],
+      },
+    });
+    await loadBleStabilityRemoteConfig({ fetcher, isStale: () => true });
+    // 응답 도착 시점에 컨텍스트가 바뀌었다는 신호 → 적용을 건너뛴다.
+    expect(resolveBleStabilityThresholds({ userId: 'u-x' }).windowThreshold).toBe(
+      DEFAULT_BLE_STABILITY_WINDOW_THRESHOLD,
+    );
+  });
+
   it('이전 부트스트랩의 오버라이드가 남아 있어도 빈 응답이면 깨끗이 비운다', async () => {
     // 이전 부트스트랩이 등록한 것처럼 흉내낸다.
     setBleStabilityOverrideResolver(() => ({ windowThreshold: 99 }));
