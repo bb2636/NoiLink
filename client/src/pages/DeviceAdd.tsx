@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
+import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import { STORAGE_KEYS } from '../utils/constants';
 import {
   bleEnsureReady,
@@ -23,6 +24,7 @@ import {
   bleConnect,
 } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
+import { formatAckErrorForBanner, subscribeNativeAckErrors } from '../native/nativeAckErrors';
 import { NOIPOD_NAME_PREFIX, type BleDiscoverySnapshot, type NativeToWebMessage } from '@noilink/shared';
 
 interface RegisteredDevice {
@@ -58,6 +60,10 @@ export default function DeviceAdd() {
   const [devices, setDevices] = useState<BleDiscoverySnapshot[]>([]);
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 브릿지가 web→native 메시지를 거부할 때 (`native.ack.ok=false`) 화면에 띄울 안내.
+  // 페어링 중에 ble.connect/ble.startScan 등이 조용히 실패하면 사용자/QA 가 사유를
+  // 알 수 없으므로, 짧은 토스트로 한국어 안내 + 디버그 키를 노출한다 (Task #77).
+  const [ackErrorBanner, setAckErrorBanner] = useState<string | null>(null);
   const stoppedRef = useRef(false);
 
   // 네이티브 메시지 수신 → discovery/connection/error 분기
@@ -127,6 +133,14 @@ export default function DeviceAdd() {
       window.removeEventListener('noilink-native-bridge', onBridge as EventListener);
     };
   }, [isNative, connectingId, navigate]);
+
+  // ack(ok=false) 구독 — 브릿지가 거부한 사유를 사용자/QA 가 모두 읽을 수 있는
+  // 토스트로 노출 (Task #77). 디버그 키도 함께 보여 버그 리포트 단서를 남긴다.
+  useEffect(() => {
+    return subscribeNativeAckErrors((payload) => {
+      setAckErrorBanner(formatAckErrorForBanner(payload.error));
+    });
+  }, []);
 
   const handleStartScan = () => {
     if (!isNative) {
@@ -285,6 +299,16 @@ export default function DeviceAdd() {
           </button>
         )}
       </div>
+
+      {/* 브릿지 거부(ack ok=false) 토스트 — 한국어 안내 + 디버그 키 (Task #77) */}
+      <SuccessBanner
+        isOpen={!!ackErrorBanner}
+        message={ackErrorBanner ?? ''}
+        backgroundColor="#3a1212"
+        textColor="#fca5a5"
+        duration={5000}
+        onClose={() => setAckErrorBanner(null)}
+      />
     </MobileLayout>
   );
 }

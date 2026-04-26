@@ -5,10 +5,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
+import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import { STORAGE_KEYS } from '../utils/constants';
 import { ensureDemoDevicesSeeded } from '../utils/seedDemoDevices';
 import { bleConnect, bleDisconnect } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
+import { formatAckErrorForBanner, subscribeNativeAckErrors } from '../native/nativeAckErrors';
 import type { NativeToWebMessage } from '@noilink/shared';
 
 export interface DeviceInfo {
@@ -58,6 +60,9 @@ export default function Device() {
   const isNative = isNoiLinkNativeShell();
   const [connectedId, setConnectedId] = useState<string | null>(getConnectedDeviceId);
   const [registered, setRegistered] = useState<RegisteredDevice[]>(loadRegisteredDevices);
+  // 브릿지가 web→native 메시지를 거부할 때 (`native.ack.ok=false`) 화면에 띄울 안내.
+  // 핵심 흐름(연결/해제) 도중 조용히 실패하지 않도록 짧은 토스트로 사유를 노출한다 (Task #77).
+  const [ackErrorBanner, setAckErrorBanner] = useState<string | null>(null);
 
   const devicesWithConnection: DeviceInfo[] = registered.map((d) => ({
     id: d.id,
@@ -98,6 +103,14 @@ export default function Device() {
       window.removeEventListener('storage', storageHandler);
       window.removeEventListener('noilink-native-bridge', bridgeHandler as EventListener);
     };
+  }, []);
+
+  // ack(ok=false) 구독 — 브릿지가 거부한 사유를 사용자/QA 가 모두 읽을 수 있는
+  // 토스트로 노출. 디버그 키(`type:reason@field`)도 함께 보여줘 버그 리포트 단서를 남긴다.
+  useEffect(() => {
+    return subscribeNativeAckErrors((payload) => {
+      setAckErrorBanner(formatAckErrorForBanner(payload.error));
+    });
   }, []);
 
   const handleConnectAction = (device: DeviceInfo) => {
@@ -217,6 +230,16 @@ export default function Device() {
           <span className="font-semibold">기기 추가</span>
         </button>
       </div>
+
+      {/* 브릿지 거부(ack ok=false) 토스트 — 한국어 안내 + 디버그 키 (Task #77) */}
+      <SuccessBanner
+        isOpen={!!ackErrorBanner}
+        message={ackErrorBanner ?? ''}
+        backgroundColor="#3a1212"
+        textColor="#fca5a5"
+        duration={5000}
+        onClose={() => setAckErrorBanner(null)}
+      />
     </MobileLayout>
   );
 }

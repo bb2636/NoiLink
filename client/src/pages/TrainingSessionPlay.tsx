@@ -19,6 +19,7 @@ import { reportBleAbortFireAndForget } from '../utils/reportBleAbort';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
 import { bleReconnectNow, bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
+import { formatAckErrorForBanner, subscribeNativeAckErrors } from '../native/nativeAckErrors';
 import { isBleUnstableForAbort, type TrainingAbortReason } from './trainingAbortReason';
 
 /**
@@ -138,6 +139,10 @@ export default function TrainingSessionPlay() {
   // (사용자가 토스트를 닫아도 다시 뜨지 않는다 — 한 세션에 정확히 한 번).
   const [bleStabilityNoticeOpen, setBleStabilityNoticeOpen] = useState(false);
   const bleStabilityNoticeShownRef = useRef(false);
+  // 트레이닝 도중 브릿지가 web→native 메시지를 거부하면(`native.ack.ok=false`)
+  // 화면에는 아무 변화가 없어 사용자/QA 가 사유를 알 수 없다 (Task #77).
+  // 짧은 토스트로 한국어 안내 + 디버그 키 (`type:reason@field`) 를 함께 노출한다.
+  const [ackErrorBanner, setAckErrorBanner] = useState<string | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -164,6 +169,14 @@ export default function TrainingSessionPlay() {
       navigate('/training', { replace: true });
     }
   }, [state, totalSec, navigate]);
+
+  // ack(ok=false) 구독 — 트레이닝 도중 BLE write/connect 가 거부되어도 화면은
+  // 조용히 보일 수 있으므로, 한국어 안내 + 디버그 키를 짧은 토스트로 노출한다 (Task #77).
+  useEffect(() => {
+    return subscribeNativeAckErrors((payload) => {
+      setAckErrorBanner(formatAckErrorForBanner(payload.error));
+    });
+  }, []);
 
   // ── 엔진 lifecycle ──
   useEffect(() => {
@@ -808,6 +821,19 @@ export default function TrainingSessionPlay() {
         textColor="#FFD66B"
         duration={4000}
         onClose={() => setBleStabilityNoticeOpen(false)}
+      />
+
+      {/* 브릿지 거부(ack ok=false) 토스트 — 한국어 안내 + 디버그 키 (Task #77).
+          BLE 단절 토스트와 동시에 뜰 가능성은 매우 낮지만, 같은 top-0 영역에
+          렌더되므로 둘 중 늦게 마운트된 쪽이 위로 보일 수 있다. 둘 다 자동 닫힘이라
+          교차하는 시간은 짧고, 사용자는 어느 쪽이든 즉시 사유를 확인할 수 있다. */}
+      <SuccessBanner
+        isOpen={!!ackErrorBanner}
+        message={ackErrorBanner ?? ''}
+        backgroundColor="#3a1212"
+        textColor="#fca5a5"
+        duration={5000}
+        onClose={() => setAckErrorBanner(null)}
       />
 
       <ConfirmModal

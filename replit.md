@@ -117,6 +117,20 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
   `client/src/utils/__tests__/bleStabilityRemoteConfig.test.ts`.
 - 운영 튜닝: 환경 변수만 갱신하면 앱 재배포 없이 모델/사용자별 임계값 A/B 가능.
 
+## Bridge Reject Toast (Task #77)
+
+- 모바일 디스패처/웹 수신기는 잘못된 web→native 메시지를 거부할 때
+  `${type}:${reason}@${field}: ${message}` 형식의 사유를 `native.ack.payload.error` 에 싣는다.
+- 클라이언트는 `client/src/native/nativeAckErrors.ts` 의
+  `subscribeNativeAckErrors()` / `formatAckErrorForBanner()` 로 사유를 파싱해
+  한국어 안내(예: "내부 오류: ble.connect의 deviceId 누락") + 디버그 키
+  (`type:reason@field`) 를 SuccessBanner 에 띄운다.
+- 적용 화면: `client/src/pages/Device.tsx`, `client/src/pages/DeviceAdd.tsx`,
+  `client/src/pages/TrainingSessionPlay.tsx`.
+- 자유 문자열(`BleManagerError.message`, `version-mismatch` 등)은 디버그 키 없이
+  원문을 그대로 노출해 정보 손실이 없도록 한다.
+- 회귀 테스트: `client/src/native/__tests__/nativeAckErrors.test.ts`.
+
 ## Deployment
 
 - Target: autoscale
