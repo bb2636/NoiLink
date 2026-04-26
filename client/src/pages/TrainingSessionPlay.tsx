@@ -557,11 +557,17 @@ export default function TrainingSessionPlay() {
     // Result.tsx 가 비교 카드와 "직전 대비" 코칭 문구를 함께 숨긴다.
     const previousScoreRes = await previousScorePromise;
     let previousScore: number | undefined;
+    // Task #123: 직전 점수와 함께 직전 세션의 `createdAt` 도 한 쌍으로 보관해
+    // 결과 화면 비교 카드의 직전 날짜 라벨이 가짜 "오늘 - 2일" 이 아니라
+    // 실제 세션 날짜로 표시되게 한다. 점수가 없으면 날짜도 비워(undefined)
+    // 라벨이 어긋난 채로 새어 나가는 일이 없게 한다.
+    let previousScoreCreatedAt: string | undefined;
     if (previousScoreRes && previousScoreRes.success && previousScoreRes.data) {
       for (const s of previousScoreRes.data) {
         if (s.id === res.sessionId) continue;
         if (typeof s.score === 'number') {
           previousScore = s.score;
+          previousScoreCreatedAt = s.createdAt;
           break;
         }
       }
@@ -573,6 +579,9 @@ export default function TrainingSessionPlay() {
         displayScore: res.displayScore,
         // 비교 카드에 사용할 직전 점수 (첫 세션·이력 조회 실패 시 undefined).
         previousScore,
+        // 비교 카드의 직전 날짜 라벨용(Task #123) — 점수와 한 쌍으로 함께 전달.
+        // 점수가 없으면 날짜도 undefined 라 라벨이 어긋나는 일이 없다.
+        previousScoreCreatedAt,
         yieldsScore: state.yieldsScore,
         sessionId: res.sessionId,
         // 서버 idempotency 캐시 hit(= 사용자가 같은 결과를 두 번 보낸 셈) 신호를

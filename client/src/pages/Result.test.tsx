@@ -75,6 +75,10 @@ const BASE_STATE: TrainingResultState = {
   title: '집중력 트레이닝',
   displayScore: 80,
   previousScore: 70,
+  // Task #123: 정상 완료 흐름은 점수와 한 쌍으로 직전 세션 createdAt 도 함께
+  // 넘긴다 — 비교 카드 라벨이 가짜 "오늘 - 2일" 이 아니라 실제 세션 날짜가
+  // 되도록 잠근다. 기본 픽스처는 5월 10일을 직전 세션으로 둔다.
+  previousScoreCreatedAt: '2026-05-10T03:00:00.000Z',
   yieldsScore: true,
   sessionId: 'sess-test',
 };
@@ -778,6 +782,133 @@ describe('Result — 재진입 시 점수도 서버에서 다시 불러오기 (T
     expect(card?.textContent).toContain('75');
     expect(card?.textContent).toContain('82');
     expect(card?.textContent).toContain('+7');
+  });
+
+  // ───────────────────────────────────────────────────────────
+  // Task #123 — 비교 카드의 직전 날짜 라벨을 실제 세션 날짜로 표시
+  // ───────────────────────────────────────────────────────────
+  //
+  // 정책 요약:
+  //   1. 정상 완료 흐름: navigate state.previousScoreCreatedAt 의 ISO 날짜를
+  //      "{월}월 {일}일" 라벨로 비교 카드의 직전 점수 아래에 표시한다.
+  //   2. 재진입 흐름: 세션 단건 직전 점수 엔드포인트 응답의
+  //      previousScoreCreatedAt 을 같은 라벨 로직으로 표시한다.
+  //   3. 직전 날짜가 누락된 과거 페이로드는 "직전" 으로 폴백 — 가짜
+  //      "오늘 - 2일" 라벨이 절대 부활하지 않는다.
+  //
+  // 보호 목적:
+  //   - 점수는 진짜인데 라벨만 "오늘 - 2일" 인 어긋난 비교 카드 회귀를 잠근다.
+
+  function expectedLocalDateLabel(iso: string): string {
+    const d = new Date(iso);
+    return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+  }
+
+  function prevScoreMiniText(): string {
+    // 비교 카드 안의 첫 번째 ScoreMini(직전) 의 라벨 영역만 본다.
+    // ScoreMini 의 라벨은 점수 원 아래의 마지막 span(text-xs text-gray-400).
+    const card = prevVsTodayCard();
+    if (!card) return '';
+    const labels = card.querySelectorAll('span.text-xs.text-gray-400');
+    return Array.from(labels)
+      .map((s) => s.textContent ?? '')
+      .join('|');
+  }
+
+  it('정상 완료 흐름에서 previousScoreCreatedAt 이 라벨로 표시된다 (가짜 "오늘 - 2일" 폴백 금지)', async () => {
+    mockApiGet.mockResolvedValue({ success: true, data: { raw: null, score: null } });
+
+    const PREV_ISO = '2026-05-10T12:00:00.000Z';
+    renderResult({
+      displayScore: 82,
+      previousScore: 75,
+      previousScoreCreatedAt: PREV_ISO,
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const labels = prevScoreMiniText();
+    // 직전 라벨에 실제 세션 날짜가 들어 있어야 한다.
+    expect(labels).toContain(expectedLocalDateLabel(PREV_ISO));
+    // 오늘 라벨도 그대로 노출돼 한 쌍이 함께 보인다.
+    expect(labels).toContain('오늘');
+    // 가짜 "오늘 - 2일" 폴백이 부활하지 않는지 — 오늘로부터 2일 전 라벨이
+    // 우연히 일치하지 않게 명시적으로 다른 날짜를 픽스처에 둔다.
+    const twoDaysAgo = new Date();
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+    const fakeLabel = `${twoDaysAgo.getMonth() + 1}월 ${twoDaysAgo.getDate()}일`;
+    if (fakeLabel !== expectedLocalDateLabel(PREV_ISO)) {
+      // PREV_ISO 와 우연히 같은 날이면 의미 있는 단언이 아니므로 건너뛴다.
+      expect(labels.split('|').filter((l) => l === fakeLabel).length).toBe(0);
+    }
+  });
+
+  it('재진입 흐름에서 서버 응답의 previousScoreCreatedAt 이 라벨로 표시된다', async () => {
+    const PREV_ISO = '2026-04-22T12:00:00.000Z';
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.endsWith('/previous-score')) {
+        return Promise.resolve({
+          success: true,
+          data: { previousScore: 58, previousScoreCreatedAt: PREV_ISO },
+        });
+      }
+      if (url.startsWith('/metrics/session/')) {
+        return Promise.resolve({
+          success: true,
+          data: {
+            raw: null,
+            score: {
+              sessionId: 'sess-test',
+              userId: 'user-1',
+              memory: 70,
+              comprehension: 70,
+              focus: 70,
+              createdAt: '2026-04-26T00:00:00.000Z',
+            },
+          },
+        });
+      }
+      return Promise.resolve({ success: false });
+    });
+
+    reentryRender();
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const labels = prevScoreMiniText();
+    expect(labels).toContain(expectedLocalDateLabel(PREV_ISO));
+    expect(labels).toContain('오늘');
+  });
+
+  it('previousScoreCreatedAt 이 누락된 과거 페이로드면 "직전" 으로 폴백한다 (가짜 라벨 부활 방지)', async () => {
+    mockApiGet.mockResolvedValue({ success: true, data: { raw: null, score: null } });
+
+    renderResult({
+      displayScore: 82,
+      previousScore: 75,
+      previousScoreCreatedAt: undefined,
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const labels = prevScoreMiniText();
+    // 라벨이 비어 있지 않고 "직전" 으로 폴백돼야 한다.
+    expect(labels).toContain('직전');
+    // 그리고 절대로 현재 시각 기반 "오늘 - 2일" 라벨이 그려지지 않아야 한다.
+    const twoDaysAgo = new Date();
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+    const fakeLabel = `${twoDaysAgo.getMonth() + 1}월 ${twoDaysAgo.getDate()}일`;
+    expect(labels.split('|').filter((l) => l === fakeLabel).length).toBe(0);
   });
 
   it('서버 score 가 null 이면 데모 폴백을 사용한다 (빈 응답 안전망)', async () => {

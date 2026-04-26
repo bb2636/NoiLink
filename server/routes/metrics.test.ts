@@ -595,13 +595,21 @@ describe('GET /api/metrics/session/:sessionId/previous-score (Task #114)', () =>
     currentActor.user = ACTOR_USER;
   });
 
-  it('현재 세션 직전 시점에서 점수가 있는 가장 최신 세션의 점수를 돌려준다', async () => {
+  it('현재 세션 직전 시점에서 점수가 있는 가장 최신 세션의 점수와 날짜를 돌려준다 (Task #123)', async () => {
     const app = buildApp();
 
     const res = await request(app).get('/api/metrics/session/sess-current/previous-score');
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ success: true, data: { previousScore: 60 } });
+    expect(res.body).toEqual({
+      success: true,
+      data: {
+        previousScore: 60,
+        // 비교 카드 라벨이 가짜 "오늘 - 2일" 이 아니라 실제 직전 세션의
+        // createdAt 으로 표시되도록 함께 회신한다.
+        previousScoreCreatedAt: '2025-01-02T00:00:00.000Z',
+      },
+    });
   });
 
   it('점수 미산출 세션(score=undefined)은 후보에서 제외되고 그 이전의 점수 있는 세션이 채택된다', async () => {
@@ -623,14 +631,19 @@ describe('GET /api/metrics/session/:sessionId/previous-score (Task #114)', () =>
     expect(res.body.data.previousScore).toBe(60);
   });
 
-  it('첫 세션(과거에 점수 있는 세션이 하나도 없음) 이면 previousScore: null', async () => {
+  it('첫 세션(과거에 점수 있는 세션이 하나도 없음) 이면 previousScore/previousScoreCreatedAt 모두 null', async () => {
     store.sessions = [SESSIONS[0]]; // sess-old-1 하나만 — 자기 자신 외 후보 없음.
     const app = buildApp();
 
     const res = await request(app).get('/api/metrics/session/sess-old-1/previous-score');
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ success: true, data: { previousScore: null } });
+    // 클라이언트가 비교 카드 자체를 숨기도록 둘 다 null 로 회신한다 — 점수만
+    // null 이고 날짜만 들어오는 어긋난 상태가 새어 나가지 않게 같이 잠근다.
+    expect(res.body).toEqual({
+      success: true,
+      data: { previousScore: null, previousScoreCreatedAt: null },
+    });
   });
 
   it('세션 이력이 50건을 넘어 옛날 세션을 다시 열어도 직전 점수를 정확히 돌려준다 (페이징 한계 제거)', async () => {

@@ -29,6 +29,14 @@ export type TrainingResultState = {
   title: string;
   displayScore?: number;
   previousScore?: number;
+  /**
+   * 직전 세션의 `createdAt`(ISO 8601, Task #123).
+   * 비교 카드의 직전 날짜 라벨을 가짜 "오늘 - 2일" 이 아니라 실제 직전 세션
+   * 날짜로 표시하기 위해 점수와 한 쌍으로 함께 전달한다. 직전 세션이 없으면
+   * (첫 세션) undefined — 비교 카드 자체가 숨겨지므로 라벨도 필요 없다.
+   * 정상 완료 흐름과 재진입 흐름 모두 같은 라벨 로직을 쓴다.
+   */
+  previousScoreCreatedAt?: string;
   yieldsScore: boolean;
   sessionId?: string;
   /** BLE 단절 → 자동 재연결 회복 구간 누적 시간(ms). 0 또는 미존재면 배너 숨김. */
@@ -136,7 +144,11 @@ export default function Result() {
   // 그대로 채운다. 클라이언트가 페이징·정렬을 다루지 않으므로 사용자가 50회
   // 이상 트레이닝한 뒤 옛날 세션을 다시 열어도 직전 점수가 빠지지 않는다.
   // 직전 세션이 없으면(첫 세션) 응답이 `previousScore: null` → 비교 카드는 숨긴다.
+  // Task #123: 응답에 `previousScoreCreatedAt` 도 함께 들어와, 비교 카드의 직전
+  // 날짜 라벨을 실제 세션 날짜로 표시한다(가짜 "오늘 - 2일" 폴백 제거).
   const [serverPreviousScore, setServerPreviousScore] = useState<number | null>(null);
+  const [serverPreviousScoreCreatedAt, setServerPreviousScoreCreatedAt] =
+    useState<string | null>(null);
   const needsPreviousScoreFetch =
     Boolean(sessionIdForFetch) &&
     !stateProvidedDisplayScore &&
@@ -144,12 +156,13 @@ export default function Result() {
   useEffect(() => {
     if (!needsPreviousScoreFetch || !sessionIdForFetch) return;
     // sessionId 가 바뀌어 새로 조회가 필요해지면 이전 결과를 비워
-    // 다른 세션의 직전 점수가 잠깐 노출되는 것을 막는다.
+    // 다른 세션의 직전 점수/날짜가 잠깐 노출되는 것을 막는다.
     setServerPreviousScore(null);
+    setServerPreviousScoreCreatedAt(null);
     let cancelled = false;
     (async () => {
       const res = await api
-        .get<{ previousScore: number | null }>(
+        .get<{ previousScore: number | null; previousScoreCreatedAt?: string | null }>(
           `/metrics/session/${sessionIdForFetch}/previous-score`,
         )
         .catch(() => null);
@@ -158,6 +171,12 @@ export default function Result() {
       const prev = res.data.previousScore;
       if (typeof prev === 'number') {
         setServerPreviousScore(prev);
+        // 점수와 날짜를 한 쌍으로만 채택 — 점수만 들어오는 응답에 라벨이
+        // 어긋나지 않게 한다(점수 없으면 카드가 숨겨지므로 라벨도 무의미).
+        const createdAt = res.data.previousScoreCreatedAt;
+        if (typeof createdAt === 'string') {
+          setServerPreviousScoreCreatedAt(createdAt);
+        }
       }
     })();
     return () => {
@@ -193,10 +212,16 @@ export default function Result() {
   // - 어느 경로로도 직전 점수를 못 얻으면(첫 세션·이력 조회 실패) 비교 카드를
   //   숨긴다 — 가짜 비교를 보여 사용자를 오인시키지 않기 위함.
   let resolvedPreviousScore: number | undefined;
+  let resolvedPreviousScoreCreatedAt: string | undefined;
   if (state?.previousScore != null) {
     resolvedPreviousScore = state.previousScore;
+    // Task #123: 정상 완료 흐름은 TrainingSessionPlay 가 점수와 날짜를 한 쌍으로
+    // 채워 보낸다. 같은 출처의 값을 함께 채택해 라벨이 어긋나지 않게 한다.
+    resolvedPreviousScoreCreatedAt = state.previousScoreCreatedAt;
   } else if (serverPreviousScore != null) {
     resolvedPreviousScore = serverPreviousScore;
+    // 재진입 흐름: 같은 단건 엔드포인트 응답에서 받은 날짜를 그대로 사용한다.
+    resolvedPreviousScoreCreatedAt = serverPreviousScoreCreatedAt ?? undefined;
   }
   const hasPreviousScore = resolvedPreviousScore !== undefined;
   const prevScore = resolvedPreviousScore ?? 0;
@@ -620,8 +645,14 @@ export default function Result() {
               style={{ backgroundColor: '#1A1A1A' }}
             >
               <div className="flex items-center justify-around">
-                {/* 직전 */}
-                <ScoreMini score={prevScore} label={formatPastDate()} accent="#888" />
+                {/* 직전 — 라벨은 직전 세션의 실제 createdAt 으로 표기(Task #123).
+                    날짜가 없으면(과거 페이로드 호환) "직전" 으로만 노출해 가짜
+                    "오늘 - 2일" 라벨이 다시 새어 나오지 않게 한다. */}
+                <ScoreMini
+                  score={prevScore}
+                  label={formatPastDate(resolvedPreviousScoreCreatedAt)}
+                  accent="#888"
+                />
                 {/* 화살표 + 차이 */}
                 <div className="flex flex-col items-center">
                   <span className="text-sm mb-1" style={{ color: '#AAED10' }}>
@@ -731,9 +762,19 @@ function ScoreMini({
   );
 }
 
-function formatPastDate(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 2);
+/**
+ * 비교 카드의 직전 날짜 라벨(Task #123).
+ *
+ * 정책:
+ *  - 인자가 직전 세션의 ISO 8601 `createdAt` 이면 "{월}월 {일}일" 로 표기한다.
+ *    점수와 한 쌍으로 같은 출처(서버 이력)에서 온 값이라 라벨이 어긋나지 않는다.
+ *  - 인자가 비었거나(과거 페이로드 호환) ISO 파싱이 실패하면 "직전" 으로 폴백한다.
+ *    가짜 "오늘 - 2일" 라벨이 다시 부활하지 않도록 절대 현재 시각을 쓰지 않는다.
+ */
+function formatPastDate(createdAt: string | undefined): string {
+  if (!createdAt) return '직전';
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) return '직전';
   return `${d.getMonth() + 1}월 ${d.getDate()}일`;
 }
 

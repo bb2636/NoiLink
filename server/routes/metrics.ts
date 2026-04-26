@@ -332,6 +332,10 @@ router.get('/session/:sessionId', optionalAuth, async (req: Request, res: Respon
  *    있어도 sessionId 자체로 현재 세션은 제외해 자기 자신과 비교하지 않는다.
  *  - 직전 세션이 없거나(첫 세션) 모두 점수 미산출이면 `previousScore: null` 로
  *    돌려보낸다 — 클라이언트는 이 신호로 비교 카드를 숨긴다(가짜 비교 금지).
+ *  - 직전 세션이 있으면 그 세션의 `createdAt` 도 함께(`previousScoreCreatedAt`)
+ *    돌려보낸다(Task #123). 클라이언트는 비교 카드의 직전 날짜 라벨을 가짜
+ *    "오늘 - 2일" 이 아니라 이 실제 세션 날짜로 표시한다 — 점수와 날짜가
+ *    한 쌍으로 어긋나지 않게 한다. 직전이 없으면 `previousScoreCreatedAt: null`.
  */
 router.get('/session/:sessionId/previous-score', optionalAuth, async (req: Request, res: Response) => {
   try {
@@ -363,7 +367,12 @@ router.get('/session/:sessionId/previous-score', optionalAuth, async (req: Reque
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     const previousScore = candidates.length > 0 ? (candidates[0].score as number) : null;
-    res.json({ success: true, data: { previousScore } });
+    const previousScoreCreatedAt =
+      candidates.length > 0 ? candidates[0].createdAt : null;
+    res.json({
+      success: true,
+      data: { previousScore, previousScoreCreatedAt },
+    });
   } catch (error) {
     res.status(500).json({
       success: false,
