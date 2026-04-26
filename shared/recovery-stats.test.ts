@@ -36,6 +36,99 @@ describe('sanitizeRecoveryRawMetrics', () => {
       windows: 3,
     });
   });
+
+  // ───────────────────────────────────────────────────────────
+  // Task #61: segments(회복 구간 타임라인) 보존 회귀
+  // 서버가 결과 화면 재진입·운영자 분석을 위해 segments 를 그대로 저장하려면
+  // sanitize 가 segments 를 통과시키되 정수 ms 로 정규화해야 한다.
+  // ───────────────────────────────────────────────────────────
+
+  it('preserves segments and rounds startedAt / durationMs to integer ms (Task #61)', () => {
+    const result = sanitizeRecoveryRawMetrics({
+      excludedMs: 4_123,
+      windows: 2,
+      segments: [
+        { startedAt: 5_000.4, durationMs: 1_500.6 },
+        { startedAt: 22_000, durationMs: 2_623.2 },
+      ],
+    });
+    expect(result).toEqual({
+      excludedMs: 4_123,
+      windows: 2,
+      segments: [
+        { startedAt: 5_000, durationMs: 1_501 },
+        { startedAt: 22_000, durationMs: 2_623 },
+      ],
+    });
+  });
+
+  it('omits segments field entirely when the array is empty so the payload shape stays back-compatible', () => {
+    const result = sanitizeRecoveryRawMetrics({
+      excludedMs: 4_000,
+      windows: 1,
+      segments: [],
+    });
+    expect(result).toEqual({ excludedMs: 4_000, windows: 1 });
+    expect(result).not.toHaveProperty('segments');
+  });
+
+  it('drops segment entries with non-positive durationMs so averages are not diluted by zero-length items', () => {
+    const result = sanitizeRecoveryRawMetrics({
+      excludedMs: 3_000,
+      windows: 1,
+      segments: [
+        { startedAt: 1_000, durationMs: 0 },
+        { startedAt: 2_000, durationMs: -50 },
+        { startedAt: 5_000, durationMs: 3_000 },
+      ],
+    });
+    expect(result?.segments).toEqual([{ startedAt: 5_000, durationMs: 3_000 }]);
+  });
+
+  it('clamps negative / NaN startedAt to 0 while keeping the segment when duration is valid', () => {
+    const result = sanitizeRecoveryRawMetrics({
+      excludedMs: 1_000,
+      windows: 1,
+      segments: [{ startedAt: -100, durationMs: 1_000 }],
+    });
+    expect(result?.segments).toEqual([{ startedAt: 0, durationMs: 1_000 }]);
+  });
+
+  it('treats segments as absent when not an array (defensive against malformed payloads)', () => {
+    const result = sanitizeRecoveryRawMetrics({
+      excludedMs: 2_000,
+      windows: 1,
+      segments: 'oops' as unknown as never,
+    });
+    expect(result).toEqual({ excludedMs: 2_000, windows: 1 });
+    expect(result).not.toHaveProperty('segments');
+  });
+
+  it('drops non-object segment entries silently (defensive against malformed payloads)', () => {
+    const result = sanitizeRecoveryRawMetrics({
+      excludedMs: 2_000,
+      windows: 1,
+      segments: [
+        null,
+        'oops',
+        { startedAt: 5_000, durationMs: 2_000 },
+      ] as unknown as never[],
+    });
+    expect(result?.segments).toEqual([{ startedAt: 5_000, durationMs: 2_000 }]);
+  });
+
+  it('keeps a non-empty segments-only payload (excludedMs/windows = 0 but segments present is still meaningful)', () => {
+    const result = sanitizeRecoveryRawMetrics({
+      excludedMs: 0,
+      windows: 0,
+      segments: [{ startedAt: 1_000, durationMs: 500 }],
+    });
+    expect(result).toEqual({
+      excludedMs: 0,
+      windows: 0,
+      segments: [{ startedAt: 1_000, durationMs: 500 }],
+    });
+  });
 });
 
 describe('aggregateRecoveryStats', () => {

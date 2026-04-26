@@ -169,6 +169,133 @@ describe('POST /api/metrics/calculate — recovery 페이로드 정규화', () =
     expect(store.rawMetrics[0].recovery).toEqual({ excludedMs: 7_500, windows: 2 });
   });
 
+  // ───────────────────────────────────────────────────────────
+  // Task #61: 회복 segments(타임라인) 영속화 회귀.
+  // 결과 화면(Result.tsx)이 보여주는 끊김 타임라인을 운영자가 지난 세션에서도
+  // 다시 들여다볼 수 있도록, 서버는 sanitize 를 통과한 segments 를 그대로
+  // rawMetrics 에 저장해야 한다 — 손상된 항목만 골라 떨어뜨려야 한다.
+  // ───────────────────────────────────────────────────────────
+
+  it('segments 가 포함된 정상 페이로드는 정수 ms 로 정규화되어 그대로 영속화된다 (Task #61)', async () => {
+    const app = buildApp();
+    const payload = baseRawMetrics({
+      recovery: {
+        excludedMs: 4_123,
+        windows: 2,
+        segments: [
+          { startedAt: 5_000.4, durationMs: 1_500.6 },
+          { startedAt: 22_000, durationMs: 2_623 },
+        ],
+      },
+    });
+
+    const res = await request(app).post('/api/metrics/calculate').send(payload);
+
+    expect(res.status).toBe(201);
+    expect(store.rawMetrics[0].recovery).toEqual({
+      excludedMs: 4_123,
+      windows: 2,
+      segments: [
+        { startedAt: 5_000, durationMs: 1_501 },
+        { startedAt: 22_000, durationMs: 2_623 },
+      ],
+    });
+  });
+
+  it('손상된 segments 항목(durationMs <= 0, 비-object) 만 떨궈내고 유효 항목은 보존한다', async () => {
+    const app = buildApp();
+    const payload = baseRawMetrics({
+      recovery: {
+        excludedMs: 3_000,
+        windows: 1,
+        segments: [
+          { startedAt: 1_000, durationMs: 0 },
+          { startedAt: 2_000, durationMs: -50 },
+          // @ts-expect-error - 잘못된 모양을 의도적으로 보냄
+          null,
+          { startedAt: 5_000, durationMs: 3_000 },
+        ],
+      },
+    });
+
+    const res = await request(app).post('/api/metrics/calculate').send(payload);
+
+    expect(res.status).toBe(201);
+    expect(store.rawMetrics[0].recovery).toEqual({
+      excludedMs: 3_000,
+      windows: 1,
+      segments: [{ startedAt: 5_000, durationMs: 3_000 }],
+    });
+  });
+
+  it('segments 가 빈 배열로 들어오면 저장 시 segments 필드 자체가 생략된다 (과거 페이로드와 모양 호환)', async () => {
+    const app = buildApp();
+    const payload = baseRawMetrics({
+      recovery: { excludedMs: 4_000, windows: 1, segments: [] },
+    });
+
+    const res = await request(app).post('/api/metrics/calculate').send(payload);
+
+    expect(res.status).toBe(201);
+    expect(store.rawMetrics[0].recovery).toEqual({ excludedMs: 4_000, windows: 1 });
+    expect(store.rawMetrics[0].recovery).not.toHaveProperty('segments');
+  });
+
+  it('POST /api/metrics/raw 도 동일하게 segments 를 정규화해 영속화한다', async () => {
+    const app = buildApp();
+    const payload = baseRawMetrics({
+      recovery: {
+        excludedMs: 4_123,
+        windows: 2,
+        segments: [
+          { startedAt: 5_000, durationMs: 1_500 },
+          { startedAt: 22_000, durationMs: 2_623 },
+        ],
+      },
+    });
+
+    const res = await request(app).post('/api/metrics/raw').send(payload);
+
+    expect(res.status).toBe(201);
+    expect(store.rawMetrics[0].recovery).toEqual({
+      excludedMs: 4_123,
+      windows: 2,
+      segments: [
+        { startedAt: 5_000, durationMs: 1_500 },
+        { startedAt: 22_000, durationMs: 2_623 },
+      ],
+    });
+  });
+
+  it('GET /api/metrics/session/:sessionId 응답에 저장된 segments 가 그대로 포함된다 (재진입 시 동일 안내가 보이도록)', async () => {
+    const app = buildApp();
+    const payload = baseRawMetrics({
+      recovery: {
+        excludedMs: 4_123,
+        windows: 2,
+        segments: [
+          { startedAt: 5_000, durationMs: 1_500 },
+          { startedAt: 22_000, durationMs: 2_623 },
+        ],
+      },
+    });
+
+    const post = await request(app).post('/api/metrics/calculate').send(payload);
+    expect(post.status).toBe(201);
+
+    const get = await request(app).get('/api/metrics/session/sess-1');
+    expect(get.status).toBe(200);
+    expect(get.body.success).toBe(true);
+    expect(get.body.data.raw.recovery).toEqual({
+      excludedMs: 4_123,
+      windows: 2,
+      segments: [
+        { startedAt: 5_000, durationMs: 1_500 },
+        { startedAt: 22_000, durationMs: 2_623 },
+      ],
+    });
+  });
+
   it('actor 가 인증되어 있지 않으면 401 로 차단되어 raw/score 가 모두 저장되지 않는다', async () => {
     currentActor.user = null;
     const app = buildApp();

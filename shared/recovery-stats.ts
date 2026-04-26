@@ -50,8 +50,32 @@ function sanitizeNumber(n: unknown): number {
 }
 
 /**
+ * 회복 구간 세그먼트(타임라인) 1개를 안전한 모양으로 정규화한다.
+ *
+ * - startedAt/durationMs 가 모두 정수 ms 로 통일된다 (음수·NaN 은 0).
+ * - durationMs <= 0 인 항목은 의미 없는 더미로 보고 제외한다 — 결과 화면의
+ *   "평균/최장 끊김" 계산이 0짜리 항목으로 희석되지 않도록 한다.
+ * - object 가 아니거나 필드가 누락되면 null 을 반환한다.
+ */
+function sanitizeSegment(
+  input: unknown,
+): { startedAt: number; durationMs: number } | null {
+  if (!input || typeof input !== 'object') return null;
+  const obj = input as Record<string, unknown>;
+  const startedAt = Math.round(sanitizeNumber(obj.startedAt));
+  const durationMs = Math.round(sanitizeNumber(obj.durationMs));
+  if (durationMs <= 0) return null;
+  return { startedAt, durationMs };
+}
+
+/**
  * recovery 페이로드를 안전한 모양으로 정규화한다 — 음수/NaN/누락 필드를 0으로.
  * 서버 측 입력 검증용으로도 사용한다(잘못된 모양이 통계를 오염시키지 않도록).
+ *
+ * Task #61: segments(회복 구간 타임라인)도 정수 ms 로 정규화해 통과시킨다 —
+ * 운영자가 지난 세션의 끊김 패턴을 다시 들여다볼 수 있도록 서버에 보존한다.
+ * 누적 통계는 excludedMs/windows 만 보면 충분하므로 segments 가 비어 있으면
+ * 굳이 빈 배열을 만들지 않고 필드를 생략한다 (과거 페이로드와 모양 호환).
  */
 export function sanitizeRecoveryRawMetrics(
   input: unknown,
@@ -60,8 +84,15 @@ export function sanitizeRecoveryRawMetrics(
   const obj = input as Record<string, unknown>;
   const excludedMs = Math.round(sanitizeNumber(obj.excludedMs));
   const windows = Math.round(sanitizeNumber(obj.windows));
-  if (excludedMs === 0 && windows === 0) return undefined;
-  return { excludedMs, windows };
+  const segments = Array.isArray(obj.segments)
+    ? obj.segments
+        .map(sanitizeSegment)
+        .filter((s): s is { startedAt: number; durationMs: number } => s !== null)
+    : [];
+  if (excludedMs === 0 && windows === 0 && segments.length === 0) return undefined;
+  const result: RecoveryRawMetrics = { excludedMs, windows };
+  if (segments.length > 0) result.segments = segments;
+  return result;
 }
 
 /**
