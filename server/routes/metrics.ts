@@ -11,6 +11,7 @@ import type { RawMetrics, MetricsScore, Session, User } from '@noilink/shared';
 import { sanitizeRecoveryRawMetrics } from '@noilink/shared';
 import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
 import { userCanActOnTargetUserId } from '../utils/session-user-policy.js';
+import { withIdempotency } from '../utils/idempotency.js';
 
 /**
  * 클라이언트가 보낸 recovery 페이로드를 안전한 모양(음수/NaN/누락 정규화)으로 덮어쓴다.
@@ -69,15 +70,23 @@ router.post('/raw', optionalAuth, async (req: Request, res: Response) => {
     if (denied) {
       return res.status(denied.status).json({ success: false, error: denied.error });
     }
-    
-    rawMetrics.createdAt = rawMetrics.createdAt || new Date().toISOString();
-    normalizeRecoveryInPlace(rawMetrics);
-    
-    const rawMetricsList = await db.get('rawMetrics') || [];
-    rawMetricsList.push(rawMetrics);
-    await db.set('rawMetrics', rawMetricsList);
-    
-    res.status(201).json({ success: true, data: rawMetrics });
+
+    // 인증·인가 통과 후 idempotency 보호로 감싼다 — 재시도가 들어와도 raw insert 는 1회.
+    await withIdempotency(
+      req,
+      res,
+      { scope: 'metrics.raw', userId: authReq.user!.id },
+      async () => {
+        rawMetrics.createdAt = rawMetrics.createdAt || new Date().toISOString();
+        normalizeRecoveryInPlace(rawMetrics);
+
+        const rawMetricsList = await db.get('rawMetrics') || [];
+        rawMetricsList.push(rawMetrics);
+        await db.set('rawMetrics', rawMetricsList);
+
+        res.status(201).json({ success: true, data: rawMetrics });
+      },
+    );
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -106,48 +115,57 @@ router.post('/calculate', optionalAuth, async (req: Request, res: Response) => {
     if (denied) {
       return res.status(denied.status).json({ success: false, error: denied.error });
     }
-    
-    // 점수 계산
-    const metricsScore = await calculateAllMetrics(rawMetrics);
-    
-    // 원시 메트릭 저장 — recovery 메타는 사용자 통계·코칭 신호의 입력값이므로
-    // 음수·NaN·누락 케이스를 항상 정규화한 뒤 영속화한다.
-    rawMetrics.createdAt = rawMetrics.createdAt || new Date().toISOString();
-    normalizeRecoveryInPlace(rawMetrics);
-    const rawMetricsList = await db.get('rawMetrics') || [];
-    rawMetricsList.push(rawMetrics);
-    await db.set('rawMetrics', rawMetricsList);
-    
-    // 점수 저장
-    const metricsScores = await db.get('metricsScores') || [];
-    metricsScores.push(metricsScore);
-    await db.set('metricsScores', metricsScores);
-    
-    // 세션 점수 업데이트
-    const sessions = await db.get('sessions') || [];
-    const sessionIndex = sessions.findIndex((s: any) => s.id === rawMetrics.sessionId);
-    if (sessionIndex !== -1) {
-      // 종합 점수 계산 (6대 지표 평균)
-      const scores = [
-        metricsScore.memory,
-        metricsScore.comprehension,
-        metricsScore.focus,
-        metricsScore.judgment,
-        metricsScore.agility,
-        metricsScore.endurance,
-      ].filter((s): s is number => s !== undefined);
-      
-      if (scores.length > 0) {
-        const avgScore = scores.reduce((sum, s) => sum + s, 0) / scores.length;
-        sessions[sessionIndex].score = Math.round(avgScore);
-      }
-      
-      await db.set('sessions', sessions);
-    }
 
-    void generateAndSavePersonalReport(rawMetrics.userId);
-    
-    res.status(201).json({ success: true, data: metricsScore });
+    // 인증·인가 통과 후 idempotency 보호로 감싼다.
+    // 재시도가 들어와도 raw/score insert·세션 점수 업데이트·리포트 트리거가 한 번씩만 일어난다.
+    await withIdempotency(
+      req,
+      res,
+      { scope: 'metrics.calculate', userId: authReq.user!.id },
+      async () => {
+        // 점수 계산
+        const metricsScore = await calculateAllMetrics(rawMetrics);
+
+        // 원시 메트릭 저장 — recovery 메타는 사용자 통계·코칭 신호의 입력값이므로
+        // 음수·NaN·누락 케이스를 항상 정규화한 뒤 영속화한다.
+        rawMetrics.createdAt = rawMetrics.createdAt || new Date().toISOString();
+        normalizeRecoveryInPlace(rawMetrics);
+        const rawMetricsList = await db.get('rawMetrics') || [];
+        rawMetricsList.push(rawMetrics);
+        await db.set('rawMetrics', rawMetricsList);
+
+        // 점수 저장
+        const metricsScores = await db.get('metricsScores') || [];
+        metricsScores.push(metricsScore);
+        await db.set('metricsScores', metricsScores);
+
+        // 세션 점수 업데이트
+        const sessions = await db.get('sessions') || [];
+        const sessionIndex = sessions.findIndex((s: any) => s.id === rawMetrics.sessionId);
+        if (sessionIndex !== -1) {
+          // 종합 점수 계산 (6대 지표 평균)
+          const scores = [
+            metricsScore.memory,
+            metricsScore.comprehension,
+            metricsScore.focus,
+            metricsScore.judgment,
+            metricsScore.agility,
+            metricsScore.endurance,
+          ].filter((s): s is number => s !== undefined);
+
+          if (scores.length > 0) {
+            const avgScore = scores.reduce((sum, s) => sum + s, 0) / scores.length;
+            sessions[sessionIndex].score = Math.round(avgScore);
+          }
+
+          await db.set('sessions', sessions);
+        }
+
+        void generateAndSavePersonalReport(rawMetrics.userId);
+
+        res.status(201).json({ success: true, data: metricsScore });
+      },
+    );
   } catch (error) {
     res.status(500).json({
       success: false,

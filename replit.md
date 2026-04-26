@@ -61,6 +61,20 @@ Auto-detection priority:
 - Auth middleware protects user update endpoints (self-or-admin only)
 - x-user-id header bypass removed
 
+## Idempotency (training save retry safety)
+
+- 결과 저장 라우트(`POST /api/sessions`, `POST /api/metrics/calculate`, `POST /api/metrics/raw`)는
+  `Idempotency-Key` 헤더를 받으면 (scope, userId, key) 단위로 첫 응답을 캐시한다 (`server/utils/idempotency.ts`).
+  같은 키가 두 번째로 들어오면 핸들러를 다시 실행하지 않고 캐시된 status/body 를 반환 → 네트워크 타임아웃
+  재시도가 트레이닝을 두 번 저장하지 않는다. 캐시는 단일 KV 키(`idempotency`) 에 저장돼 모든 DB 백엔드에서 동일.
+- 클라이언트는 `TrainingSessionPlay` 가 세션 시작 시 `createPendingLocalId()` 로 안정 키를 1회 발급해
+  화면 내 자동/수동 재시도와 큐(pendingTrainingRuns) → background drain 까지 동일 키를 흘려보낸다.
+  헤더 부착은 `api.createSession`/`api.calculateMetrics`/`api.saveRawMetrics` 의 옵션 인자.
+- 회귀 테스트:
+  - `client/src/utils/__tests__/submitTrainingRunRetry.test.ts` — `localId` 가 두 단계 모두에 같은
+    idempotency 키로 흐르는지, 일시 실패 후 재시도에서도 키가 유지되는지.
+  - `client/src/hooks/__tests__/drainPendingTrainingRuns.test.ts` — drain 시 큐의 `localId` 가 그대로 흐른다.
+
 ## Admin Account
 
 Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production without `ADMIN_PASSWORD`)

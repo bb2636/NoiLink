@@ -243,7 +243,13 @@ async function drainOne(
   let observedSessionId = run.partialSessionId;
 
   const result = await submitCompletedTrainingWithRetry(
-    { ...run.input, existingSessionId: run.partialSessionId },
+    {
+      ...run.input,
+      existingSessionId: run.partialSessionId,
+      // 큐의 안정 키를 그대로 idempotency 키로 흘려보낸다 — 화면 내 시도와 background drain
+      // 모두 같은 키를 쓰므로 서버는 같은 트레이닝을 두 번 저장하지 않는다.
+      localId: run.localId,
+    },
     {
       backoffsMs: backoffs,
       sleep: options.sleep,

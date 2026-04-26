@@ -22,9 +22,11 @@ class ApiClient {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
+      // headers 는 마지막에 둬야 한다 — options 를 뒤에 펼치면 (caller 가 headers 를
+      // 넘긴 경우) 위에서 합쳐 둔 Authorization/Content-Type 이 다시 덮여 사라진다.
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        headers,
         ...options,
+        headers,
       });
 
       if (!response.ok) {
@@ -142,10 +144,13 @@ class ApiClient {
   }
   
   // Sessions API
-  async createSession(sessionData: any) {
+  async createSession(sessionData: any, opts?: { idempotencyKey?: string }) {
     return this.request<any>('/sessions', {
       method: 'POST',
       body: JSON.stringify(sessionData),
+      ...(opts?.idempotencyKey
+        ? { headers: { 'Idempotency-Key': opts.idempotencyKey } }
+        : {}),
     });
   }
   
@@ -159,17 +164,23 @@ class ApiClient {
   }
   
   // Metrics API
-  async saveRawMetrics(rawMetrics: any) {
+  async saveRawMetrics(rawMetrics: any, opts?: { idempotencyKey?: string }) {
     return this.request<any>('/metrics/raw', {
       method: 'POST',
       body: JSON.stringify(rawMetrics),
+      ...(opts?.idempotencyKey
+        ? { headers: { 'Idempotency-Key': opts.idempotencyKey } }
+        : {}),
     });
   }
   
-  async calculateMetrics(rawMetrics: any) {
+  async calculateMetrics(rawMetrics: any, opts?: { idempotencyKey?: string }) {
     return this.request<any>('/metrics/calculate', {
       method: 'POST',
       body: JSON.stringify(rawMetrics),
+      ...(opts?.idempotencyKey
+        ? { headers: { 'Idempotency-Key': opts.idempotencyKey } }
+        : {}),
     });
   }
   

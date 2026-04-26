@@ -187,6 +187,54 @@ describe('submitCompletedTrainingWithRetry', () => {
     expect(payload.meta).toBeUndefined();
   });
 
+  it('localId 가 주어지면 createSession/calculateMetrics 호출 모두에 idempotency 키로 흘러간다 (서버 중복 저장 방지의 클라이언트 측 절반)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-id' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 70 } });
+
+    const localId = 'pending-12345-abc';
+    await submitCompletedTrainingWithRetry(baseInput({ localId }), {
+      backoffsMs: [0, 0],
+      sleep: () => Promise.resolve(),
+    });
+
+    // createSession 의 두 번째 인자가 { idempotencyKey: localId } 이어야 한다.
+    expect(mockedApi.createSession).toHaveBeenCalledTimes(1);
+    expect(mockedApi.createSession.mock.calls[0][1]).toEqual({ idempotencyKey: localId });
+    // calculateMetrics 도 같은 키로 호출되어야 한다 — 두 단계 모두 같은 트레이닝의 재시도이므로.
+    expect(mockedApi.calculateMetrics).toHaveBeenCalledTimes(1);
+    expect(mockedApi.calculateMetrics.mock.calls[0][1]).toEqual({ idempotencyKey: localId });
+  });
+
+  it('localId 가 없으면 idempotency 옵션 인자는 undefined 로 전달된다 (헤더 미부착)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-id' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 70 } });
+
+    await submitCompletedTrainingWithRetry(baseInput(), {
+      backoffsMs: [0, 0],
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(mockedApi.createSession.mock.calls[0][1]).toBeUndefined();
+    expect(mockedApi.calculateMetrics.mock.calls[0][1]).toBeUndefined();
+  });
+
+  it('createSession 일시 실패 후 재시도 시에도 동일한 idempotency 키가 다시 전송된다 (서버가 첫 응답을 흡수하도록)', async () => {
+    mockedApi.createSession
+      .mockResolvedValueOnce({ success: false, error: 'timeout' })
+      .mockResolvedValueOnce({ success: true, data: { id: 'sess-rt' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 50 } });
+
+    const localId = 'pending-xyz';
+    await submitCompletedTrainingWithRetry(baseInput({ localId }), {
+      backoffsMs: [0, 0],
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(mockedApi.createSession).toHaveBeenCalledTimes(2);
+    expect(mockedApi.createSession.mock.calls[0][1]).toEqual({ idempotencyKey: localId });
+    expect(mockedApi.createSession.mock.calls[1][1]).toEqual({ idempotencyKey: localId });
+  });
+
   it('onAttempt 가 매 시도 결과와 함께 호출된다 (부분 진행분 외부 동기화 통로)', async () => {
     mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-on' } });
     mockedApi.calculateMetrics

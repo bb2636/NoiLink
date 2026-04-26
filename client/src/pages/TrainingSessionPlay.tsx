@@ -14,7 +14,7 @@ import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noilink/shared';
 import { SESSION_MAX_MS, partialThresholdForMode, resolveBleStabilityThresholds } from '@noilink/shared';
 import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
-import { enqueuePendingRun } from '../utils/pendingTrainingRuns';
+import { createPendingLocalId, enqueuePendingRun } from '../utils/pendingTrainingRuns';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
 import { bleReconnectNow, bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
@@ -151,6 +151,11 @@ export default function TrainingSessionPlay() {
   // 화면 내 자동 재시도 + 사용자의 수동 재시도까지 누적된 시도 횟수.
   // 화면을 떠나며 큐에 적재할 때 다음 백그라운드 drain 의 시도 한도 계산에 사용된다.
   const accumulatedAttemptsRef = useRef(0);
+  // 한 트레이닝 결과를 식별하는 안정 키. 세션 시작 시 1회 발급해, 화면 내 자동·수동 재시도와
+  // 화면을 떠난 뒤 큐에 적재되는 항목까지 동일 키로 흐르게 한다.
+  // → 서버 idempotency 가 같은 키의 두 번째 요청을 첫 응답으로 흡수해 트레이닝이
+  //   두 번 저장되는 것을 막는다.
+  const localIdRef = useRef<string>(createPendingLocalId());
 
   // ── 가드: 잘못된 진입은 목록으로 ──
   useEffect(() => {
@@ -479,6 +484,9 @@ export default function TrainingSessionPlay() {
         engineMetrics: metrics ?? undefined,
         existingSessionId: partialSessionIdRef.current,
         partialProgressPct: partialPct,
+        // 화면 내 자동·수동 재시도가 모두 같은 idempotency 키를 쓰도록 세션 시작 시
+        // 발급한 안정 키를 그대로 흘려보낸다 — 서버가 첫 응답을 흡수해 중복 저장 방지.
+        localId: localIdRef.current,
       },
       {
         onAttempt: ({ result }) => {
@@ -590,6 +598,9 @@ export default function TrainingSessionPlay() {
           partialSessionId: partialSessionIdRef.current,
           lastError: err,
           title: state.title,
+          // 화면 내 시도와 background drain 이 같은 idempotency 키를 쓰도록
+          // 세션 시작 시 발급한 안정 키를 그대로 큐에 보존한다.
+          localId: localIdRef.current,
         });
       } catch {
         // 큐 적재가 실패해도 사용자 흐름을 막지 않는다 — 기존대로 안내 배너만 노출.

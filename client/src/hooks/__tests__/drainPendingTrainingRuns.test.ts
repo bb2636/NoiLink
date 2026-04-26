@@ -149,6 +149,20 @@ describe('drainPendingRuns', () => {
     expect(getPendingRuns()).toEqual([]);
   });
 
+  it('drain 시 큐 항목의 localId 가 idempotency 키로 createSession/calculateMetrics 에 흘러간다 (서버 중복 저장 방지)', async () => {
+    enqueuePendingRun({
+      input: baseInput(),
+      localId: 'pending-drain-key',
+    });
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-d' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 60 } });
+
+    await drainPendingRuns('u1', { sleep: noSleep });
+
+    expect(mockedApi.createSession.mock.calls[0][1]).toEqual({ idempotencyKey: 'pending-drain-key' });
+    expect(mockedApi.calculateMetrics.mock.calls[0][1]).toEqual({ idempotencyKey: 'pending-drain-key' });
+  });
+
   it('drain 중 createSession 에 처음 성공하면 partialSessionId 가 즉시 영속화되어, 이후 실패 시에도 다음 진입에서 재사용된다', async () => {
     enqueuePendingRun({ input: baseInput(), attempts: 0 });
     mockedApi.createSession.mockResolvedValue({ success: true, data: { id: 'fresh-sess' } });

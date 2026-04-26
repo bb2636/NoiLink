@@ -51,6 +51,14 @@ export interface SubmitCompletedTrainingInput {
    * 정상 완료(전체 진행) 세션에서는 undefined.
    */
   partialProgressPct?: number;
+  /**
+   * 한 트레이닝 결과를 식별하는 안정 키.
+   * 화면 내 자동 재시도, 사용자의 수동 재시도, 다음 진입의 백그라운드 drain 까지
+   * 모두 같은 값을 사용해야 — 서버 idempotency 가 같은 키의 두 번째 요청을
+   * 첫 응답으로 흡수해 트레이닝이 두 번 저장되는 것을 막는다.
+   * (보통 pending 큐의 `localId` 가 그대로 들어온다.)
+   */
+  localId?: string;
 }
 
 /**
@@ -96,17 +104,20 @@ export async function submitCompletedTraining(
           }
         : undefined;
 
-    const sessionRes = await api.createSession({
-      userId: input.userId,
-      mode: input.mode,
-      bpm: input.bpm,
-      level: input.level,
-      duration: durationMs,
-      isComposite: input.mode === 'COMPOSITE' || input.isComposite,
-      isValid: true,
-      phases,
-      ...(partialMeta ? { meta: partialMeta } : {}),
-    });
+    const sessionRes = await api.createSession(
+      {
+        userId: input.userId,
+        mode: input.mode,
+        bpm: input.bpm,
+        level: input.level,
+        duration: durationMs,
+        isComposite: input.mode === 'COMPOSITE' || input.isComposite,
+        isValid: true,
+        phases,
+        ...(partialMeta ? { meta: partialMeta } : {}),
+      },
+      input.localId ? { idempotencyKey: input.localId } : undefined,
+    );
 
     if (!sessionRes.success || !sessionRes.data?.id) {
       return {
@@ -127,7 +138,10 @@ export async function submitCompletedTraining(
   const raw: RawMetrics = input.engineMetrics
     ? { ...input.engineMetrics, sessionId, userId: input.userId }
     : buildSyntheticRawMetrics({ sessionId, userId: input.userId, quality: q });
-  const calcRes = await api.calculateMetrics(raw);
+  const calcRes = await api.calculateMetrics(
+    raw,
+    input.localId ? { idempotencyKey: input.localId } : undefined,
+  );
   if (!calcRes.success || !calcRes.data) {
     return {
       sessionId,

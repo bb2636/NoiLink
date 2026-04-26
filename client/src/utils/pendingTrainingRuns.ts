@@ -108,6 +108,14 @@ function generateLocalId(): string {
 }
 
 /**
+ * 큐 외부(예: TrainingSessionPlay 의 세션 시작 시점)에서 안정 키를 미리 발급받고 싶을 때 사용.
+ * 같은 키를 idempotency 헤더와 큐 적재에 모두 사용해 서버에 중복 저장이 일어나지 않게 한다.
+ */
+export function createPendingLocalId(): string {
+  return generateLocalId();
+}
+
+/**
  * 새 항목을 큐에 추가한다. 큐 상한(MAX_PENDING_RUNS)을 넘으면 가장 오래된 항목을 버린다.
  * @returns 새 항목의 localId
  */
@@ -117,10 +125,17 @@ export function enqueuePendingRun(args: {
   partialSessionId?: string;
   lastError?: string;
   title?: string;
+  /**
+   * 화면에서 이미 사용한 안정 키(예: TrainingSessionPlay 가 세션 시작 시 발급한 키)를
+   * 그대로 큐에 보존하고 싶을 때 사용. 미지정 시 새 키가 생성된다.
+   * 같은 키가 화면 내 시도와 background drain 모두에 흘러야 서버 idempotency 가
+   * 중복 저장을 막을 수 있다.
+   */
+  localId?: string;
 }): string {
   const list = getPendingRuns();
   const item: PendingTrainingRun = {
-    localId: generateLocalId(),
+    localId: args.localId ?? generateLocalId(),
     enqueuedAt: Date.now(),
     attempts: args.attempts ?? 0,
     lastError: args.lastError,

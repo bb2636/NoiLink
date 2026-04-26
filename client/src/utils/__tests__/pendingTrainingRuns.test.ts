@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   __resetPendingTrainingRunsForTest,
+  createPendingLocalId,
   enqueuePendingRun,
   getPendingRuns,
   hasExhaustedAttempts,
@@ -93,6 +94,22 @@ describe('pendingTrainingRuns: 큐 기본 동작', () => {
     expect(all.find((r) => r.localId === ids[0])).toBeUndefined();
     expect(all.find((r) => r.localId === ids[1])).toBeUndefined();
     expect(all.find((r) => r.localId === ids[2])).toBeUndefined();
+  });
+
+  it('호출자가 localId 를 지정하면 그 값이 그대로 큐에 보존된다 (idempotency 키 일치 보장)', () => {
+    const preset = 'pending-fixed-1234';
+    const id = enqueuePendingRun({ input: baseInput(), localId: preset });
+    expect(id).toBe(preset);
+    const [r] = getPendingRuns();
+    expect(r.localId).toBe(preset);
+  });
+
+  it('createPendingLocalId 는 호출마다 서로 다른 안정 키를 발급한다', () => {
+    const a = createPendingLocalId();
+    const b = createPendingLocalId();
+    expect(a).not.toBe(b);
+    expect(typeof a).toBe('string');
+    expect(a.length).toBeGreaterThan(0);
   });
 
   it('hasExhaustedAttempts 는 시도 한도(MAX_TOTAL_ATTEMPTS) 와 일치한다', () => {
