@@ -8,6 +8,8 @@
     "ios": "expo run:ios",
     "prebuild": "expo prebuild",
     "web": "expo start --web",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "eas-build-pre-install": "cd ../shared && npm install && npm run build"
   },
   "dependencies": {
@@ -32,7 +34,8 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "vitest": "^2.1.9"
   },
   "private": true
 }
