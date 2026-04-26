@@ -20,6 +20,10 @@ import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
 import { DEMO_PROFILE } from '../utils/demoProfile';
+import {
+  hasSeenReplayedHint,
+  markReplayedHintSeen,
+} from '../utils/replayedHintSeen';
 
 export type TrainingResultState = {
   title: string;
@@ -254,7 +258,21 @@ export default function Result() {
   // 사실 첫 요청이 이미 서버에 도달해 같은 결과가 저장되었던 케이스.
   // 점수/배지 위에 1회성 subtle hint 로 노출해 "방금 다시 저장된 게 아니라
   // 같은 결과를 다시 불러온 것" 임을 명확히 한다. 사용자 흐름은 막지 않는다.
-  const showReplayedHint = state?.replayed === true;
+  //
+  // Task #118 — 같은 sessionId 의 결과 화면을 두 번째 이상 열 때는 같은 안내가
+  // 또 노출되지 않도록 sessionId 기준 "본 적 있음" 표시를 localStorage 에 남긴다.
+  // useState 의 lazy initializer 로 마운트 시점에 한 번만 판단해, 첫 렌더에서
+  // 보였다가 effect 가 실행되며 사라지는 깜빡임을 만들지 않는다.
+  // sessionId 가 비어 있으면(추적 불가) 기존 동작대로 그대로 노출한다.
+  const [showReplayedHint] = useState(() => {
+    if (state?.replayed !== true) return false;
+    return !hasSeenReplayedHint(state?.sessionId);
+  });
+  useEffect(() => {
+    if (!showReplayedHint) return;
+    if (!state?.sessionId) return;
+    markReplayedHintSeen(state.sessionId);
+  }, [showReplayedHint, state?.sessionId]);
 
   // 반짝이 입자 (랜덤 시드 안정화)
   const particles = useMemo(

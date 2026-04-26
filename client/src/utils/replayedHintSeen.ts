@@ -1,0 +1,92 @@
+/**
+ * 결과 화면 "이미 저장된 결과를 불러왔어요" 힌트(Task #65)의 1회성 노출을 위해
+ * sessionId 기준 "본 적 있음" 표시를 localStorage 에 가볍게 영속한다 (Task #118).
+ *
+ * 정책:
+ *  - 같은 sessionId 의 결과 화면을 두 번째 이상 열면 힌트가 노출되지 않는다.
+ *  - 새로운 sessionId 의 캐시 hit 응답에서는 정상적으로 1회 노출된다.
+ *  - 저장은 단일 키(`noilink:replayed-hint-seen`) 하위 JSON 배열로 단순화한다.
+ *    값은 `{ id: <sessionId>, at: <unix_ms> }` 의 가벼운 엔트리.
+ *  - 무한 누적을 막기 위해 최근 `MAX_ENTRIES` 개만 유지한다 (LRU-by-write).
+ *  - 비-브라우저 환경/quota 초과/잘못된 JSON 등 어떤 실패도 앱 흐름을
+ *    깨지 않도록 try/catch 로 감싸 안전하게 폴백한다 (이 경우 힌트는 그냥
+ *    한 번 더 노출될 수 있으나 사용자 흐름은 막지 않는다).
+ *  - sessionId 가 비어 있으면 추적을 비활성화한다 — 호출자는 현재 동작
+ *    그대로(=항상 노출) 폴백한다.
+ */
+
+const STORAGE_KEY = 'noilink:replayed-hint-seen';
+
+/** 저장하는 최근 엔트리 개수 상한. 너무 적으면 회귀, 너무 많으면 무의미한 누적. */
+export const REPLAYED_HINT_MAX_ENTRIES = 50;
+
+interface StoredEntry {
+  id: string;
+  at: number;
+}
+
+function readEntries(): StoredEntry[] {
+  let raw: string | null = null;
+  try {
+    raw = globalThis.localStorage?.getItem(STORAGE_KEY) ?? null;
+  } catch {
+    return [];
+  }
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (e): e is StoredEntry =>
+        e != null &&
+        typeof e === 'object' &&
+        typeof (e as StoredEntry).id === 'string' &&
+        typeof (e as StoredEntry).at === 'number' &&
+        Number.isFinite((e as StoredEntry).at),
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writeEntries(entries: StoredEntry[]): void {
+  try {
+    globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(entries));
+  } catch {
+    // 무시 — 다음 호출에서 재시도. 힌트가 한 번 더 떠도 치명적이지 않다.
+  }
+}
+
+/** sessionId 의 결과 화면에서 replayed 힌트를 이미 본 적이 있는지 확인한다. */
+export function hasSeenReplayedHint(
+  sessionId: string | null | undefined,
+): boolean {
+  if (!sessionId) return false;
+  return readEntries().some((e) => e.id === sessionId);
+}
+
+/**
+ * sessionId 를 "본 적 있음" 으로 표시한다. 같은 id 가 이미 있으면 타임스탬프만
+ * 갱신되고, MAX_ENTRIES 를 넘으면 가장 오래된 항목부터 제거된다.
+ */
+export function markReplayedHintSeen(
+  sessionId: string | null | undefined,
+  now: number = Date.now(),
+): void {
+  if (!sessionId) return;
+  const filtered = readEntries().filter((e) => e.id !== sessionId);
+  filtered.push({ id: sessionId, at: now });
+  while (filtered.length > REPLAYED_HINT_MAX_ENTRIES) {
+    filtered.shift();
+  }
+  writeEntries(filtered);
+}
+
+/** 테스트/로그아웃 등에서 모든 기억을 비운다. */
+export function clearAllReplayedHintSeen(): void {
+  try {
+    globalThis.localStorage?.removeItem(STORAGE_KEY);
+  } catch {
+    // 무시.
+  }
+}
