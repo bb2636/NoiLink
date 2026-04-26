@@ -14,6 +14,20 @@ This is an **npm monorepo** with three workspaces:
 - `server/` — Express.js backend API (port 3001)
 - `shared/` — Shared TypeScript types
 
+### `@noilink/shared` 는 ESM-only 패키지
+
+- `shared/package.json` 은 `"type": "module"` 이며 `dist/*.js` 산출물은 ESM
+  (`export *`, named exports). 모든 컨슈머(client, server, mobile)는 반드시
+  `import` 로 사용한다 — `require('@noilink/shared')` 는 깨진다.
+- 회귀 사례 (Apr 2026): `type` 필드가 빠진 적이 있었는데 그러면 Node 가
+  dist 를 CJS 로 잘못 해석해서 `import { KST_TIME_ZONE } from '@noilink/shared'`
+  같은 정적 named import 가 `does not provide an export named ...` 로 서버
+  부팅 단계에서 즉사했다. 동적 `await import(...)` 와 vitest(Vite alias 로 ts
+  소스를 직접 읽음) 에서는 잡히지 않아 묻혔던 사례.
+- 회귀 방지: `scripts/post-merge.sh` 가 build 직후 `node --input-type=module -e`
+  로 `KST_TIME_ZONE` / `COMPOSITE_TOTAL_MS` / `sanitizeRecoveryRawMetrics` 를
+  정적 import 해보고 실패 시 머지 후 셋업이 실패한다.
+
 ## Tech Stack
 
 - **Frontend**: React 18, Vite, TypeScript, Tailwind CSS, Framer Motion, React Router v6
