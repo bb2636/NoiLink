@@ -7,8 +7,19 @@ import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
 import { calculateAllMetrics } from '../services/score-calculator.js';
 import { generateAndSavePersonalReport } from '../services/personal-report.js';
-import type { BleAbortEvent, RawMetrics, MetricsScore, Session, User } from '@noilink/shared';
-import { sanitizeBleAbortEventInput, sanitizeRecoveryRawMetrics } from '@noilink/shared';
+import type {
+  AckBannerEvent,
+  BleAbortEvent,
+  RawMetrics,
+  MetricsScore,
+  Session,
+  User,
+} from '@noilink/shared';
+import {
+  sanitizeAckBannerEventInput,
+  sanitizeBleAbortEventInput,
+  sanitizeRecoveryRawMetrics,
+} from '@noilink/shared';
 import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
 import { userCanActOnTargetUserId } from '../utils/session-user-policy.js';
 import { withIdempotency } from '../utils/idempotency.js';
@@ -89,6 +100,49 @@ router.post('/ble-abort', async (req: Request, res: Response) => {
   } catch (error) {
     // 텔레메트리 실패가 사용자 흐름에 절대 전파되지 않도록 항상 202로 회신하고 서버 로그만 남긴다.
     console.error('[ble-abort] failed to record event', error);
+    return res.status(202).json({ success: true, recorded: false });
+  }
+});
+
+/**
+ * POST /api/metrics/ack-banner
+ * `subscribeAckErrorBanner` 의 burst 가 끝나는 시점에 클라이언트가 보내는 운영 텔레메트리
+ * (Task #116). burst 가 자동 닫힘으로 사라졌는지 / 사용자 또는 화면 이동으로 닫혔는지,
+ * burst 안에 거부가 몇 건 누적됐고 첫 거부부터 얼마나 길었는지를 익명으로 모은다.
+ *
+ * 정책:
+ *  - 익명 집계용 — 인증 불필요. 페이로드는 reason / burstCount / burstDurationMs 만 받는다.
+ *  - 클라이언트는 fire-and-forget(`sendBeacon`/`keepalive`) 로 호출하므로 어떤 오류 상황에서도
+ *    사용자 경험에 영향이 없도록 catch-all 응답한다.
+ *  - 운영 조회용 SQL 가이드: `docs/operations/ack-banner-telemetry.md`.
+ */
+router.post('/ack-banner', async (req: Request, res: Response) => {
+  try {
+    const sanitized = sanitizeAckBannerEventInput(req.body);
+    if (!sanitized) {
+      // 잘못된 모양은 202+ignored 로 조용히 무시 — 클라이언트가 재시도/노이즈를 만들지 않도록.
+      return res.status(202).json({ success: true, ignored: true });
+    }
+
+    const event: AckBannerEvent = {
+      occurredAt: new Date().toISOString(),
+      ...sanitized,
+    };
+
+    const events = (await db.get('ackBannerEvents')) || [];
+    events.push(event);
+    await db.set('ackBannerEvents', events);
+
+    // 운영 알람·검색을 위한 한 줄 로그 (PII 없음).
+    console.info(
+      `[ack-banner] reason=${event.reason} burstCount=${event.burstCount} ` +
+        `burstDurationMs=${event.burstDurationMs}`,
+    );
+
+    return res.status(202).json({ success: true });
+  } catch (error) {
+    // 텔레메트리 실패가 사용자 흐름에 절대 전파되지 않도록 항상 202 로 회신하고 서버 로그만 남긴다.
+    console.error('[ack-banner] failed to record event', error);
     return res.status(202).json({ success: true, recorded: false });
   }
 });

@@ -296,18 +296,22 @@ describe('createAckErrorCoalescer', () => {
 });
 
 describe('subscribeAckErrorBanner', () => {
-  let unsub: (() => void) | null = null;
+  let sub: { unsubscribe(): void; notifyDismissed(): void } | null = null;
   afterEach(() => {
-    if (unsub) {
-      unsub();
-      unsub = null;
+    if (sub) {
+      sub.unsubscribe();
+      sub = null;
     }
   });
 
   it('같은 키 5회 연속 거부는 같은 base 메시지의 카운터로 묶여 setBanner 에 흘러간다', () => {
     const setBanner = vi.fn();
     let now = 1000;
-    unsub = subscribeAckErrorBanner(setBanner, { windowMs: 2000, now: () => now });
+    sub = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: () => now,
+      onTelemetry: () => undefined,
+    });
 
     for (let i = 0; i < 5; i += 1) {
       window.dispatchEvent(
@@ -355,12 +359,13 @@ describe('subscribeAckErrorBanner', () => {
   it('burst 가 멎고 자동 닫힘 임계값이 지나면 setBanner(null) 로 banner 를 비운다', () => {
     const setBanner = vi.fn();
     const timer = createFakeTimer();
-    unsub = subscribeAckErrorBanner(setBanner, {
+    sub = subscribeAckErrorBanner(setBanner, {
       windowMs: 2000,
       now: timer.now,
       autoDismissMs: 5000,
       setTimer: timer.setTimer,
       clearTimer: timer.clearTimer,
+      onTelemetry: () => undefined,
     });
 
     // burst: 같은 키 3번 (50ms 간격) — 카운터로 묶인 단일 banner 가 갱신된다.
@@ -396,12 +401,13 @@ describe('subscribeAckErrorBanner', () => {
   it('burst 가 이어지는 동안은 자동 닫힘이 발화하지 않는다 (타이머 재시작)', () => {
     const setBanner = vi.fn();
     const timer = createFakeTimer();
-    unsub = subscribeAckErrorBanner(setBanner, {
+    sub = subscribeAckErrorBanner(setBanner, {
       windowMs: 2000,
       now: timer.now,
       autoDismissMs: 5000,
       setTimer: timer.setTimer,
       clearTimer: timer.clearTimer,
+      onTelemetry: () => undefined,
     });
 
     // 첫 거부.
@@ -442,12 +448,13 @@ describe('subscribeAckErrorBanner', () => {
   it('구독 해제 시 보류 중인 자동 닫힘 타이머는 취소된다', () => {
     const setBanner = vi.fn();
     const timer = createFakeTimer();
-    const off = subscribeAckErrorBanner(setBanner, {
+    const handle = subscribeAckErrorBanner(setBanner, {
       windowMs: 2000,
       now: timer.now,
       autoDismissMs: 5000,
       setTimer: timer.setTimer,
       clearTimer: timer.clearTimer,
+      onTelemetry: () => undefined,
     });
 
     window.dispatchEvent(
@@ -462,7 +469,7 @@ describe('subscribeAckErrorBanner', () => {
     expect(setBanner).toHaveBeenCalledTimes(1);
     expect(timer.pending()).toBe(1);
 
-    off();
+    handle.unsubscribe();
     // 해제 직후 큐에서 자동 닫힘 타이머가 사라져 있어야 한다 — 언마운트 후 setBanner(null) 금지.
     expect(timer.pending()).toBe(0);
     timer.advance(60_000);
@@ -472,12 +479,13 @@ describe('subscribeAckErrorBanner', () => {
   it('autoDismissMs <= 0 이면 자동 닫힘이 비활성된다', () => {
     const setBanner = vi.fn();
     const timer = createFakeTimer();
-    unsub = subscribeAckErrorBanner(setBanner, {
+    sub = subscribeAckErrorBanner(setBanner, {
       windowMs: 2000,
       now: timer.now,
       autoDismissMs: 0,
       setTimer: timer.setTimer,
       clearTimer: timer.clearTimer,
+      onTelemetry: () => undefined,
     });
 
     window.dispatchEvent(
@@ -493,5 +501,242 @@ describe('subscribeAckErrorBanner', () => {
     expect(timer.pending()).toBe(0);
     timer.advance(60_000);
     expect(setBanner).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Task #116 — burst 가 끝나는 시점(자동 닫힘 발화 / notifyDismissed / unsubscribe) 마다
+ * 운영 텔레메트리가 한 건 흘러간다는 회귀 보호.
+ *
+ * 보호 정책:
+ *  1. 자동 닫힘 타이머가 발화하면 reason='auto-dismiss', burstCount, burstDurationMs 가 함께 보고된다.
+ *  2. 페이지가 notifyDismissed() 를 호출하면 reason='user-dismiss' 로 보고되고
+ *     보류 중인 자동 닫힘 타이머는 취소된다 (중복 보고 금지).
+ *  3. 활성 burst 가 있는 상태에서 unsubscribe() 하면 reason='unmount' 로 한 건 보고된다.
+ *  4. 활성 burst 가 없는 상태에서 notifyDismissed()/unsubscribe() 는 텔레메트리를 흘리지 않는다.
+ *  5. burst 가 닫힌 뒤(예: 자동 닫힘 발화 후) notifyDismissed() 가 와도 중복으로 보고되지 않는다.
+ *  6. 새 burst 가 시작되면 카운터/시각이 1 / 0ms 부터 다시 누적된다.
+ */
+describe('subscribeAckErrorBanner — burst 텔레메트리 (Task #116)', () => {
+  let sub: { unsubscribe(): void; notifyDismissed(): void } | null = null;
+  afterEach(() => {
+    if (sub) {
+      sub.unsubscribe();
+      sub = null;
+    }
+  });
+
+  function dispatchReject(id: string, error = 'ble.writeLed:field-enum@payload.colorCode: bad enum') {
+    window.dispatchEvent(
+      new CustomEvent('noilink-native-ack', { detail: { id, ok: false, error } }),
+    );
+  }
+
+  it('자동 닫힘 발화 시 reason=auto-dismiss / burstCount / burstDurationMs 가 보고된다', () => {
+    const setBanner = vi.fn();
+    const onTelemetry = vi.fn();
+    const timer = createFakeTimer();
+    sub = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 5000,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+      onTelemetry,
+    });
+
+    // burst: 3건 (각 50ms 간격) → burstDurationMs 는 첫 거부부터 자동 닫힘 발화까지 = 100 + 5000 = 5100ms.
+    dispatchReject('r-0');
+    timer.advance(50);
+    dispatchReject('r-1');
+    timer.advance(50);
+    dispatchReject('r-2');
+
+    expect(onTelemetry).not.toHaveBeenCalled();
+    timer.advance(5000); // 자동 닫힘 발화.
+    expect(onTelemetry).toHaveBeenCalledTimes(1);
+    expect(onTelemetry).toHaveBeenCalledWith({
+      reason: 'auto-dismiss',
+      burstCount: 3,
+      burstDurationMs: 5100,
+    });
+  });
+
+  it('단발 거부도 자동 닫힘으로 사라지면 burstCount=1 로 보고된다', () => {
+    const setBanner = vi.fn();
+    const onTelemetry = vi.fn();
+    const timer = createFakeTimer();
+    sub = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 5000,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+      onTelemetry,
+    });
+
+    dispatchReject('r-0');
+    timer.advance(5000);
+    expect(onTelemetry).toHaveBeenCalledTimes(1);
+    expect(onTelemetry.mock.calls[0][0]).toMatchObject({
+      reason: 'auto-dismiss',
+      burstCount: 1,
+      burstDurationMs: 5000,
+    });
+  });
+
+  it('notifyDismissed() 는 user-dismiss 한 건 보고 + 보류 중 자동 닫힘 취소', () => {
+    const setBanner = vi.fn();
+    const onTelemetry = vi.fn();
+    const timer = createFakeTimer();
+    sub = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 5000,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+      onTelemetry,
+    });
+
+    dispatchReject('r-0');
+    timer.advance(50);
+    dispatchReject('r-1');
+    timer.advance(2000);
+    sub.notifyDismissed();
+
+    expect(onTelemetry).toHaveBeenCalledTimes(1);
+    expect(onTelemetry.mock.calls[0][0]).toMatchObject({
+      reason: 'user-dismiss',
+      burstCount: 2,
+      burstDurationMs: 2050,
+    });
+    // 보류 중이던 자동 닫힘 타이머가 취소되어 큐가 비어 있어야 한다.
+    expect(timer.pending()).toBe(0);
+    timer.advance(60_000);
+    expect(onTelemetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('자동 닫힘이 먼저 발화한 뒤 notifyDismissed() 가 와도 중복 보고되지 않는다', () => {
+    const setBanner = vi.fn();
+    const onTelemetry = vi.fn();
+    const timer = createFakeTimer();
+    sub = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 5000,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+      onTelemetry,
+    });
+
+    dispatchReject('r-0');
+    timer.advance(5000); // 자동 닫힘 발화.
+    expect(onTelemetry).toHaveBeenCalledTimes(1);
+
+    sub.notifyDismissed(); // 활성 burst 가 없음 → 무시.
+    expect(onTelemetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('활성 burst 가 있을 때 unsubscribe() 하면 reason=unmount 로 한 건 보고된다', () => {
+    const setBanner = vi.fn();
+    const onTelemetry = vi.fn();
+    const timer = createFakeTimer();
+    const handle = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 5000,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+      onTelemetry,
+    });
+
+    dispatchReject('r-0');
+    timer.advance(1000);
+    handle.unsubscribe();
+
+    expect(onTelemetry).toHaveBeenCalledTimes(1);
+    expect(onTelemetry.mock.calls[0][0]).toMatchObject({
+      reason: 'unmount',
+      burstCount: 1,
+      burstDurationMs: 1000,
+    });
+  });
+
+  it('활성 burst 가 없는 상태의 unsubscribe()/notifyDismissed() 는 텔레메트리를 흘리지 않는다', () => {
+    const setBanner = vi.fn();
+    const onTelemetry = vi.fn();
+    const timer = createFakeTimer();
+    const handle = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 5000,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+      onTelemetry,
+    });
+
+    handle.notifyDismissed();
+    handle.unsubscribe();
+    expect(onTelemetry).not.toHaveBeenCalled();
+  });
+
+  it('자동 닫힘 후 새 거부가 들어오면 burstCount/burstDurationMs 가 1/0 부터 다시 누적된다', () => {
+    const setBanner = vi.fn();
+    const onTelemetry = vi.fn();
+    const timer = createFakeTimer();
+    sub = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 5000,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+      onTelemetry,
+    });
+
+    // 첫 burst — 자동 닫힘으로 종료.
+    dispatchReject('r-0');
+    timer.advance(5000);
+    expect(onTelemetry).toHaveBeenCalledTimes(1);
+    expect(onTelemetry.mock.calls[0][0]).toMatchObject({
+      reason: 'auto-dismiss',
+      burstCount: 1,
+      burstDurationMs: 5000,
+    });
+
+    // 두 번째 burst — 첫 burst 종료 후 새로 시작.
+    timer.advance(10_000);
+    dispatchReject('r-1');
+    timer.advance(100);
+    dispatchReject('r-2');
+    sub.notifyDismissed();
+
+    expect(onTelemetry).toHaveBeenCalledTimes(2);
+    expect(onTelemetry.mock.calls[1][0]).toMatchObject({
+      reason: 'user-dismiss',
+      burstCount: 2,
+      burstDurationMs: 100,
+    });
+  });
+
+  it('onTelemetry 가 throw 해도 토스트/구독 흐름이 깨지지 않는다', () => {
+    const setBanner = vi.fn();
+    const onTelemetry = vi.fn(() => {
+      throw new Error('boom');
+    });
+    const timer = createFakeTimer();
+    sub = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 5000,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+      onTelemetry,
+    });
+
+    dispatchReject('r-0');
+    expect(() => timer.advance(5000)).not.toThrow();
+    expect(setBanner).toHaveBeenCalledTimes(2);
+    expect(setBanner.mock.calls[1][0]).toBeNull();
+    expect(onTelemetry).toHaveBeenCalledTimes(1);
   });
 });

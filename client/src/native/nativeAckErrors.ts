@@ -15,7 +15,13 @@
  * 보여주되, QA/베타 사용자가 정확히 어떤 분기가 깨졌는지 확인할 수 있도록 디버그 키
  * (`type:reason@field`)도 함께 노출한다.
  */
-import { parseBridgeAckError, type BridgeValidationErrorReason } from '@noilink/shared';
+import {
+  parseBridgeAckError,
+  type AckBannerDismissReason,
+  type AckBannerEventInput,
+  type BridgeValidationErrorReason,
+} from '@noilink/shared';
+import { reportAckBannerEventFireAndForget } from '../utils/reportAckBannerEvent';
 
 const REASON_KO: Record<BridgeValidationErrorReason, string> = {
   'not-object': '메시지 형식 오류',
@@ -228,6 +234,26 @@ export interface AckBannerSubscriptionOptions extends AckErrorCoalescerOptions {
    */
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
+  /**
+   * burst 가 끝난 시점의 운영 텔레메트리를 흘려줄 수신기 (Task #116).
+   * 기본값은 `reportAckBannerEventFireAndForget` — 서버 `POST /api/metrics/ack-banner`.
+   * 테스트는 빈 함수나 spy 를 주입해 네트워크 호출 없이 호출 모양만 검증할 수 있다.
+   */
+  onTelemetry?: (event: AckBannerEventInput) => void;
+}
+
+/**
+ * `subscribeAckErrorBanner` 가 돌려주는 핸들. unsubscribe 외에 외부 닫힘 알림 API 를 함께 노출한다.
+ *
+ * - `unsubscribe()`: useEffect cleanup 에서 호출. 보류 중인 자동 닫힘 타이머도 함께 취소된다.
+ * - `notifyDismissed()`: 페이지가 SuccessBanner.onClose 등으로 banner 를 외부에서 닫을 때
+ *   호출한다. 자동 닫힘 타이머가 살아있다면 취소되고, burst 가 활성 중이면
+ *   `user-dismiss` 텔레메트리가 한 건 흘러간다. 이미 자동 닫힘이 발화한 뒤 호출되면
+ *   조용히 무시된다 (중복 보고 금지).
+ */
+export interface AckBannerSubscription {
+  unsubscribe(): void;
+  notifyDismissed(): void;
 }
 
 /**
@@ -239,11 +265,15 @@ export interface AckBannerSubscriptionOptions extends AckErrorCoalescerOptions {
  * 추가로, 마지막 거부 후 `autoDismissMs` 동안 새 거부가 없으면 `setBanner(null)` 을
  * 호출해 banner 를 자동으로 닫는다 (Task #109). 새 거부가 들어올 때마다 타이머는
  * 다시 시작되므로, burst 가 이어지는 동안은 토스트가 닫히지 않는다.
+ *
+ * Task #116 — burst 가 끝나는 시점(자동 닫힘 발화 / 외부 닫힘 알림 / 구독 해제) 마다
+ * `onTelemetry` 로 한 건의 익명 통계가 흘러간다. 운영자는 자동 닫힘 vs 사용자 닫힘
+ * 비율과 burst 평균 길이를 보고 `ACK_ERROR_AUTO_DISMISS_MS` 임계값 튜닝의 근거로 쓴다.
  */
 export function subscribeAckErrorBanner(
   setBanner: (banner: string | null) => void,
   opts?: AckBannerSubscriptionOptions,
-): () => void {
+): AckBannerSubscription {
   const next = createAckErrorCoalescer(opts);
   const autoDismissMs = opts?.autoDismissMs ?? ACK_ERROR_AUTO_DISMISS_MS;
   const setTimer =
@@ -252,8 +282,15 @@ export function subscribeAckErrorBanner(
     opts?.clearTimer ??
     ((handle: unknown) =>
       clearTimeout(handle as ReturnType<typeof setTimeout>));
+  const onTelemetry = opts?.onTelemetry ?? reportAckBannerEventFireAndForget;
+  const now = opts?.now ?? Date.now;
 
   let dismissHandle: unknown = null;
+  // burst 활성 상태 — 첫 거부가 들어온 시점부터 닫힘이 보고될 때까지 유지.
+  // 같은 burst 안에 여러 텔레메트리가 중복으로 흘러가지 않도록 게이트 역할도 한다.
+  let burstStartedAt: number | null = null;
+  let burstCount = 0;
+
   const cancelDismiss = () => {
     if (dismissHandle != null) {
       clearTimer(dismissHandle);
@@ -261,19 +298,54 @@ export function subscribeAckErrorBanner(
     }
   };
 
+  const reportBurstClose = (reason: AckBannerDismissReason) => {
+    if (burstStartedAt === null) return; // 활성 burst 가 없으면 보고할 것도 없다.
+    const event: AckBannerEventInput = {
+      reason,
+      burstCount,
+      burstDurationMs: Math.max(0, now() - burstStartedAt),
+    };
+    burstStartedAt = null;
+    burstCount = 0;
+    try {
+      onTelemetry(event);
+    } catch {
+      // 텔레메트리 실패가 토스트/구독 해제 흐름을 가로막아선 안 된다.
+    }
+  };
+
   const off = subscribeNativeAckErrors((payload) => {
     setBanner(next(payload.error).banner);
     cancelDismiss();
+    if (burstStartedAt === null) {
+      // 새 burst 시작 — 첫 거부 시각을 기록하고 카운터를 1 로 초기화.
+      burstStartedAt = now();
+      burstCount = 1;
+    } else {
+      // 같은 burst 안에서 거부가 추가됨 — 카운터만 증가, 시작 시각은 유지.
+      burstCount += 1;
+    }
     if (autoDismissMs > 0) {
       dismissHandle = setTimer(() => {
         dismissHandle = null;
         setBanner(null);
+        reportBurstClose('auto-dismiss');
       }, autoDismissMs);
     }
   });
 
-  return () => {
-    cancelDismiss();
-    off();
+  return {
+    unsubscribe: () => {
+      cancelDismiss();
+      // 활성 burst 가 있으면 unmount 라벨로 마감 — "burst 가 끝났는데 자동 닫힘이
+      // 발화하지 못한" 비율을 추적하기 위함. 활성 burst 가 없으면 조용히 끝낸다.
+      reportBurstClose('unmount');
+      off();
+    },
+    notifyDismissed: () => {
+      // 외부에서 banner 가 먼저 닫힘 — 보류 중인 자동 닫힘은 취소하고 한 건 보고.
+      cancelDismiss();
+      reportBurstClose('user-dismiss');
+    },
   };
 }

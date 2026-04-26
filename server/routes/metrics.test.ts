@@ -19,6 +19,8 @@ const store: Record<string, any> = {
   sessions: [],
   rawMetrics: [],
   metricsScores: [],
+  bleAbortEvents: [],
+  ackBannerEvents: [],
 };
 
 vi.mock('../db.js', () => ({
@@ -683,5 +685,115 @@ describe('GET /api/metrics/session/:sessionId/previous-score (Task #114)', () =>
     const res = await request(app).get('/api/metrics/session/sess-other-user/previous-score');
 
     expect(res.status).toBe(403);
+  });
+});
+
+/**
+ * `POST /api/metrics/ack-banner` (Task #116) 회귀 테스트.
+ *
+ * ack 거부 토스트의 burst 통계는 익명·fire-and-forget 이므로:
+ *  - 인증이 없어도 통과한다.
+ *  - 정상 페이로드는 `ackBannerEvents` 컬렉션에 한 건 append 되고 occurredAt 이 부착된다.
+ *  - 잘못된 모양의 페이로드(알 수 없는 reason 등)도 5xx 가 아니라 202 로 회신해
+ *    클라이언트가 재시도/노이즈를 만들지 않는다.
+ *  - DB 쓰기 실패도 사용자 흐름에 전파되지 않는다 (202 + recorded:false).
+ */
+describe('POST /api/metrics/ack-banner — 운영 텔레메트리', () => {
+  beforeEach(() => {
+    store.ackBannerEvents = [];
+    currentActor.user = null;
+  });
+
+  it('정상 페이로드는 occurredAt 부착 + ackBannerEvents 에 append 된다 (인증 없이도 허용)', async () => {
+    const app = buildApp();
+
+    const res = await request(app).post('/api/metrics/ack-banner').send({
+      reason: 'auto-dismiss',
+      burstCount: 3,
+      burstDurationMs: 4_999,
+    });
+
+    expect(res.status).toBe(202);
+    expect(res.body.success).toBe(true);
+    expect(store.ackBannerEvents).toHaveLength(1);
+    const event = store.ackBannerEvents[0];
+    expect(event).toMatchObject({
+      reason: 'auto-dismiss',
+      burstCount: 3,
+      burstDurationMs: 4_999,
+    });
+    expect(typeof event.occurredAt).toBe('string');
+    expect(Number.isFinite(new Date(event.occurredAt).getTime())).toBe(true);
+    // PII 가 흘러들지 않는지 확인 — 화이트리스트 외 키는 저장되어선 안 된다.
+    expect(Object.keys(event).sort()).toEqual(
+      ['burstCount', 'burstDurationMs', 'occurredAt', 'reason'].sort(),
+    );
+  });
+
+  it('user-dismiss / unmount 라벨도 동일하게 저장된다', async () => {
+    const app = buildApp();
+
+    for (const reason of ['user-dismiss', 'unmount'] as const) {
+      const res = await request(app)
+        .post('/api/metrics/ack-banner')
+        .send({ reason, burstCount: 2, burstDurationMs: 1_200 });
+      expect(res.status).toBe(202);
+    }
+
+    expect(store.ackBannerEvents).toHaveLength(2);
+    expect(store.ackBannerEvents.map((e: { reason: string }) => e.reason).sort()).toEqual(
+      ['unmount', 'user-dismiss'],
+    );
+  });
+
+  it('비정상 burstCount/burstDurationMs 는 정규화되어 저장된다 (음수 → 0, burstCount 최저 1)', async () => {
+    const app = buildApp();
+
+    const res = await request(app).post('/api/metrics/ack-banner').send({
+      reason: 'auto-dismiss',
+      burstCount: -3,
+      burstDurationMs: -100,
+    });
+
+    expect(res.status).toBe(202);
+    expect(store.ackBannerEvents).toHaveLength(1);
+    expect(store.ackBannerEvents[0]).toMatchObject({
+      reason: 'auto-dismiss',
+      burstCount: 1,
+      burstDurationMs: 0,
+    });
+  });
+
+  it('알 수 없는 reason 라벨은 202+ignored 로 조용히 무시된다', async () => {
+    const app = buildApp();
+
+    const res = await request(app).post('/api/metrics/ack-banner').send({
+      reason: 'manual',
+      burstCount: 1,
+      burstDurationMs: 0,
+    });
+
+    expect(res.status).toBe(202);
+    expect(res.body.ignored).toBe(true);
+    expect(store.ackBannerEvents).toHaveLength(0);
+  });
+
+  it('DB 쓰기 실패도 사용자 흐름에 전파되지 않고 202+recorded:false 로 회신한다', async () => {
+    const { db } = (await import('../db.js')) as unknown as {
+      db: { set: ReturnType<typeof vi.fn> };
+    };
+    db.set.mockImplementationOnce(async () => {
+      throw new Error('boom');
+    });
+    const app = buildApp();
+
+    const res = await request(app).post('/api/metrics/ack-banner').send({
+      reason: 'auto-dismiss',
+      burstCount: 1,
+      burstDurationMs: 0,
+    });
+
+    expect(res.status).toBe(202);
+    expect(res.body.recorded).toBe(false);
   });
 });

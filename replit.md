@@ -102,6 +102,12 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
     로 익명 회복 통계(`windows`, `totalMs`, `bleUnstable`)를 fire-and-forget 보고.
   - 서버는 `bleAbortEvents` JSONB 배열에 append + 한 줄 콘솔 로그 (PII 없음).
   - 운영 조회는 `kv_store` JSONB 단일 SQL 쿼리로 "지난 7일 환경 점검 안내 비율" 산출.
+- ack 거부 토스트 burst 텔레메트리: `docs/operations/ack-banner-telemetry.md`
+  - `subscribeAckErrorBanner` 가 burst(연속 거부 묶음) 가 끝나는 시점마다
+    `POST /api/metrics/ack-banner` 로 익명 통계 fire-and-forget 보고.
+  - 페이로드: `reason` (`auto-dismiss`/`user-dismiss`/`unmount`), `burstCount`, `burstDurationMs`.
+  - 서버는 `ackBannerEvents` JSONB 배열에 append + `[ack-banner]` 한 줄 콘솔 로그.
+  - `ACK_ERROR_AUTO_DISMISS_MS`(현재 5초) 임계값 튜닝의 운영 데이터 근거.
 
 ## Remote Config (BLE Stability Thresholds — Task #48)
 

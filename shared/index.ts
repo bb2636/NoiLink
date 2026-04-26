@@ -7,3 +7,4 @@ export * from './ble-protocol.js';
 export * from './ble-stability-config.js';
 export * from './recovery-stats.js';
 export * from './ble-abort-event.js';
+export * from './ack-banner-event.js';
