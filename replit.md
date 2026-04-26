@@ -137,6 +137,24 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
   원문을 그대로 노출해 정보 손실이 없도록 한다.
 - 회귀 테스트: `client/src/native/__tests__/nativeAckErrors.test.ts`.
 
+## Result Comparison Card (Task #112 → Task #114)
+
+- 결과 화면(`client/src/pages/Result.tsx`) 의 "직전 vs 오늘" 비교 카드 + 코칭 메시지는
+  `previousScore` 가 확정됐을 때만 노출된다 — 임시 폴백(`todayScore - 12`) 은
+  Task #113 에서 제거됨.
+- 우선순위:
+  1. `navigate state.previousScore` (정상 완료 직후 흐름) → 그대로 사용.
+  2. 그 외(=기록에서 재진입) → `GET /api/metrics/session/:sessionId/previous-score`
+     를 useEffect 로 호출해 서버에서 받아온 값 사용 (Task #114 — 단건 엔드포인트).
+  3. 서버가 `previousScore: null` 을 돌려주면(첫 세션) 비교 카드와 "직전 대비"
+     코칭 문구를 모두 숨겨 가짜 차이 노출을 막는다.
+- 서버 엔드포인트(`server/routes/metrics.ts`): 같은 `userId` + 같은 `mode` +
+  같은 `isComposite` 의 세션 중 `isValid===true` & `score: number` & `createdAt`
+  이 target 보다 엄격히 이전인 가장 최근 1건의 score 를 돌려준다. 없으면 null.
+- 회귀 테스트:
+  - `server/routes/metrics.test.ts` — 모드/형식/유효/시간/권한 규칙 (Task #114).
+  - `client/src/pages/Result.test.tsx` — 재진입/첫 세션/state 우선/응답 전 숨김.
+
 ## Deployment
 
 - Target: autoscale
