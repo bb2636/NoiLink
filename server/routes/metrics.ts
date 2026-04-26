@@ -16,6 +16,8 @@ import type {
   User,
 } from '@noilink/shared';
 import {
+  isoToKstLocalDate,
+  KST_TIME_ZONE,
   sanitizeAckBannerEventInput,
   sanitizeBleAbortEventInput,
   sanitizeRecoveryRawMetrics,
@@ -336,6 +338,11 @@ router.get('/session/:sessionId', optionalAuth, async (req: Request, res: Respon
  *    돌려보낸다(Task #123). 클라이언트는 비교 카드의 직전 날짜 라벨을 가짜
  *    "오늘 - 2일" 이 아니라 이 실제 세션 날짜로 표시한다 — 점수와 날짜가
  *    한 쌍으로 어긋나지 않게 한다. 직전이 없으면 `previousScoreCreatedAt: null`.
+ *  - Task #132: 라벨이 디바이스 시간대로 흔들리지 않도록 KST(`Asia/Seoul`) 기준
+ *    `YYYY-MM-DD` 표시용 문자열(`previousScoreLocalDate`) 과 기준 시간대
+ *    (`timeZone`) 도 함께 회신한다. 클라이언트는 ISO 가 아니라 이 표시용 문자열을
+ *    우선 사용해 라벨을 만든다. 자정 근처(UTC 15:00 ↔ KST 다음 날 00:00) 케이스도
+ *    항상 KST 의 같은 날짜로 떨어진다. 직전 점수가 없으면 둘 다 null.
  */
 router.get('/session/:sessionId/previous-score', optionalAuth, async (req: Request, res: Response) => {
   try {
@@ -369,9 +376,18 @@ router.get('/session/:sessionId/previous-score', optionalAuth, async (req: Reque
     const previousScore = candidates.length > 0 ? (candidates[0].score as number) : null;
     const previousScoreCreatedAt =
       candidates.length > 0 ? candidates[0].createdAt : null;
+    // Task #132: 비교 카드 라벨이 디바이스 시간대로 흔들리지 않도록 KST 기준
+    // `YYYY-MM-DD` 표시용 문자열도 한 쌍으로 함께 회신한다. 직전이 없으면
+    // 둘 다 null 로 잠가 라벨만 새어 나가는 어긋남을 방지.
+    const previousScoreLocalDate = isoToKstLocalDate(previousScoreCreatedAt);
     res.json({
       success: true,
-      data: { previousScore, previousScoreCreatedAt },
+      data: {
+        previousScore,
+        previousScoreCreatedAt,
+        previousScoreLocalDate,
+        timeZone: KST_TIME_ZONE,
+      },
     });
   } catch (error) {
     res.status(500).json({

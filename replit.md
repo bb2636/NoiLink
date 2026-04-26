@@ -151,9 +151,18 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
 - 서버 엔드포인트(`server/routes/metrics.ts`): 같은 `userId` + 같은 `mode` +
   같은 `isComposite` 의 세션 중 `isValid===true` & `score: number` & `createdAt`
   이 target 보다 엄격히 이전인 가장 최근 1건의 score 를 돌려준다. 없으면 null.
+- 비교 카드의 직전 날짜 라벨(Task #123 → Task #132): 응답에 `previousScoreCreatedAt`
+  (ISO) 과 함께 KST(`Asia/Seoul`) 기준 표시용 날짜 `previousScoreLocalDate`
+  (`YYYY-MM-DD`) 와 `timeZone` 도 한 쌍으로 내려준다. 클라이언트는 표시용 날짜를
+  우선 사용해 라벨이 디바이스 시간대로 흔들리지 않게 한다(자정 경계 회귀 보호).
+  같은 KST 헬퍼(`shared/kst-date.ts` 의 `isoToKstLocalDate`) 를 정상 완료 흐름
+  (`TrainingSessionPlay`) 에서도 사용해 두 흐름의 라벨이 정확히 일치한다.
 - 회귀 테스트:
-  - `server/routes/metrics.test.ts` — 모드/형식/유효/시간/권한 규칙 (Task #114).
-  - `client/src/pages/Result.test.tsx` — 재진입/첫 세션/state 우선/응답 전 숨김.
+  - `server/routes/metrics.test.ts` — 모드/형식/유효/시간/권한 규칙 (Task #114),
+    KST 표시용 날짜·자정 경계 (Task #132).
+  - `client/src/pages/Result.test.tsx` — 재진입/첫 세션/state 우선/응답 전 숨김,
+    KST 표시용 라벨/자정 경계 (Task #132).
+  - `shared/kst-date.test.ts` — `isoToKstLocalDate` 자정/월/연 경계.
 
 ## Deployment
 

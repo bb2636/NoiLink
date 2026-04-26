@@ -37,6 +37,14 @@ export type TrainingResultState = {
    * 정상 완료 흐름과 재진입 흐름 모두 같은 라벨 로직을 쓴다.
    */
   previousScoreCreatedAt?: string;
+  /**
+   * 직전 세션의 KST(`Asia/Seoul`) 기준 표시용 날짜(`YYYY-MM-DD`, Task #132).
+   * ISO 만 가지고 라벨을 만들면 디바이스 시간대로 흔들리므로(자정 근처에 끝낸
+   * 세션이 다른 시간대 디바이스에서 다른 날짜로 보이는 어긋남), 점수·ISO 와
+   * 한 쌍으로 KST 기준 표시용 문자열을 함께 전달해 라벨이 항상 같은 날짜로
+   * 떨어지게 한다. 누락(과거 페이로드 호환)이면 ISO 폴백 → "직전" 폴백 순.
+   */
+  previousScoreLocalDate?: string;
   yieldsScore: boolean;
   sessionId?: string;
   /** BLE 단절 → 자동 재연결 회복 구간 누적 시간(ms). 0 또는 미존재면 배너 숨김. */
@@ -149,6 +157,10 @@ export default function Result() {
   const [serverPreviousScore, setServerPreviousScore] = useState<number | null>(null);
   const [serverPreviousScoreCreatedAt, setServerPreviousScoreCreatedAt] =
     useState<string | null>(null);
+  // Task #132: 서버가 함께 내려주는 KST 기준 표시용 날짜(`YYYY-MM-DD`).
+  // 라벨 우선순위는 이 표시용 문자열 → ISO 폴백 → "직전" 순.
+  const [serverPreviousScoreLocalDate, setServerPreviousScoreLocalDate] =
+    useState<string | null>(null);
   const needsPreviousScoreFetch =
     Boolean(sessionIdForFetch) &&
     !stateProvidedDisplayScore &&
@@ -159,12 +171,15 @@ export default function Result() {
     // 다른 세션의 직전 점수/날짜가 잠깐 노출되는 것을 막는다.
     setServerPreviousScore(null);
     setServerPreviousScoreCreatedAt(null);
+    setServerPreviousScoreLocalDate(null);
     let cancelled = false;
     (async () => {
       const res = await api
-        .get<{ previousScore: number | null; previousScoreCreatedAt?: string | null }>(
-          `/metrics/session/${sessionIdForFetch}/previous-score`,
-        )
+        .get<{
+          previousScore: number | null;
+          previousScoreCreatedAt?: string | null;
+          previousScoreLocalDate?: string | null;
+        }>(`/metrics/session/${sessionIdForFetch}/previous-score`)
         .catch(() => null);
       if (cancelled) return;
       if (!res || !res.success || !res.data) return;
@@ -176,6 +191,12 @@ export default function Result() {
         const createdAt = res.data.previousScoreCreatedAt;
         if (typeof createdAt === 'string') {
           setServerPreviousScoreCreatedAt(createdAt);
+        }
+        // Task #132: 표시용 날짜도 같은 응답에서 받아 라벨이 디바이스 시간대로
+        // 흔들리지 않게 한다. 누락된 응답이면 null 로 두고 라벨은 ISO 폴백을 쓴다.
+        const localDate = res.data.previousScoreLocalDate;
+        if (typeof localDate === 'string') {
+          setServerPreviousScoreLocalDate(localDate);
         }
       }
     })();
@@ -213,15 +234,20 @@ export default function Result() {
   //   숨긴다 — 가짜 비교를 보여 사용자를 오인시키지 않기 위함.
   let resolvedPreviousScore: number | undefined;
   let resolvedPreviousScoreCreatedAt: string | undefined;
+  // Task #132: 라벨 우선순위는 KST 표시용 문자열(서버/클라이언트 모두 같은
+  // 헬퍼로 만든 값) → ISO 폴백 → "직전" 폴백.
+  let resolvedPreviousScoreLocalDate: string | undefined;
   if (state?.previousScore != null) {
     resolvedPreviousScore = state.previousScore;
     // Task #123: 정상 완료 흐름은 TrainingSessionPlay 가 점수와 날짜를 한 쌍으로
     // 채워 보낸다. 같은 출처의 값을 함께 채택해 라벨이 어긋나지 않게 한다.
     resolvedPreviousScoreCreatedAt = state.previousScoreCreatedAt;
+    resolvedPreviousScoreLocalDate = state.previousScoreLocalDate;
   } else if (serverPreviousScore != null) {
     resolvedPreviousScore = serverPreviousScore;
     // 재진입 흐름: 같은 단건 엔드포인트 응답에서 받은 날짜를 그대로 사용한다.
     resolvedPreviousScoreCreatedAt = serverPreviousScoreCreatedAt ?? undefined;
+    resolvedPreviousScoreLocalDate = serverPreviousScoreLocalDate ?? undefined;
   }
   const hasPreviousScore = resolvedPreviousScore !== undefined;
   const prevScore = resolvedPreviousScore ?? 0;
@@ -654,7 +680,10 @@ export default function Result() {
                     "오늘 - 2일" 라벨이 다시 새어 나오지 않게 한다. */}
                 <ScoreMini
                   score={prevScore}
-                  label={formatPastDate(resolvedPreviousScoreCreatedAt)}
+                  label={formatPastDate(
+                    resolvedPreviousScoreLocalDate,
+                    resolvedPreviousScoreCreatedAt,
+                  )}
                   accent="#888"
                 />
                 {/* 화살표 + 차이 */}
@@ -767,19 +796,39 @@ function ScoreMini({
 }
 
 /**
- * 비교 카드의 직전 날짜 라벨(Task #123).
+ * 비교 카드의 직전 날짜 라벨(Task #123 / Task #132).
  *
  * 정책:
- *  - 인자가 직전 세션의 ISO 8601 `createdAt` 이면 "{월}월 {일}일" 로 표기한다.
- *    점수와 한 쌍으로 같은 출처(서버 이력)에서 온 값이라 라벨이 어긋나지 않는다.
- *  - 인자가 비었거나(과거 페이로드 호환) ISO 파싱이 실패하면 "직전" 으로 폴백한다.
- *    가짜 "오늘 - 2일" 라벨이 다시 부활하지 않도록 절대 현재 시각을 쓰지 않는다.
+ *  - KST(`Asia/Seoul`) 기준 표시용 날짜(`YYYY-MM-DD`) 가 들어오면 그것을 우선 사용한다.
+ *    서버와 클라이언트가 같은 헬퍼(`isoToKstLocalDate`) 로 만든 값이라 라벨이
+ *    디바이스 시간대와 무관하게 항상 같은 날짜로 떨어진다 (자정 경계 회귀 보호).
+ *  - 표시용 날짜가 없으면(과거 페이로드 호환) ISO `createdAt` 으로 폴백한다.
+ *    이 폴백은 디바이스 로컬 시간대를 쓰지만, 서버가 항상 표시용 문자열을
+ *    내려주므로 실제 운영에서는 도달하지 않는다.
+ *  - 둘 다 비거나 파싱 실패면 "직전" 으로 폴백한다 — 절대 현재 시각으로 라벨을
+ *    조작하지 않는다(가짜 "오늘 - 2일" 라벨 회귀 방지).
  */
-function formatPastDate(createdAt: string | undefined): string {
-  if (!createdAt) return '직전';
-  const d = new Date(createdAt);
-  if (Number.isNaN(d.getTime())) return '직전';
-  return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+function formatPastDate(
+  localDate: string | undefined,
+  createdAt: string | undefined,
+): string {
+  if (localDate) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(localDate);
+    if (m) {
+      const month = parseInt(m[2], 10);
+      const day = parseInt(m[3], 10);
+      if (Number.isFinite(month) && Number.isFinite(day)) {
+        return `${month}월 ${day}일`;
+      }
+    }
+  }
+  if (createdAt) {
+    const d = new Date(createdAt);
+    if (!Number.isNaN(d.getTime())) {
+      return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+    }
+  }
+  return '직전';
 }
 
 /** 회복 카드 요약 라벨/값 한 쌍 (평균/최장/횟수). */

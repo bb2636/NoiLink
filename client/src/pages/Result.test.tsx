@@ -79,6 +79,9 @@ const BASE_STATE: TrainingResultState = {
   // 넘긴다 — 비교 카드 라벨이 가짜 "오늘 - 2일" 이 아니라 실제 세션 날짜가
   // 되도록 잠근다. 기본 픽스처는 5월 10일을 직전 세션으로 둔다.
   previousScoreCreatedAt: '2026-05-10T03:00:00.000Z',
+  // Task #132: KST 기준 표시용 날짜도 한 쌍으로 함께 전달해 라벨이 디바이스
+  // 시간대로 흔들리지 않게 한다. 2026-05-10T03:00:00Z = KST 12:00 → 5월 10일.
+  previousScoreLocalDate: '2026-05-10',
   yieldsScore: true,
   sessionId: 'sess-test',
 };
@@ -785,24 +788,24 @@ describe('Result — 재진입 시 점수도 서버에서 다시 불러오기 (T
   });
 
   // ───────────────────────────────────────────────────────────
-  // Task #123 — 비교 카드의 직전 날짜 라벨을 실제 세션 날짜로 표시
+  // Task #123 / Task #132 — 비교 카드의 직전 날짜 라벨을 실제 세션 날짜로
+  // 표시하되, 라벨이 디바이스 시간대로 흔들리지 않도록 KST 표시용 문자열을
+  // 우선 사용한다.
   // ───────────────────────────────────────────────────────────
   //
   // 정책 요약:
-  //   1. 정상 완료 흐름: navigate state.previousScoreCreatedAt 의 ISO 날짜를
-  //      "{월}월 {일}일" 라벨로 비교 카드의 직전 점수 아래에 표시한다.
+  //   1. 정상 완료 흐름: navigate state.previousScoreLocalDate (KST 기준
+  //      `YYYY-MM-DD`) 가 있으면 "{월}월 {일}일" 라벨을 그것에서 만든다.
   //   2. 재진입 흐름: 세션 단건 직전 점수 엔드포인트 응답의
-  //      previousScoreCreatedAt 을 같은 라벨 로직으로 표시한다.
-  //   3. 직전 날짜가 누락된 과거 페이로드는 "직전" 으로 폴백 — 가짜
-  //      "오늘 - 2일" 라벨이 절대 부활하지 않는다.
+  //      previousScoreLocalDate 를 같은 라벨 로직으로 표시한다.
+  //   3. 표시용 날짜가 없으면 ISO 폴백, 그것도 없으면 "직전" 으로 폴백 —
+  //      가짜 "오늘 - 2일" 라벨이 절대 부활하지 않는다.
+  //   4. 자정 경계(UTC 15:00 = KST 다음 날 00:00) 에서도 KST 표시용 날짜가
+  //      우선 사용돼 디바이스 시간대로 라벨이 흔들리지 않는다.
   //
   // 보호 목적:
-  //   - 점수는 진짜인데 라벨만 "오늘 - 2일" 인 어긋난 비교 카드 회귀를 잠근다.
-
-  function expectedLocalDateLabel(iso: string): string {
-    const d = new Date(iso);
-    return `${d.getMonth() + 1}월 ${d.getDate()}일`;
-  }
+  //   - 점수는 진짜인데 라벨만 "오늘 - 2일" 인 어긋난 비교 카드 회귀.
+  //   - 자정 근처 세션이 디바이스 시간대에 따라 다른 날짜 라벨로 보이는 회귀.
 
   function prevScoreMiniText(): string {
     // 비교 카드 안의 첫 번째 ScoreMini(직전) 의 라벨 영역만 본다.
@@ -815,14 +818,15 @@ describe('Result — 재진입 시 점수도 서버에서 다시 불러오기 (T
       .join('|');
   }
 
-  it('정상 완료 흐름에서 previousScoreCreatedAt 이 라벨로 표시된다 (가짜 "오늘 - 2일" 폴백 금지)', async () => {
+  it('정상 완료 흐름: previousScoreLocalDate 가 우선 라벨로 표시된다 (가짜 "오늘 - 2일" 폴백 금지)', async () => {
     mockApiGet.mockResolvedValue({ success: true, data: { raw: null, score: null } });
 
-    const PREV_ISO = '2026-05-10T12:00:00.000Z';
+    // KST 표시용 날짜는 5월 10일 — ISO 와 한 쌍으로 함께 전달.
     renderResult({
       displayScore: 82,
       previousScore: 75,
-      previousScoreCreatedAt: PREV_ISO,
+      previousScoreCreatedAt: '2026-05-10T12:00:00.000Z',
+      previousScoreLocalDate: '2026-05-10',
     });
 
     await act(async () => {
@@ -831,8 +835,7 @@ describe('Result — 재진입 시 점수도 서버에서 다시 불러오기 (T
     });
 
     const labels = prevScoreMiniText();
-    // 직전 라벨에 실제 세션 날짜가 들어 있어야 한다.
-    expect(labels).toContain(expectedLocalDateLabel(PREV_ISO));
+    expect(labels).toContain('5월 10일');
     // 오늘 라벨도 그대로 노출돼 한 쌍이 함께 보인다.
     expect(labels).toContain('오늘');
     // 가짜 "오늘 - 2일" 폴백이 부활하지 않는지 — 오늘로부터 2일 전 라벨이
@@ -840,19 +843,47 @@ describe('Result — 재진입 시 점수도 서버에서 다시 불러오기 (T
     const twoDaysAgo = new Date();
     twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
     const fakeLabel = `${twoDaysAgo.getMonth() + 1}월 ${twoDaysAgo.getDate()}일`;
-    if (fakeLabel !== expectedLocalDateLabel(PREV_ISO)) {
-      // PREV_ISO 와 우연히 같은 날이면 의미 있는 단언이 아니므로 건너뛴다.
+    if (fakeLabel !== '5월 10일') {
       expect(labels.split('|').filter((l) => l === fakeLabel).length).toBe(0);
     }
   });
 
-  it('재진입 흐름에서 서버 응답의 previousScoreCreatedAt 이 라벨로 표시된다', async () => {
-    const PREV_ISO = '2026-04-22T12:00:00.000Z';
+  it('자정 경계: previousScoreLocalDate 가 디바이스 시간대를 무시하고 KST 날짜로 떨어진다 (Task #132)', async () => {
+    mockApiGet.mockResolvedValue({ success: true, data: { raw: null, score: null } });
+
+    // 직전 세션이 UTC 2026-04-24 15:30 = KST 2026-04-25 00:30 (KST 자정 직후).
+    // ISO 만 보면 디바이스 로컬 시간대에 따라 04-24 로 떨어질 수 있지만,
+    // 서버가 함께 내려준 KST 표시용 문자열을 우선 사용해 라벨은 "4월 25일" 이어야 한다.
+    renderResult({
+      displayScore: 82,
+      previousScore: 75,
+      previousScoreCreatedAt: '2026-04-24T15:30:00.000Z',
+      previousScoreLocalDate: '2026-04-25',
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const labels = prevScoreMiniText();
+    expect(labels).toContain('4월 25일');
+    // 디바이스가 UTC 라면 ISO 만으로는 "4월 24일" 로 보이지만, 표시용 문자열을
+    // 우선 사용하므로 KST 의 다음 날짜(4월 25일) 가 정확히 노출된다.
+    expect(labels.split('|').filter((l) => l === '4월 24일').length).toBe(0);
+  });
+
+  it('재진입 흐름: 서버 응답의 previousScoreLocalDate 가 라벨로 표시된다 (Task #123 / Task #132)', async () => {
     mockApiGet.mockImplementation((url: string) => {
       if (url.endsWith('/previous-score')) {
         return Promise.resolve({
           success: true,
-          data: { previousScore: 58, previousScoreCreatedAt: PREV_ISO },
+          data: {
+            previousScore: 58,
+            previousScoreCreatedAt: '2026-04-22T12:00:00.000Z',
+            previousScoreLocalDate: '2026-04-22',
+            timeZone: 'Asia/Seoul',
+          },
         });
       }
       if (url.startsWith('/metrics/session/')) {
@@ -883,17 +914,64 @@ describe('Result — 재진입 시 점수도 서버에서 다시 불러오기 (T
     });
 
     const labels = prevScoreMiniText();
-    expect(labels).toContain(expectedLocalDateLabel(PREV_ISO));
+    expect(labels).toContain('4월 22일');
     expect(labels).toContain('오늘');
   });
 
-  it('previousScoreCreatedAt 이 누락된 과거 페이로드면 "직전" 으로 폴백한다 (가짜 라벨 부활 방지)', async () => {
+  it('재진입 흐름 자정 경계: 서버 KST 표시용 날짜가 디바이스 시간대를 무시하고 라벨에 반영된다 (Task #132)', async () => {
+    // 서버가 KST 기준으로 04-25 로 내려줬다면, 디바이스가 어떤 시간대든 라벨도 04-25 가 되어야 한다.
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.endsWith('/previous-score')) {
+        return Promise.resolve({
+          success: true,
+          data: {
+            previousScore: 58,
+            previousScoreCreatedAt: '2026-04-24T15:00:00.000Z',
+            previousScoreLocalDate: '2026-04-25',
+            timeZone: 'Asia/Seoul',
+          },
+        });
+      }
+      if (url.startsWith('/metrics/session/')) {
+        return Promise.resolve({
+          success: true,
+          data: {
+            raw: null,
+            score: {
+              sessionId: 'sess-test',
+              userId: 'user-1',
+              memory: 70,
+              comprehension: 70,
+              focus: 70,
+              createdAt: '2026-04-26T00:00:00.000Z',
+            },
+          },
+        });
+      }
+      return Promise.resolve({ success: false });
+    });
+
+    reentryRender();
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const labels = prevScoreMiniText();
+    expect(labels).toContain('4월 25일');
+    expect(labels.split('|').filter((l) => l === '4월 24일').length).toBe(0);
+  });
+
+  it('previousScoreLocalDate / previousScoreCreatedAt 모두 누락된 과거 페이로드면 "직전" 으로 폴백한다', async () => {
     mockApiGet.mockResolvedValue({ success: true, data: { raw: null, score: null } });
 
     renderResult({
       displayScore: 82,
       previousScore: 75,
       previousScoreCreatedAt: undefined,
+      previousScoreLocalDate: undefined,
     });
 
     await act(async () => {

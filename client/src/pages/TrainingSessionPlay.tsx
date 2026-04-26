@@ -12,7 +12,12 @@ import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import PodGrid from '../components/PodGrid/PodGrid';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import type { Level, NativeToWebMessage, RawMetrics, Session, TrainingMode } from '@noilink/shared';
-import { SESSION_MAX_MS, partialThresholdForMode, resolveBleStabilityThresholds } from '@noilink/shared';
+import {
+  SESSION_MAX_MS,
+  isoToKstLocalDate,
+  partialThresholdForMode,
+  resolveBleStabilityThresholds,
+} from '@noilink/shared';
 import api from '../utils/api';
 import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
 import { createPendingLocalId, enqueuePendingRun } from '../utils/pendingTrainingRuns';
@@ -562,12 +567,17 @@ export default function TrainingSessionPlay() {
     // 실제 세션 날짜로 표시되게 한다. 점수가 없으면 날짜도 비워(undefined)
     // 라벨이 어긋난 채로 새어 나가는 일이 없게 한다.
     let previousScoreCreatedAt: string | undefined;
+    // Task #132: 비교 카드 라벨이 디바이스 시간대로 흔들리지 않도록 KST 기준
+    // `YYYY-MM-DD` 표시용 문자열도 한 쌍으로 함께 보낸다. 서버 단건 직전 점수
+    // 엔드포인트와 동일한 헬퍼로 만들어 두 흐름의 라벨을 정확히 일치시킨다.
+    let previousScoreLocalDate: string | undefined;
     if (previousScoreRes && previousScoreRes.success && previousScoreRes.data) {
       for (const s of previousScoreRes.data) {
         if (s.id === res.sessionId) continue;
         if (typeof s.score === 'number') {
           previousScore = s.score;
           previousScoreCreatedAt = s.createdAt;
+          previousScoreLocalDate = isoToKstLocalDate(s.createdAt) ?? undefined;
           break;
         }
       }
@@ -582,6 +592,10 @@ export default function TrainingSessionPlay() {
         // 비교 카드의 직전 날짜 라벨용(Task #123) — 점수와 한 쌍으로 함께 전달.
         // 점수가 없으면 날짜도 undefined 라 라벨이 어긋나는 일이 없다.
         previousScoreCreatedAt,
+        // 라벨이 디바이스 시간대로 흔들리지 않도록 KST 기준 표시용 날짜도
+        // 함께 전달(Task #132). 서버 단건 직전 점수 엔드포인트와 동일한
+        // 헬퍼로 만든 값이라 두 흐름의 라벨이 정확히 일치한다.
+        previousScoreLocalDate,
         yieldsScore: state.yieldsScore,
         sessionId: res.sessionId,
         // 서버 idempotency 캐시 hit(= 사용자가 같은 결과를 두 번 보낸 셈) 신호를

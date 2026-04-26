@@ -595,7 +595,7 @@ describe('GET /api/metrics/session/:sessionId/previous-score (Task #114)', () =>
     currentActor.user = ACTOR_USER;
   });
 
-  it('현재 세션 직전 시점에서 점수가 있는 가장 최신 세션의 점수와 날짜를 돌려준다 (Task #123)', async () => {
+  it('현재 세션 직전 시점에서 점수가 있는 가장 최신 세션의 점수/날짜/KST 표시용 문자열을 돌려준다 (Task #123 / Task #132)', async () => {
     const app = buildApp();
 
     const res = await request(app).get('/api/metrics/session/sess-current/previous-score');
@@ -608,8 +608,60 @@ describe('GET /api/metrics/session/:sessionId/previous-score (Task #114)', () =>
         // 비교 카드 라벨이 가짜 "오늘 - 2일" 이 아니라 실제 직전 세션의
         // createdAt 으로 표시되도록 함께 회신한다.
         previousScoreCreatedAt: '2025-01-02T00:00:00.000Z',
+        // Task #132: 라벨이 디바이스 시간대로 흔들리지 않도록 KST 기준
+        // `YYYY-MM-DD` 표시용 문자열과 기준 시간대도 한 쌍으로 회신한다.
+        // 2025-01-02T00:00:00Z = KST 2025-01-02 09:00 → "2025-01-02".
+        previousScoreLocalDate: '2025-01-02',
+        timeZone: 'Asia/Seoul',
       },
     });
+  });
+
+  // Task #132 — 자정 경계(UTC 15:00 = KST 다음 날 00:00) 회귀 보호.
+  // 직전 세션이 UTC 자정 직전(KST 다음 날 새벽) 에 끝났을 때, 라벨이 KST 의
+  // "다음 날" 로 정확히 떨어지는지 잠근다. 디바이스 로컬 시간대로 라벨이 흔들려
+  // 같은 점수가 다른 날짜로 보이는 어긋남을 막는다.
+  it('자정 경계: UTC 15:00 직전 세션은 KST 의 다음 날짜로 표시된다 (Task #132)', async () => {
+    const MIDNIGHT_SESSIONS: Session[] = [
+      {
+        id: 'sess-prev-late-utc',
+        userId: 'u1',
+        mode: 'FOCUS',
+        bpm: 60,
+        level: 1,
+        duration: 30_000,
+        score: 65,
+        isComposite: false,
+        isValid: true,
+        phases: [],
+        // UTC 2026-04-24 15:00 = KST 2026-04-25 00:00 (자정 경계 통과)
+        createdAt: '2026-04-24T15:00:00.000Z',
+      },
+      {
+        id: 'sess-current',
+        userId: 'u1',
+        mode: 'FOCUS',
+        bpm: 60,
+        level: 1,
+        duration: 30_000,
+        score: 80,
+        isComposite: false,
+        isValid: true,
+        phases: [],
+        createdAt: '2026-04-26T00:00:00.000Z',
+      },
+    ];
+    store.sessions = MIDNIGHT_SESSIONS;
+    const app = buildApp();
+
+    const res = await request(app).get('/api/metrics/session/sess-current/previous-score');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.previousScore).toBe(65);
+    expect(res.body.data.previousScoreCreatedAt).toBe('2026-04-24T15:00:00.000Z');
+    // 핵심 회귀: KST 기준 라벨은 04-24 가 아니라 04-25 로 떨어져야 한다.
+    expect(res.body.data.previousScoreLocalDate).toBe('2026-04-25');
+    expect(res.body.data.timeZone).toBe('Asia/Seoul');
   });
 
   it('점수 미산출 세션(score=undefined)은 후보에서 제외되고 그 이전의 점수 있는 세션이 채택된다', async () => {
@@ -631,18 +683,24 @@ describe('GET /api/metrics/session/:sessionId/previous-score (Task #114)', () =>
     expect(res.body.data.previousScore).toBe(60);
   });
 
-  it('첫 세션(과거에 점수 있는 세션이 하나도 없음) 이면 previousScore/previousScoreCreatedAt 모두 null', async () => {
+  it('첫 세션(과거에 점수 있는 세션이 하나도 없음) 이면 previousScore/previousScoreCreatedAt/previousScoreLocalDate 모두 null', async () => {
     store.sessions = [SESSIONS[0]]; // sess-old-1 하나만 — 자기 자신 외 후보 없음.
     const app = buildApp();
 
     const res = await request(app).get('/api/metrics/session/sess-old-1/previous-score');
 
     expect(res.status).toBe(200);
-    // 클라이언트가 비교 카드 자체를 숨기도록 둘 다 null 로 회신한다 — 점수만
-    // null 이고 날짜만 들어오는 어긋난 상태가 새어 나가지 않게 같이 잠근다.
+    // 클라이언트가 비교 카드 자체를 숨기도록 점수/ISO/표시용 날짜 모두 null 로
+    // 회신한다 — 점수만 null 이고 날짜만 들어오는 어긋난 상태가 새어 나가지 않게
+    // 같이 잠근다. timeZone 은 응답 형태가 일정하도록 항상 포함된다.
     expect(res.body).toEqual({
       success: true,
-      data: { previousScore: null, previousScoreCreatedAt: null },
+      data: {
+        previousScore: null,
+        previousScoreCreatedAt: null,
+        previousScoreLocalDate: null,
+        timeZone: 'Asia/Seoul',
+      },
     });
   });
 
