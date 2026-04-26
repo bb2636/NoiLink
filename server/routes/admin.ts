@@ -11,6 +11,7 @@ import {
   RECOVERY_COACHING_THRESHOLD_MS,
   RECOVERY_COACHING_MIN_SESSIONS,
 } from '@noilink/shared';
+import { getBleStabilityRemoteConfigStatus } from './config.js';
 
 const router = Router();
 
@@ -40,6 +41,10 @@ router.get('/dashboard', async (req: AuthRequest, res: Response) => {
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         return lastLogin >= sevenDaysAgo;
       }).length,
+      // BLE 단절 안내 임계값 원격 설정의 현재 상태 (Task #71).
+      // 잘못된 BLE_STABILITY_REMOTE_CONFIG 가 푸시되면 parseError 가 채워지므로
+      // 운영자가 대시보드에서 즉시 사실을 인지할 수 있다.
+      bleStabilityRemoteConfig: getBleStabilityRemoteConfigStatus(),
     };
     
     res.json({ success: true, data: stats });

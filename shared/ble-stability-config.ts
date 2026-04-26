@@ -154,6 +154,94 @@ export interface BleStabilityRemoteConfig {
 export const BLE_STABILITY_REMOTE_CONFIG_SCHEMA_VERSION = 1;
 
 /**
+ * 원격 설정 로딩 결과의 진단 메타 (Task #71).
+ *
+ * 잘못된 환경 변수가 푸시되어 빈 설정이 내려갈 때, 운영자가
+ * "튜닝이 적용되지 않는다"고 추측하지 않고 사실 자체를 확인할 수 있도록
+ * 응답/관리자 대시보드에 노출된다.
+ *
+ * - `source: 'env'` 는 `BLE_STABILITY_REMOTE_CONFIG` 가 설정되어 있어
+ *   파싱이 시도되었음을 뜻한다 (성공/실패 모두 포함).
+ * - `source: 'empty'` 는 환경 변수가 비어 있어 의도적으로 기본값이 쓰임을 뜻한다.
+ * - `parseError` 가 채워져 있으면 JSON 자체가 깨졌거나 객체 모양이 아니어서
+ *   파싱 단계에서 빈 설정으로 폴백되었다는 강력한 경고 신호다.
+ * - `validationError` 가 채워져 있으면 JSON 은 멀쩡하지만 임계값이 전부
+ *   음수/문자열/0 같은 무효값이라 클라이언트가 적용할 규칙이 0 개로 줄었다는
+ *   뜻이다 — 운영자가 가장 놓치기 쉬운 "조용한 폴백" 케이스를 잡아낸다.
+ * - `ruleCount` / `hasDefault` 는 sanitize 를 통과한 *실효* 규칙 수만을 반영해,
+ *   "푸시한 5 개 중 실제로는 1 개만 적용 중" 같은 부분 무효화도 표면화한다.
+ * - `rawRuleCount` 는 환경 변수에 들어 있는 규칙 수 그 자체다 — 실효 규칙과
+ *   비교하면 몇 개가 sanitize 단계에서 떨어졌는지 즉시 확인할 수 있다.
+ */
+export interface BleStabilityRemoteConfigDiagnostics {
+  source: 'env' | 'empty';
+  ruleCount: number;
+  rawRuleCount: number;
+  hasDefault: boolean;
+  parseError?: string;
+  validationError?: string;
+  /** 마지막으로 환경 변수를 읽고 파싱한 시각 (ISO 8601). */
+  lastLoadedAt: string;
+}
+
+/**
+ * 원격 설정의 *실효* 규칙/기본값 개수를 계산한다 (Task #71).
+ *
+ * `makeBleStabilityResolverFromRemoteConfig` 와 같은 sanitize 규칙을 그대로
+ * 쓰므로, "JSON 은 멀쩡하지만 임계값이 모두 무효라 실제로는 빈 설정이 내려가는"
+ * 케이스를 진단 메타에서 정확히 표면화할 수 있다.
+ */
+export interface BleStabilityRemoteConfigSummary {
+  rawRuleCount: number;
+  effectiveRuleCount: number;
+  rawHasDefault: boolean;
+  effectiveHasDefault: boolean;
+}
+
+export function summarizeBleStabilityRemoteConfig(
+  config: BleStabilityRemoteConfig | null | undefined,
+): BleStabilityRemoteConfigSummary {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    return {
+      rawRuleCount: 0,
+      effectiveRuleCount: 0,
+      rawHasDefault: false,
+      effectiveHasDefault: false,
+    };
+  }
+  const rawRules = Array.isArray(config.rules) ? config.rules : [];
+  let effectiveRuleCount = 0;
+  for (const rule of rawRules) {
+    if (!rule || typeof rule !== 'object') continue;
+    if (hasAnyEffectiveThreshold(rule.thresholds)) effectiveRuleCount++;
+  }
+  const rawHasDefault =
+    !!config.default && typeof config.default === 'object';
+  const effectiveHasDefault = hasAnyEffectiveThreshold(config.default);
+  return {
+    rawRuleCount: rawRules.length,
+    effectiveRuleCount,
+    rawHasDefault,
+    effectiveHasDefault,
+  };
+}
+
+/**
+ * `pickPositive` 와 동일한 기준 — 양의 유한수만 실효값으로 본다.
+ * `sanitizeOverride` 는 음수도 일단 통과시키지만(이후 단계에서 떨어뜨림),
+ * 진단 메타에서는 "실제로 적용 가능한가?" 를 보여 줘야 운영자에게 의미가 있다.
+ */
+function hasAnyEffectiveThreshold(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  const r = raw as { windowThreshold?: unknown; msThreshold?: unknown };
+  return isEffectiveThreshold(r.windowThreshold) || isEffectiveThreshold(r.msThreshold);
+}
+
+function isEffectiveThreshold(value: unknown): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+/**
  * 원격 설정을 오버라이드 훅으로 변환한다.
  *
  * 비어 있거나 모양이 잘못되어 적용할 규칙이 하나도 없으면 `null` 을 반환한다.
