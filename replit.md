@@ -164,18 +164,28 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
   우선 사용해 라벨이 디바이스 시간대로 흔들리지 않게 한다(자정 경계 회귀 보호).
   같은 KST 헬퍼(`shared/kst-date.ts` 의 `isoToKstLocalDate`) 를 정상 완료 흐름
   (`TrainingSessionPlay`) 에서도 사용해 두 흐름의 라벨이 정확히 일치한다.
+- 홈 "주간 출석 도장" 7칸(Task #144): `useUserStats` 의 `checkedDays` 도 같은
+  KST 헬퍼 위에 쌓아 디바이스 시간대 영향을 받지 않게 잠갔다. `shared/kst-date.ts`
+  에 추가한 `kstStartOfWeekMonYmd` / `kstYmdDiffDays` / `kstWeekdayMon0FromYmd` 가
+  단일 출처. 자정 직전(KST) 에 끝낸 세션이 UTC 디바이스에서도 같은 KST 요일
+  칸을 채우고, 지난 주 일요일(KST) 세션이 새 주에 잘못 흘러들어가지 않는다.
 - 회귀 테스트:
   - `server/routes/metrics.test.ts` — 모드/형식/유효/시간/권한 규칙 (Task #114),
     KST 표시용 날짜·자정 경계 (Task #132).
   - `client/src/pages/Result.test.tsx` — 재진입/첫 세션/state 우선/응답 전 숨김,
     KST 표시용 라벨/자정 경계 (Task #132).
-  - `shared/kst-date.test.ts` — `isoToKstLocalDate` 자정/월/연 경계.
+  - `shared/kst-date.test.ts` — `isoToKstLocalDate` 자정/월/연 경계 (Task #132),
+    `kstStartOfWeekMonYmd` / `kstYmdDiffDays` / `kstWeekdayMon0FromYmd` 의 주 시작·
+    요일 인덱스·일수 차이 (Task #144).
   - `client/src/utils/__tests__/submitTrainingRunRetry.test.ts` —
     `includePreviousScore` 플래그의 호출/병렬/실패 폴백/생략 정책 (Task #122)
     및 `previousScoreLocalDate` 전파 (Task #132 ← Task #122).
   - `client/src/pages/TrainingSessionPlay.test.tsx` — 정상 완료 흐름이 submit
     결과의 직전 점수/표시용 날짜를 navigate state 로 흘리고, 페이징 이력 호출
     로 회귀하지 않음을 잠근다 (Task #122 / Task #132 자정 경계 회귀 보호).
+  - `client/src/hooks/__tests__/useUserStats.weeklyAttendance.test.ts` — UTC 디바이스
+    시뮬레이션(`process.env.TZ='UTC'`) 하에서 `checkedDays` 가 KST 요일 칸에 떨어지는지
+    (Task #144).
 
 ## Deployment
 

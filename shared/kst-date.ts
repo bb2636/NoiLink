@@ -43,3 +43,59 @@ export function isoToKstLocalDate(iso: string | null | undefined): string | null
   if (!year || !month || !day) return null;
   return `${year}-${month}-${day}`;
 }
+
+/**
+ * `YYYY-MM-DD` 문자열을 받아 그 날짜의 요일을 월=0..일=6 인덱스로 돌려준다 (Task #144).
+ *
+ *  - 입력은 이미 KST 기준으로 환산된 달력 날짜라고 가정한다 (`isoToKstLocalDate` 출력).
+ *  - `Date.UTC` + `getUTCDay()` 로 디바이스 시간대 영향을 받지 않는 요일을 얻는다.
+ *  - 형식이 어긋난 입력은 `null` — 호출자는 안전하게 폴백한다.
+ */
+export function kstWeekdayMon0FromYmd(ymd: string | null | undefined): number | null {
+  if (!ymd) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const utc = new Date(Date.UTC(y, mo - 1, d));
+  if (Number.isNaN(utc.getTime())) return null;
+  // getUTCDay: 0=일, 1=월, ..., 6=토 → 월=0..일=6 으로 변환
+  return (utc.getUTCDay() + 6) % 7;
+}
+
+/**
+ * KST 기준의 ISO 시각이 속한 주(週) 의 월요일 자정 날짜를 `YYYY-MM-DD` 로 돌려준다 (Task #144).
+ *
+ *  - 홈 "주간 출석 도장" 7칸의 시작점(월요일)을 디바이스 시간대 영향 없이 잠그기 위한 기준.
+ *  - 자정 근처(KST) 에 끝낸 세션이 UTC 디바이스에서 다른 주로 떨어지는 어긋남을 막는다.
+ */
+export function kstStartOfWeekMonYmd(iso: string | null | undefined): string | null {
+  const ymd = isoToKstLocalDate(iso);
+  if (!ymd) return null;
+  const mon0 = kstWeekdayMon0FromYmd(ymd);
+  if (mon0 === null) return null;
+  const [y, mo, d] = ymd.split('-').map(Number);
+  const utc = new Date(Date.UTC(y, mo - 1, d));
+  utc.setUTCDate(utc.getUTCDate() - mon0);
+  const yy = utc.getUTCFullYear();
+  const mm = String(utc.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(utc.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+/**
+ * `YYYY-MM-DD` 문자열 두 개의 달력 일수 차이 (Task #144).
+ *
+ *  - 양수면 `later` 가 `earlier` 보다 뒤. DST 가 없는 KST 에서는 안전하다.
+ *  - 두 입력 모두 이미 같은 시간대(KST) 에서 환산된 달력 날짜라고 가정한다.
+ *  - 형식이 어긋난 입력은 `null` — 호출자는 비교를 건너뛴다.
+ */
+export function kstYmdDiffDays(later: string, earlier: string): number | null {
+  const lm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(later);
+  const em = /^(\d{4})-(\d{2})-(\d{2})$/.exec(earlier);
+  if (!lm || !em) return null;
+  const a = Date.UTC(Number(lm[1]), Number(lm[2]) - 1, Number(lm[3]));
+  const b = Date.UTC(Number(em[1]), Number(em[2]) - 1, Number(em[3]));
+  return Math.round((a - b) / 86_400_000);
+}

@@ -10,6 +10,9 @@ import type {
 import {
   aggregateRecoveryStats,
   type AggregatedRecoveryStats,
+  isoToKstLocalDate,
+  kstStartOfWeekMonYmd,
+  kstYmdDiffDays,
 } from '@noilink/shared';
 
 export interface DerivedUserStats {
@@ -43,15 +46,6 @@ const MODE_LABELS: Record<TrainingMode, string> = {
 // 사용자별 캐시 — 탭 전환 시 즉시 표시
 const cache = new Map<string, DerivedUserStats>();
 const inFlight = new Map<string, boolean>();
-
-function startOfWeekMon(d: Date): Date {
-  const day = d.getDay(); // 0=일, 1=월, ...
-  const diff = (day + 6) % 7; // 월=0
-  const out = new Date(d);
-  out.setHours(0, 0, 0, 0);
-  out.setDate(out.getDate() - diff);
-  return out;
-}
 
 function deriveStats(
   sessions: Session[],
@@ -113,14 +107,21 @@ function deriveStats(
     .slice(0, 3)
     .map(([m]) => MODE_LABELS[m] ?? '트레이닝');
 
-  // 이번 주 출석(월~일)
-  const weekStart = startOfWeekMon(new Date());
+  // 이번 주 출석(월~일) — KST(`Asia/Seoul`) 기준으로 잠가 디바이스 시간대 흔들림을 막는다 (Task #144).
+  //  - 자정 직전(KST) 에 끝낸 세션이 UTC 디바이스에서 다른 요일/주 칸으로 떨어지던 어긋남을 회귀 방지.
+  //  - 결과 화면 비교 카드(Task #132) 와 같은 헬퍼(`isoToKstLocalDate`) 위에 쌓아 두 화면이 항상 같은 주를 가리킨다.
+  //  - 헬퍼가 `null` 을 돌려주는 비정상 입력은 조용히 건너뛰고 7칸 모두 비워둔다 — 가짜 체크를 만들지 않는다.
   const checkedDays = [false, false, false, false, false, false, false];
-  for (const x of indexed) {
-    const d = new Date(x.s.createdAt);
-    d.setHours(0, 0, 0, 0);
-    const diffDays = Math.floor((d.getTime() - weekStart.getTime()) / 86400000);
-    if (diffDays >= 0 && diffDays < 7) checkedDays[diffDays] = true;
+  const weekStartYmd = kstStartOfWeekMonYmd(new Date().toISOString());
+  if (weekStartYmd) {
+    for (const x of indexed) {
+      const sessYmd = isoToKstLocalDate(x.s.createdAt);
+      if (!sessYmd) continue;
+      const diffDays = kstYmdDiffDays(sessYmd, weekStartYmd);
+      if (diffDays !== null && diffDays >= 0 && diffDays < 7) {
+        checkedDays[diffDays] = true;
+      }
+    }
   }
 
   // 회복 통계: 세션 1개당 recoveries 1개 항목(없으면 null)을 그대로 넘긴다 —
