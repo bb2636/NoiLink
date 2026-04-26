@@ -362,11 +362,22 @@ function StandardHome({ variant, home, user }: StandardProps) {
 //   띄운다(트리거 = 카드 카피와 1:1 일치). 단발성 outlier 만으로는 띄우지 않는다.
 // 회복이 한 번도 없었던 경우엔 카드를 통째로 숨겨 잡음을 만들지 않는다.
 function RecoverySection({ stats }: { stats: AggregatedRecoveryStats }) {
+  const showCoaching = shouldShowRecoveryCoaching(stats);
+
+  // 사용자가 안내를 닫을 수 있도록 하되(과도한 잔소리 방지),
+  // 신호가 임계 미만으로 내려가면 닫힘 상태를 자동으로 초기화 —
+  // 다음에 다시 30초를 넘으면 카드가 새로 등장한다(auto re-arm).
+  // Hooks 규칙(early return 보다 위에서 무조건 호출) 준수 — 회복이
+  // 한 번도 없던 상태와 있는 상태가 오가도 호출 순서가 깨지지 않는다.
+  const [coachingDismissed, setCoachingDismissed] = useState(false);
+  useEffect(() => {
+    if (!showCoaching) setCoachingDismissed(false);
+  }, [showCoaching]);
+
   // 회복이 한 번도 없었던 사용자에게는 카드를 노출하지 않는다 — 잡음 방지.
   if (stats.sessionsWithRecovery === 0) return null;
   const totalSec = Math.round(stats.totalMs / 1000);
   const avgSec = Math.round(stats.avgMsPerSession / 1000);
-  const showCoaching = shouldShowRecoveryCoaching(stats);
 
   return (
     <div className="mb-6">
@@ -393,19 +404,29 @@ function RecoverySection({ stats }: { stats: AggregatedRecoveryStats }) {
           회복 발생 · 세션당 평균 ≈ {avgSec}초
         </div>
 
-        {showCoaching && (
+        {showCoaching && !coachingDismissed && (
           <div
             role="status"
             data-testid="recovery-coaching-card"
-            className="mt-3 rounded-xl px-3 py-3"
+            className="mt-3 rounded-xl px-3 py-3 relative"
             style={{
               backgroundColor: '#3A2A00',
               color: '#FFD66B',
               border: '1px solid #5A4500',
             }}
           >
-            <div className="text-sm font-semibold mb-1">환경 점검을 권장해요</div>
-            <p className="text-[12px] leading-relaxed" style={{ color: '#F5E0A0' }}>
+            <button
+              type="button"
+              aria-label="안내 닫기"
+              data-testid="recovery-coaching-dismiss"
+              onClick={() => setCoachingDismissed(true)}
+              className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-full text-base leading-none"
+              style={{ color: '#F5E0A0', backgroundColor: 'transparent' }}
+            >
+              ×
+            </button>
+            <div className="text-sm font-semibold mb-1 pr-6">환경 점검을 권장해요</div>
+            <p className="text-[12px] leading-relaxed pr-6" style={{ color: '#F5E0A0' }}>
               최근 {stats.sessionsCount}개 세션의 평균 회복 시간이 30초를 넘었어요.
               기기와의 거리를 줄이거나 주변 블루투스 간섭(전자레인지·공유기 등)을
               확인하면 점수에 반영되는 시간이 늘어납니다.
