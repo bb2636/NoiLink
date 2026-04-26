@@ -360,8 +360,17 @@ class ApiClient {
     );
   }
 
+  // Task #146 → Task #147 — 기관 회원 목록도 같은 in-flight 가드를 통과시켜
+  // 동시 호출(예: Home.tsx 가 조직 정보를 부르는 동안 사용자가
+  // MemberSelectModal 을 여는 경우)을 1회 fetch 로 합친다. 키는 endpoint
+  // (메서드 + 경로) 단위라 settle 후엔 새 호출이 다시 발사되고, 다른
+  // 컨텍스트로 갈리는 파라미터가 URL 에 없으므로(서버가 Authorization 토큰
+  // 으로 조직을 결정) 같은 endpoint 의 동시 호출만 묶인다.
   async getOrganizationMembers(): Promise<ApiResponse<User[]>> {
-    return this.request<User[]>('/users/organization-members');
+    const path = '/users/organization-members';
+    return this.coalesceInflight<User[]>(`GET ${path}`, () =>
+      this.request<User[]>(path),
+    );
   }
 
   async updateProfile(data: {
@@ -409,8 +418,14 @@ class ApiClient {
   }
 
   /** 기업 관리자: 가입 신청 대기 회원 목록 */
+  // Task #147 — `OrganizationMembers.tsx` 에서 멤버 목록과 함께
+  // `Promise.all` 로 거의 동시에 트리거되는 페어. 같은 endpoint 의 동시
+  // 호출은 1회 fetch 로 합쳐 두면 서버/기기 트래픽이 줄어든다.
   async getPendingOrganizationMembers(): Promise<ApiResponse<User[]>> {
-    return this.request<User[]>('/users/me/pending-organization-members');
+    const path = '/users/me/pending-organization-members';
+    return this.coalesceInflight<User[]>(`GET ${path}`, () =>
+      this.request<User[]>(path),
+    );
   }
 
   /** 기업 관리자: 가입 신청 승인 */
