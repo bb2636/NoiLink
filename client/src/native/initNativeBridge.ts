@@ -1,4 +1,4 @@
-import { isNativeToWebMessage, NATIVE_BRIDGE_VERSION, type NativeToWebMessage } from '@noilink/shared';
+import { validateNativeToWebMessage, type NativeToWebMessage } from '@noilink/shared';
 import { STORAGE_KEYS } from '../utils/constants';
 
 declare global {
@@ -51,9 +51,12 @@ function dispatchNativeMessage(msg: NativeToWebMessage): void {
 }
 
 function onIncomingFromNative(raw: unknown): void {
-  if (!isNativeToWebMessage(raw)) return;
-  if (raw.v !== NATIVE_BRIDGE_VERSION) return;
-  dispatchNativeMessage(raw);
+  const result = validateNativeToWebMessage(raw);
+  if (!result.ok) {
+    console.warn('[NoiLink bridge] reject', result.error, raw);
+    return;
+  }
+  dispatchNativeMessage(result.message);
 }
 
 /**
