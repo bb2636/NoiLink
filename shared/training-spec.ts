@@ -4,7 +4,7 @@
  */
 
 import type { Level, LogicColor, HardwareColor, PhaseType, TrainingMode } from './types.js';
-import { BPM_MAX, BPM_MIN, COLOR_CODE, type ColorCode } from './ble-protocol.js';
+import { BPM_MAX, BPM_MIN, COLOR_CODE, LEVEL_MAX, LEVEL_MIN, type ColorCode } from './ble-protocol.js';
 
 // =============================================================================
 // 0. 측정 지표 (Metrics & Data) — 용어 정의
@@ -263,7 +263,7 @@ function clamp(n: number, lo: number, hi: number): number {
 }
 
 function clampLevel(n: number): Level {
-  return clamp(Math.round(n), 1, 5) as Level;
+  return clamp(Math.round(n), LEVEL_MIN, LEVEL_MAX) as Level;
 }
 
 // =============================================================================
