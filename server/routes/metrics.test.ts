@@ -1,0 +1,182 @@
+/**
+ * `POST /api/metrics/calculate` 회복 페이로드 정규화 회귀 테스트.
+ *
+ * 잘못된 모양(음수·NaN·누락)의 recovery 가 들어와도 저장 직전에
+ * sanitizeRecoveryRawMetrics 가 항상 한 번 적용되어 통계·코칭 신호의
+ * 입력값이 오염되지 않음을 보호한다 (task #46).
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import express from 'express';
+import request from 'supertest';
+import type { RawMetrics, Session, User } from '@noilink/shared';
+
+// 인메모리 DB — 테스트별로 beforeEach 에서 초기화된다.
+const store: Record<string, any> = {
+  users: [],
+  sessions: [],
+  rawMetrics: [],
+  metricsScores: [],
+};
+
+vi.mock('../db.js', () => ({
+  db: {
+    get: vi.fn(async (key: string) => store[key]),
+    set: vi.fn(async (key: string, value: any) => {
+      store[key] = value;
+    }),
+  },
+}));
+
+// 인증 미들웨어는 JWT/실제 DB 체인 대신, 테스트가 지정한 actor 를 그대로 부착한다.
+const currentActor: { user: User | null } = { user: null };
+vi.mock('../middleware/auth.js', () => ({
+  optionalAuth: (req: any, _res: any, next: any) => {
+    if (currentActor.user) req.user = currentActor.user;
+    next();
+  },
+}));
+
+// 점수 계산은 본 테스트의 관심사가 아니므로 결정적인 더미 값을 반환한다.
+vi.mock('../services/score-calculator.js', () => ({
+  calculateAllMetrics: vi.fn(async (raw: RawMetrics) => ({
+    sessionId: raw.sessionId,
+    userId: raw.userId,
+    memory: 70,
+    comprehension: 70,
+    focus: 70,
+    judgment: 70,
+    agility: 70,
+    endurance: 70,
+    createdAt: new Date().toISOString(),
+  })),
+}));
+
+// 개인 리포트 생성은 fire-and-forget — 테스트에서는 호출만 무시한다.
+vi.mock('../services/personal-report.js', () => ({
+  generateAndSavePersonalReport: vi.fn(async () => undefined),
+}));
+
+// 라우터는 위 mock 들이 등록된 뒤에 import 해야 한다.
+const { default: metricsRouter } = await import('./metrics.js');
+
+function buildApp() {
+  const app = express();
+  app.use(express.json());
+  app.use('/api/metrics', metricsRouter);
+  return app;
+}
+
+const ACTOR_USER: User = {
+  id: 'u1',
+  username: 'tester',
+  name: 'Tester',
+  userType: 'PERSONAL',
+  streak: 0,
+  createdAt: new Date('2025-01-01').toISOString(),
+};
+
+const SEED_SESSION: Session = {
+  id: 'sess-1',
+  userId: 'u1',
+  mode: 'FOCUS',
+  bpm: 60,
+  level: 1,
+  duration: 30_000,
+  isComposite: false,
+  isValid: true,
+  phases: [],
+  createdAt: new Date('2025-01-02').toISOString(),
+};
+
+function baseRawMetrics(overrides: Partial<RawMetrics> = {}): RawMetrics {
+  return {
+    sessionId: 'sess-1',
+    userId: 'u1',
+    touchCount: 10,
+    hitCount: 8,
+    rtMean: 400,
+    rtSD: 80,
+    createdAt: new Date('2025-01-02T00:00:00Z').toISOString(),
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  store.users = [ACTOR_USER];
+  store.sessions = [SEED_SESSION];
+  store.rawMetrics = [];
+  store.metricsScores = [];
+  currentActor.user = ACTOR_USER;
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
+
+describe('POST /api/metrics/calculate — recovery 페이로드 정규화', () => {
+  it('음수·NaN 으로 들어온 recovery 를 저장 직전에 0 으로 정규화하고 (양 끝이 모두 0이면) 필드를 제거한다', async () => {
+    const app = buildApp();
+    const payload = baseRawMetrics({
+      // @ts-expect-error - 잘못된 모양을 의도적으로 보냄
+      recovery: { excludedMs: -500, windows: Number.NaN },
+    });
+
+    const res = await request(app).post('/api/metrics/calculate').send(payload);
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(store.rawMetrics).toHaveLength(1);
+    // 양 필드가 모두 0으로 클램프되면 sanitize 결과는 undefined → recovery 자체가 삭제되어야 한다.
+    expect(store.rawMetrics[0]).not.toHaveProperty('recovery');
+  });
+
+  it('한쪽 필드만 살아있는 부분 손상 페이로드는 유효 부분을 보존하면서 음수·NaN 만 정규화한다', async () => {
+    const app = buildApp();
+    const payload = baseRawMetrics({
+      // @ts-expect-error - excludedMs 는 정상, windows 는 음수
+      recovery: { excludedMs: 12_345.7, windows: -3 },
+    });
+
+    const res = await request(app).post('/api/metrics/calculate').send(payload);
+
+    expect(res.status).toBe(201);
+    expect(store.rawMetrics).toHaveLength(1);
+    expect(store.rawMetrics[0].recovery).toEqual({ excludedMs: 12_346, windows: 0 });
+  });
+
+  it('recovery 필드가 누락된 페이로드는 그대로 누락 상태로 저장된다 (정규화 단계에서 추가하지 않는다)', async () => {
+    const app = buildApp();
+    const payload = baseRawMetrics();
+    expect(payload.recovery).toBeUndefined();
+
+    const res = await request(app).post('/api/metrics/calculate').send(payload);
+
+    expect(res.status).toBe(201);
+    expect(store.rawMetrics).toHaveLength(1);
+    expect(store.rawMetrics[0]).not.toHaveProperty('recovery');
+  });
+
+  it('정상 모양의 recovery 는 반올림된 정수 값으로 보존된다', async () => {
+    const app = buildApp();
+    const payload = baseRawMetrics({
+      recovery: { excludedMs: 7_500.4, windows: 2 },
+    });
+
+    const res = await request(app).post('/api/metrics/calculate').send(payload);
+
+    expect(res.status).toBe(201);
+    expect(store.rawMetrics[0].recovery).toEqual({ excludedMs: 7_500, windows: 2 });
+  });
+
+  it('actor 가 인증되어 있지 않으면 401 로 차단되어 raw/score 가 모두 저장되지 않는다', async () => {
+    currentActor.user = null;
+    const app = buildApp();
+    const payload = baseRawMetrics({ recovery: { excludedMs: 9_000, windows: 1 } });
+
+    const res = await request(app).post('/api/metrics/calculate').send(payload);
+
+    expect(res.status).toBe(401);
+    expect(store.rawMetrics).toHaveLength(0);
+    expect(store.metricsScores).toHaveLength(0);
+  });
+});

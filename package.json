@@ -21,8 +21,9 @@
     "install:all": "npm install && cd client && npm install && cd ../server && npm install && cd ../shared && npm install",
     "install:mobile": "cd mobile && npm install",
     "dev:mobile": "cd mobile && npm start",
-    "test": "npm run test --workspace shared && npm run test --workspace client",
+    "test": "npm run test --workspace shared && npm run test --workspace server && npm run test --workspace client",
     "test:shared": "npm run test --workspace shared",
+    "test:server": "npm run test --workspace server",
     "test:client": "npm run test --workspace client"
   },
   "devDependencies": {
