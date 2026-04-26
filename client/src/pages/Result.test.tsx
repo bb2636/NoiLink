@@ -634,6 +634,66 @@ describe('Result — 재진입 시 점수도 서버에서 다시 불러오기 (T
     expect(bigScoreText()).toContain('80');
   });
 
+  // ───────────────────────────────────────────────────────────
+  // Task #113 — 정상 완료 흐름의 가짜 폴백 제거
+  // ───────────────────────────────────────────────────────────
+  //
+  // 정책 요약:
+  //   1. 정상 완료(state.displayScore 존재) 인데 state.previousScore 가 비어 있으면
+  //      비교 카드와 "직전 대비" 코칭 문구를 숨긴다 (가짜 `todayScore - 12` 폴백 금지).
+  //   2. state.previousScore 가 명시적으로 들어 있으면 그 값을 그대로 사용한다.
+  //
+  // 보호 목적:
+  //   - 첫 세션·이력 조회 실패 시 의미 없는 "+12점 향상" 비교가 부활하는 회귀를 잠근다.
+
+  it('정상 완료 흐름에서 previousScore 가 없으면 비교 카드와 "직전 대비" 문구가 숨겨진다 (Task #113)', async () => {
+    mockApiGet.mockResolvedValue({ success: true, data: { raw: null, score: null } });
+
+    // 정상 완료 — displayScore 는 있지만 previousScore 가 비어 있는 상태
+    // (TrainingSessionPlay 가 이력에서 직전 점수를 못 찾아 undefined 로 넘긴 케이스).
+    renderResult({ previousScore: undefined });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // 점수 원에는 state.displayScore(80) 가 그대로 노출되고…
+    expect(bigScoreText()).toContain('80');
+    // 비교 카드는 가짜 폴백 없이 DOM 에서 사라져야 한다.
+    expect(prevVsTodayCard()).toBeNull();
+    // 코칭 메시지에서도 "직전 대비" 문구는 빠져야 한다.
+    const text = container?.textContent ?? '';
+    expect(text).not.toContain('직전 대비');
+    expect(text).toContain('점 돌파');
+
+    // 그리고 정상 완료 흐름이므로 직전 점수용 sessions/user 호출도 일어나선 안 된다
+    // (가짜 폴백 제거가 추가 네트워크 호출로 둔갑하지 않도록 잠금).
+    const sessionCalls = mockApiGet.mock.calls.filter(
+      (call: unknown[]) =>
+        typeof call[0] === 'string' && call[0].startsWith('/sessions/user/'),
+    );
+    expect(sessionCalls.length).toBe(0);
+  });
+
+  it('정상 완료 흐름에서 previousScore 가 들어오면 그 값으로 비교 카드가 그려진다 (Task #113)', async () => {
+    mockApiGet.mockResolvedValue({ success: true, data: { raw: null, score: null } });
+
+    renderResult({ displayScore: 82, previousScore: 75 });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const card = prevVsTodayCard();
+    expect(card).toBeTruthy();
+    // 직전(75) → 오늘(82), diff +7 가 모두 카드에 노출.
+    expect(card?.textContent).toContain('75');
+    expect(card?.textContent).toContain('82');
+    expect(card?.textContent).toContain('+7');
+  });
+
   it('서버 score 가 null 이면 데모 폴백을 사용한다 (빈 응답 안전망)', async () => {
     mockApiGet.mockImplementation((url: string) => {
       if (url.startsWith('/metrics/session/')) {

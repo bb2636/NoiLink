@@ -11,8 +11,9 @@ import { MobileLayout } from '../components/Layout';
 import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import PodGrid from '../components/PodGrid/PodGrid';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
-import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noilink/shared';
+import type { Level, NativeToWebMessage, RawMetrics, Session, TrainingMode } from '@noilink/shared';
 import { SESSION_MAX_MS, partialThresholdForMode, resolveBleStabilityThresholds } from '@noilink/shared';
+import api from '../utils/api';
 import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
 import { createPendingLocalId, enqueuePendingRun } from '../utils/pendingTrainingRuns';
 import { reportBleAbortFireAndForget } from '../utils/reportBleAbort';
@@ -495,6 +496,19 @@ export default function TrainingSessionPlay() {
     setSubmitting(true);
     setErr(null);
     const partialPct = partialProgressPctRef.current;
+    // 직전 점수 조회(Task #113) — 정상 완료 흐름의 비교 카드에 가짜 폴백
+    // (`todayScore - 12`) 대신 서버 이력의 진짜 직전 점수를 보여주기 위해
+    // 제출과 병렬로 사용자 세션 이력을 받아 둔다. 제출 직전에 발사하므로
+    // 응답에는 새 세션이 아직 없을 가능성이 높지만, 응답이 늦어 새 세션이
+    // 포함되더라도 아래에서 `res.sessionId` 로 명시적으로 제외한다.
+    // limit=50 은 Result.tsx 의 재진입 흐름과 동일한 값을 쓴다 — 점수 없는
+    // 세션(자유 트레이닝/거부된 부분 결과 등)이 연속해서 끼더라도 직전 점수
+    // 누락이 줄어든다.
+    // 실패하거나 직전 세션이 없으면 `previousScore` 는 undefined 로 남고,
+    // Result.tsx 가 비교 카드를 자연스럽게 숨긴다 (첫 세션 정책).
+    const previousScorePromise = api
+      .get<Session[]>(`/sessions/user/${state.userId}?limit=50`)
+      .catch(() => null);
     const res = await submitCompletedTrainingWithRetry(
       {
         userId: state.userId,
@@ -529,11 +543,29 @@ export default function TrainingSessionPlay() {
       submitLock.current = false;
       return;
     }
+    // 직전 점수 결정(Task #113):
+    // 응답이 createdAt desc 정렬이므로 첫 항목부터 훑되, 새로 만든/업데이트된
+    // 현재 세션(`res.sessionId`)은 명시적으로 건너뛴다. 그 다음 score 가 정의된
+    // 첫 항목이 직전 점수다. 응답 실패·빈 이력·점수 누락이면 undefined 로 남기고,
+    // Result.tsx 가 비교 카드와 "직전 대비" 코칭 문구를 함께 숨긴다.
+    const previousScoreRes = await previousScorePromise;
+    let previousScore: number | undefined;
+    if (previousScoreRes && previousScoreRes.success && previousScoreRes.data) {
+      for (const s of previousScoreRes.data) {
+        if (s.id === res.sessionId) continue;
+        if (typeof s.score === 'number') {
+          previousScore = s.score;
+          break;
+        }
+      }
+    }
     navigate('/result', {
       replace: true,
       state: {
         title: state.title,
         displayScore: res.displayScore,
+        // 비교 카드에 사용할 직전 점수 (첫 세션·이력 조회 실패 시 undefined).
+        previousScore,
         yieldsScore: state.yieldsScore,
         sessionId: res.sessionId,
         // 회복 구간 안내(Task #27): 결과 화면이 "BLE 단절 회복 X초가 채점에서
