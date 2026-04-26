@@ -15,6 +15,7 @@ import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noili
 import { SESSION_MAX_MS, partialThresholdForMode, resolveBleStabilityThresholds } from '@noilink/shared';
 import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
 import { createPendingLocalId, enqueuePendingRun } from '../utils/pendingTrainingRuns';
+import { reportBleAbortFireAndForget } from '../utils/reportBleAbort';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
 import { bleReconnectNow, bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
@@ -218,9 +219,10 @@ export default function TrainingSessionPlay() {
     // (Task #43). 임계 미달이거나 첫 단절 즉시 종료 케이스는 false 가 되어
     // 기존 메시지 그대로 노출된다. 통계는 endNow() 직전에 읽어 진행 중 회복
     // 구간(getRecoveryStats 가 ongoing 시간을 포함)까지 반영되도록 한다.
+    const recoveryStats = engineRef.current?.getRecoveryStats();
     const bleUnstable =
       reason === 'ble-disconnect'
-        ? isBleUnstableForAbort(engineRef.current?.getRecoveryStats())
+        ? isBleUnstableForAbort(recoveryStats)
         : false;
     const eng = engineRef.current;
     if (eng) {
@@ -228,11 +230,21 @@ export default function TrainingSessionPlay() {
       eng.endNow();
       // engineRef는 비우지 않는다 — 이 시점부터는 endNow() 호출이 idempotent.
     }
+    // BLE 자동 종료 텔레메트리 (Task #57) — 익명·fire-and-forget.
+    // navigate 직전에 호출해야 sendBeacon 이 페이지 unload 전에 큐잉된다.
+    if (reason === 'ble-disconnect') {
+      reportBleAbortFireAndForget({
+        windows: recoveryStats?.windows ?? 0,
+        totalMs: recoveryStats?.totalMs ?? 0,
+        bleUnstable,
+        apiMode: state?.apiMode,
+      });
+    }
     navigate('/training', {
       replace: true,
       state: { abortReason: reason, bleUnstable },
     });
-  }, [engineMetrics, submitting, navigate]);
+  }, [engineMetrics, submitting, navigate, state]);
 
   // ── 앱이 백그라운드로 들어가면 즉시 세션 종료 (네이티브 셸에서만) ──
   //   - 네이티브 셸(WebView) 안에서만 동작. 일반 웹/Replit 미리보기에서는 탭 전환만으로

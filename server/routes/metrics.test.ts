@@ -393,3 +393,114 @@ describe('POST /api/metrics/raw — recovery 페이로드 정규화', () => {
     expect(store.rawMetrics).toHaveLength(0);
   });
 });
+
+/**
+ * `POST /api/metrics/ble-abort` (Task #57) 회귀 테스트.
+ *
+ * BLE 자동 종료 텔레메트리는 익명·fire-and-forget 이므로:
+ *  - 인증이 없어도 통과한다.
+ *  - 정상 페이로드는 `bleAbortEvents` 컬렉션에 한 건 append 되고 occurredAt 이 부착된다.
+ *  - 잘못된 모양의 페이로드도 5xx 가 아니라 202 로 회신해 클라이언트가 재시도/노이즈를 만들지 않는다.
+ *  - DB 쓰기 실패도 사용자 흐름에 전파되지 않는다 (202 + recorded:false).
+ */
+describe('POST /api/metrics/ble-abort — 운영 텔레메트리', () => {
+  beforeEach(() => {
+    store.bleAbortEvents = [];
+    currentActor.user = null;
+  });
+
+  it('정상 페이로드는 occurredAt 부착 + bleAbortEvents 에 append 된다 (인증 없이도 허용)', async () => {
+    const app = buildApp();
+
+    const res = await request(app).post('/api/metrics/ble-abort').send({
+      windows: 2,
+      totalMs: 7_500,
+      bleUnstable: true,
+      apiMode: 'FOCUS',
+    });
+
+    expect(res.status).toBe(202);
+    expect(res.body.success).toBe(true);
+    expect(store.bleAbortEvents).toHaveLength(1);
+    const event = store.bleAbortEvents[0];
+    expect(event).toMatchObject({
+      windows: 2,
+      totalMs: 7_500,
+      bleUnstable: true,
+      apiMode: 'FOCUS',
+    });
+    expect(typeof event.occurredAt).toBe('string');
+    expect(Number.isFinite(new Date(event.occurredAt).getTime())).toBe(true);
+    // PII 가 흘러들지 않는지 확인 — 화이트리스트 외 키는 저장되어선 안 된다.
+    expect(Object.keys(event).sort()).toEqual(
+      ['apiMode', 'bleUnstable', 'occurredAt', 'totalMs', 'windows'].sort(),
+    );
+  });
+
+  it('비-boolean bleUnstable, 음수 windows 등 비정상 입력은 정규화되어 저장된다', async () => {
+    const app = buildApp();
+
+    const res = await request(app).post('/api/metrics/ble-abort').send({
+      windows: -3,
+      totalMs: 4_999.6,
+      bleUnstable: 'yes',
+    });
+
+    expect(res.status).toBe(202);
+    expect(store.bleAbortEvents).toHaveLength(1);
+    expect(store.bleAbortEvents[0]).toMatchObject({
+      windows: 0,
+      totalMs: 5_000,
+      bleUnstable: false,
+    });
+    expect(store.bleAbortEvents[0]).not.toHaveProperty('apiMode');
+  });
+
+  it('알려지지 않은 apiMode 라벨은 누락 처리되어 저장 페이로드에서 제거된다', async () => {
+    const app = buildApp();
+
+    const res = await request(app).post('/api/metrics/ble-abort').send({
+      windows: 1,
+      totalMs: 5_000,
+      bleUnstable: true,
+      apiMode: 'NOT_A_MODE',
+    });
+
+    expect(res.status).toBe(202);
+    expect(store.bleAbortEvents).toHaveLength(1);
+    expect(store.bleAbortEvents[0]).not.toHaveProperty('apiMode');
+  });
+
+  it('windows / totalMs 가 숫자가 아닌 완전 잘못된 페이로드는 202+ignored 로 조용히 무시된다', async () => {
+    const app = buildApp();
+
+    const res = await request(app).post('/api/metrics/ble-abort').send({
+      windows: 'a',
+      totalMs: 'b',
+      bleUnstable: false,
+    });
+
+    expect(res.status).toBe(202);
+    expect(res.body.ignored).toBe(true);
+    expect(store.bleAbortEvents).toHaveLength(0);
+  });
+
+  it('DB 쓰기 실패도 사용자 흐름에 전파되지 않고 202+recorded:false 로 회신한다', async () => {
+    const { db } = (await import('../db.js')) as unknown as {
+      db: { set: ReturnType<typeof vi.fn> };
+    };
+    db.set.mockImplementationOnce(async () => {
+      throw new Error('boom');
+    });
+    const app = buildApp();
+
+    const res = await request(app).post('/api/metrics/ble-abort').send({
+      windows: 1,
+      totalMs: 5_000,
+      bleUnstable: true,
+    });
+
+    expect(res.status).toBe(202);
+    expect(res.body.recorded).toBe(false);
+  });
+});

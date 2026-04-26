@@ -7,8 +7,8 @@ import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
 import { calculateAllMetrics } from '../services/score-calculator.js';
 import { generateAndSavePersonalReport } from '../services/personal-report.js';
-import type { RawMetrics, MetricsScore, Session, User } from '@noilink/shared';
-import { sanitizeRecoveryRawMetrics } from '@noilink/shared';
+import type { BleAbortEvent, RawMetrics, MetricsScore, Session, User } from '@noilink/shared';
+import { sanitizeBleAbortEventInput, sanitizeRecoveryRawMetrics } from '@noilink/shared';
 import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
 import { userCanActOnTargetUserId } from '../utils/session-user-policy.js';
 import { withIdempotency } from '../utils/idempotency.js';
@@ -49,6 +49,49 @@ async function assertActorForRawMetrics(
   }
   return null;
 }
+
+/**
+ * POST /api/metrics/ble-abort
+ * BLE 단절로 자동 종료된 세션의 운영 텔레메트리 (Task #57).
+ *
+ * 정책:
+ *  - 익명 집계용 — 인증 불필요. 페이로드는 회복 통계(`windows`, `totalMs`),
+ *    환경 점검 안내 분류(`bleUnstable`), 트레이닝 모드(`apiMode?`) 만 받는다.
+ *    userId 등 PII 는 의도적으로 받지 않는다.
+ *  - 클라이언트는 fire-and-forget(`sendBeacon`/`keepalive`) 로 호출하므로
+ *    어떤 오류 상황에서도 사용자 경험에 영향이 없도록 catch-all 응답한다.
+ *  - 운영 조회용 SQL 가이드: `docs/operations/ble-abort-telemetry.md`.
+ */
+router.post('/ble-abort', async (req: Request, res: Response) => {
+  try {
+    const sanitized = sanitizeBleAbortEventInput(req.body);
+    if (!sanitized) {
+      // 잘못된 모양은 200으로 조용히 무시 — 클라이언트가 재시도/노이즈를 만들지 않도록.
+      return res.status(202).json({ success: true, ignored: true });
+    }
+
+    const event: BleAbortEvent = {
+      occurredAt: new Date().toISOString(),
+      ...sanitized,
+    };
+
+    const events = (await db.get('bleAbortEvents')) || [];
+    events.push(event);
+    await db.set('bleAbortEvents', events);
+
+    // 운영 알람·검색을 위한 한 줄 로그 (PII 없음).
+    console.info(
+      `[ble-abort] windows=${event.windows} totalMs=${event.totalMs} ` +
+        `bleUnstable=${event.bleUnstable} apiMode=${event.apiMode ?? '-'}`,
+    );
+
+    return res.status(202).json({ success: true });
+  } catch (error) {
+    // 텔레메트리 실패가 사용자 흐름에 절대 전파되지 않도록 항상 202로 회신하고 서버 로그만 남긴다.
+    console.error('[ble-abort] failed to record event', error);
+    return res.status(202).json({ success: true, recorded: false });
+  }
+});
 
 /**
  * POST /api/metrics/raw

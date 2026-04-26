@@ -97,6 +97,11 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
 - BLE 단절 안내 토스트 임계값 튜닝 가이드: `docs/operations/ble-stability-threshold-tuning.md`
   - `shared/ble-stability-config.ts` 의 기본값을 그대로 둘지, 모델별 오버라이드를
     등록할지에 대한 분석 절차·결정 규칙·1차 결정(2026-04 기준 기본값 유지) 기록.
+- BLE 자동 종료 운영 텔레메트리: `docs/operations/ble-abort-telemetry.md`
+  - `finalizeAndAbort('ble-disconnect')` 시점에 클라이언트가 `POST /api/metrics/ble-abort`
+    로 익명 회복 통계(`windows`, `totalMs`, `bleUnstable`)를 fire-and-forget 보고.
+  - 서버는 `bleAbortEvents` JSONB 배열에 append + 한 줄 콘솔 로그 (PII 없음).
+  - 운영 조회는 `kv_store` JSONB 단일 SQL 쿼리로 "지난 7일 환경 점검 안내 비율" 산출.
 
 ## Remote Config (BLE Stability Thresholds — Task #48)
 
