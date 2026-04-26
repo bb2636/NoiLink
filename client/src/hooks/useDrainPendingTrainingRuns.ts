@@ -5,6 +5,11 @@
  *  - 앱 진입(인증 완료) 직후 1회.
  *  - 앱이 켜진 채 네트워크가 재연결되었을 때(`online` 이벤트). 다음 앱 진입까지
  *    기다리지 않고 즉시 큐를 비워 사용자가 더 빨리 결과 안내를 받게 한다.
+ *  - 앱이 백그라운드에서 포그라운드로 돌아왔을 때(`visibilitychange` → visible,
+ *    `pageshow`). 모바일 환경에서 백그라운드 동안 네트워크가 잠깐 끊겼다 붙어
+ *    `online` 이벤트가 누락되더라도 사용자가 앱을 다시 보는 순간 큐가 비워지도록
+ *    한 번 더 기회를 만든다. throttle/in-flight 가드를 그대로 통과하므로 시도
+ *    폭주는 발생하지 않는다.
  *
  * 정책:
  *  - 사용자가 직접 트리거하지 않는 백그라운드 흐름이므로, UI 를 막거나 에러를 화면에
@@ -165,9 +170,27 @@ export function useDrainPendingTrainingRuns(options: DrainOptions = {}): void {
 
     // 앱이 켜진 채 네트워크가 재연결되면 즉시 다시 시도한다.
     const onOnline = () => tryTriggerDrain(userId);
+    // 앱이 다시 화면에 보일 때(visibilitychange → visible, pageshow)에도 한 번
+    // 더 시도한다. 백그라운드에서 발생한 짧은 네트워크 단절로 `online` 이벤트가
+    // 누락된 경우에도 사용자가 앱을 다시 보는 순간 큐가 비워진다. throttle/in-flight
+    // 가드를 그대로 통과하므로 마운트/online 트리거와 합쳐져 시도 폭주는 없다.
+    const onVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        tryTriggerDrain(userId);
+      }
+    };
+    const onPageShow = () => tryTriggerDrain(userId);
     window.addEventListener('online', onOnline);
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
+    window.addEventListener('pageshow', onPageShow);
     return () => {
       window.removeEventListener('online', onOnline);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
+      window.removeEventListener('pageshow', onPageShow);
     };
   }, [user, loading, options.enabled]);
 }
