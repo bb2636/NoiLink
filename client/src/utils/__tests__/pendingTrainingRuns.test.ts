@@ -15,8 +15,11 @@ import {
   PENDING_RUNS_KEY,
   popOutcomeNotices,
   pushOutcomeNotice,
+  removeOutcomeNotice,
   removePendingRun,
+  subscribeOutcomeNotices,
   updatePendingRun,
+  type PendingTrainingOutcome,
   type PendingTrainingRunInput,
 } from '../pendingTrainingRuns';
 
@@ -167,5 +170,61 @@ describe('pendingTrainingRuns: outcome 큐', () => {
   it('outcome 큐 손상 시에도 빈 배열을 반환한다', () => {
     localStorage.setItem(PENDING_OUTCOMES_KEY, 'broken');
     expect(popOutcomeNotices()).toEqual([]);
+  });
+});
+
+describe('pendingTrainingRuns: outcome push 구독 / 개별 제거 (Task #72)', () => {
+  it('subscribeOutcomeNotices 로 등록한 listener 는 push 시점에 동기적으로 호출된다', () => {
+    const seen: PendingTrainingOutcome[] = [];
+    const unsubscribe = subscribeOutcomeNotices((n) => seen.push(n));
+
+    pushOutcomeNotice({ localId: 's1', outcome: 'success', at: 10, title: '집중력' });
+    pushOutcomeNotice({ localId: 's2', outcome: 'final-failure', at: 11, lastError: 'down' });
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0].localId).toBe('s1');
+    expect(seen[1].localId).toBe('s2');
+
+    unsubscribe();
+    pushOutcomeNotice({ localId: 's3', outcome: 'success', at: 12 });
+    // 해제 이후에는 더 이상 통지되지 않는다.
+    expect(seen).toHaveLength(2);
+  });
+
+  it('listener 가 던지는 예외는 다른 listener 와 push 흐름을 깨지 않는다', () => {
+    const seen: string[] = [];
+    const unsubA = subscribeOutcomeNotices(() => {
+      throw new Error('boom');
+    });
+    const unsubB = subscribeOutcomeNotices((n) => seen.push(n.localId));
+
+    expect(() =>
+      pushOutcomeNotice({ localId: 'safe', outcome: 'success', at: 1 }),
+    ).not.toThrow();
+    expect(seen).toEqual(['safe']);
+    // 영속 큐에도 정상적으로 들어가 있어야 한다.
+    expect(popOutcomeNotices().map((n) => n.localId)).toEqual(['safe']);
+
+    unsubA();
+    unsubB();
+  });
+
+  it('removeOutcomeNotice 는 영속 큐에서 해당 localId 만 지우고 나머지는 유지한다', () => {
+    pushOutcomeNotice({ localId: 'r1', outcome: 'success', at: 1 });
+    pushOutcomeNotice({ localId: 'r2', outcome: 'final-failure', at: 2, lastError: 'x' });
+
+    removeOutcomeNotice('r1');
+
+    const remaining = popOutcomeNotices();
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].localId).toBe('r2');
+  });
+
+  it('존재하지 않는 localId 를 removeOutcomeNotice 에 넘겨도 no-op 이다', () => {
+    pushOutcomeNotice({ localId: 'keep', outcome: 'success', at: 1 });
+    expect(() => removeOutcomeNotice('does-not-exist')).not.toThrow();
+    const remaining = popOutcomeNotices();
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].localId).toBe('keep');
   });
 });

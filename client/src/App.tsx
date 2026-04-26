@@ -14,6 +14,7 @@ function OuterMobileLayout({ children }: { children: React.ReactNode }) {
 }
 import { useAuth, AuthProvider } from './hooks/useAuth';
 import { useDrainPendingTrainingRuns } from './hooks/useDrainPendingTrainingRuns';
+import OutcomeNoticeToast from './components/OutcomeNoticeToast/OutcomeNoticeToast';
 
 // Pages
 import Home from './pages/Home';
@@ -122,9 +123,15 @@ function App() {
 function AppRoutes() {
   // 인증 완료 후, 결과 저장 실패로 큐에 남은 트레이닝 런이 있으면 백그라운드로 재전송한다.
   // 결과는 outcome notice 로 보존되어, 사용자가 다음에 트레이닝 목록을 열 때 1회성으로 안내된다.
+  // (Task #72) 추가로, 앱이 포그라운드에 있는 동안 drain 이 결과를 결정하면 OutcomeNoticeToast
+  // 가 어떤 화면에 있든 즉시 1회성 토스트로 안내해, 사용자가 화면을 옮기지 않아도 결과를
+  // 바로 알 수 있다. 토스트는 push 이벤트를 받는 동시에 영속 큐에서 해당 항목을 지우므로
+  // 트레이닝 목록 화면의 기존 안내와 중복으로 노출되지 않는다.
   useDrainPendingTrainingRuns();
   return (
-    <Routes>
+    <>
+      <OutcomeNoticeToast />
+      <Routes>
         <Route path="/splash" element={<Splash />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
@@ -343,6 +350,7 @@ function AppRoutes() {
           }
         />
       </Routes>
+    </>
   );
 }
 

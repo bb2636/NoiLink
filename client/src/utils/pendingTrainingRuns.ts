@@ -182,7 +182,37 @@ export function hasExhaustedAttempts(run: PendingTrainingRun): boolean {
 
 // ───────────────────────────────────────────────────────────
 // Outcome notices — 사용자에게 1회성으로 보여줄 큐
+//
+// 흐름:
+//  - drain 이 한 항목의 결과(success / final-failure)를 결정하면 pushOutcomeNotice 로
+//    영속 큐(localStorage)에 한 줄을 남긴다.
+//  - 트레이닝 목록 화면(Training.tsx) 진입 시 popOutcomeNotices 로 한 번에 비워서
+//    1회성 안내 배너로 보여준다.
+//  - 추가로(Task #72), 앱이 포그라운드에 있는 동안 push 가 발생하면 구독자(글로벌
+//    토스트)가 같은 정보를 즉시 화면에 띄우고 영속 큐에서 해당 항목을 지운다
+//    (removeOutcomeNotice). 이렇게 해서 "포그라운드 복귀 직후 drain 성공" 케이스에서도
+//    사용자가 화면을 옮기지 않아도 결과를 바로 알 수 있고, 트레이닝 목록 화면 배너와
+//    중복으로 노출되지도 않는다.
 // ───────────────────────────────────────────────────────────
+
+export type OutcomeNoticeListener = (notice: PendingTrainingOutcome) => void;
+
+// 구독자 모음. 모듈 단위 Set 이라서 동일 모듈을 사용하는 모든 곳에서 공유된다.
+const outcomeListeners = new Set<OutcomeNoticeListener>();
+
+/**
+ * outcome notice push 이벤트를 구독한다. 등록 즉시 effect 가 시작되며,
+ * 반환된 함수를 호출해 해제한다(useEffect cleanup 에 그대로 사용 가능).
+ *
+ * 주의: 이 구독은 *push 이벤트* 만 전달한다. 이미 영속 큐에 들어 있는 과거
+ * 항목은 발행되지 않는다(이전 세션에서 쌓인 항목은 popOutcomeNotices 가 담당).
+ */
+export function subscribeOutcomeNotices(listener: OutcomeNoticeListener): () => void {
+  outcomeListeners.add(listener);
+  return () => {
+    outcomeListeners.delete(listener);
+  };
+}
 
 export function pushOutcomeNotice(notice: PendingTrainingOutcome): void {
   const list = safeReadArray<PendingTrainingOutcome>(PENDING_OUTCOMES_KEY);
@@ -190,6 +220,17 @@ export function pushOutcomeNotice(notice: PendingTrainingOutcome): void {
   const without = list.filter((n) => n.localId !== notice.localId);
   without.push(notice);
   safeWriteArray(PENDING_OUTCOMES_KEY, without);
+
+  // 구독자에게 동기적으로 통지. 한 구독자가 던지는 예외가 다른 구독자나 호출 흐름을
+  // 깨지 않도록 try/catch 로 격리한다(drain 자체는 사용자 액션을 막지 않아야 하는
+  // 백그라운드 흐름이므로 listener 오류로 중단되어선 안 된다).
+  for (const l of outcomeListeners) {
+    try {
+      l(notice);
+    } catch {
+      // listener 오류는 무시.
+    }
+  }
 }
 
 /** 노출하려고 outcome 들을 모두 읽고, 동시에 큐를 비운다. */
@@ -200,8 +241,23 @@ export function popOutcomeNotices(): PendingTrainingOutcome[] {
   return list;
 }
 
-/** 테스트 편의: 모든 큐를 초기화. 프로덕션 코드는 호출하지 않는다. */
+/**
+ * 영속 큐에서 특정 localId 의 outcome 만 제거한다. 글로벌 토스트가 push 이벤트를
+ * 실시간으로 받아 사용자에게 보여준 직후 호출해, 다음에 트레이닝 목록 화면이
+ * 마운트될 때 같은 결과가 다시 한 번 안내되지 않도록 한다.
+ *
+ * 존재하지 않는 localId 면 no-op.
+ */
+export function removeOutcomeNotice(localId: string): void {
+  const list = safeReadArray<PendingTrainingOutcome>(PENDING_OUTCOMES_KEY);
+  const next = list.filter((n) => n.localId !== localId);
+  if (next.length === list.length) return;
+  safeWriteArray(PENDING_OUTCOMES_KEY, next);
+}
+
+/** 테스트 편의: 모든 큐와 구독자를 초기화. 프로덕션 코드는 호출하지 않는다. */
 export function __resetPendingTrainingRunsForTest(): void {
   safeWriteArray(PENDING_RUNS_KEY, []);
   safeWriteArray(PENDING_OUTCOMES_KEY, []);
+  outcomeListeners.clear();
 }
