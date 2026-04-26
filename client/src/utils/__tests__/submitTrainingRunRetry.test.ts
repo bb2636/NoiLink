@@ -12,8 +12,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../api', () => {
   const createSession = vi.fn();
   const calculateMetrics = vi.fn();
+  // Task #122: submit 유틸이 직전 점수 단건 엔드포인트
+  // (`/metrics/session/:id/previous-score`) 를 calculateMetrics 와 병렬로 호출한다.
+  // 기존 회귀 테스트는 직전 점수 조회를 요구하지 않으므로(`includePreviousScore`
+  // 미지정), 이 mock 은 호출되지 않는 것이 정상이다 — 그래도 의도치 않게 호출됐을
+  // 때 throw 하지 않도록 빈 응답을 돌려준다.
+  const get = vi.fn(async () => ({
+    success: true,
+    data: { previousScore: null, previousScoreCreatedAt: null },
+  }));
   return {
-    default: { createSession, calculateMetrics },
+    default: { createSession, calculateMetrics, get },
   };
 });
 
@@ -26,6 +35,7 @@ import {
 const mockedApi = api as unknown as {
   createSession: ReturnType<typeof vi.fn>;
   calculateMetrics: ReturnType<typeof vi.fn>;
+  get: ReturnType<typeof vi.fn>;
 };
 
 const baseInput = (overrides: Partial<SubmitCompletedTrainingInput> = {}): SubmitCompletedTrainingInput => ({
@@ -43,11 +53,13 @@ const baseInput = (overrides: Partial<SubmitCompletedTrainingInput> = {}): Submi
 beforeEach(() => {
   mockedApi.createSession.mockReset();
   mockedApi.calculateMetrics.mockReset();
+  mockedApi.get.mockReset();
 });
 
 afterEach(() => {
   mockedApi.createSession.mockReset();
   mockedApi.calculateMetrics.mockReset();
+  mockedApi.get.mockReset();
 });
 
 describe('submitCompletedTrainingWithRetry', () => {
@@ -397,5 +409,134 @@ describe('submitCompletedTrainingWithRetry', () => {
     expect(onAttempt.mock.calls[0][0].result.error).toBe('tmp');
     expect(onAttempt.mock.calls[1][0].attemptIndex).toBe(1);
     expect(onAttempt.mock.calls[1][0].result.error).toBeUndefined();
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // Task #122 — 직전 점수 단건 엔드포인트 통합
+  // ─────────────────────────────────────────────────────────
+  // 정책 요약:
+  //   - `includePreviousScore: true` 가 들어오면 calculateMetrics 와 같은 단건
+  //     엔드포인트(`/metrics/session/:sessionId/previous-score`) 를 병렬로 호출해
+  //     결과 객체에 `previousScore`/`previousScoreCreatedAt` 를 함께 담는다.
+  //   - 두 호출은 서로 의존하지 않으므로 순차가 아닌 병렬로 동작해야 한다.
+  //   - 조회 자체가 실패하면 두 값 모두 `null` 로 폴백 — 제출 결과는 영향받지 않는다.
+  //   - 플래그가 false/미지정이면 호출 자체가 일어나지 않는다 (background drain
+  //     같은 비결과 화면 흐름에서 불필요한 네트워크를 만들지 않음).
+  //   - FREE / yieldsScore=false 모드는 결과 화면이 비교 카드를 그리지 않으므로
+  //     플래그가 true 여도 호출하지 않는다 (낭비 방지).
+
+  it('includePreviousScore=true 면 단건 엔드포인트를 calculateMetrics 와 함께 호출하고 결과에 직전 점수를 담아 돌려준다', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-prev' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({
+      success: true,
+      data: { focus: 80, memory: 80, comprehension: 80 },
+    });
+    mockedApi.get.mockResolvedValueOnce({
+      success: true,
+      data: {
+        previousScore: 73,
+        previousScoreCreatedAt: '2026-04-25T00:00:00.000Z',
+        // Task #132: 서버가 같은 KST 헬퍼로 만들어 보내는 표시용 날짜.
+        // submit 유틸은 이 값을 받아 결과에 그대로 흘려 보내야 한다 — 자체 재계산 금지.
+        previousScoreLocalDate: '2026-04-25',
+      },
+    });
+
+    const res = await submitCompletedTrainingWithRetry(
+      baseInput({ includePreviousScore: true }),
+      { backoffsMs: [0], sleep: () => Promise.resolve() },
+    );
+
+    expect(res.error).toBeUndefined();
+    expect(res.previousScore).toBe(73);
+    expect(res.previousScoreCreatedAt).toBe('2026-04-25T00:00:00.000Z');
+    // Task #132: 표시용 날짜가 서버 응답 그대로 결과에 흘러야 한다 — 두 흐름의
+    // 라벨이 정확히 일치하도록 단일 진실원을 유지.
+    expect(res.previousScoreLocalDate).toBe('2026-04-25');
+    // 호출 경로가 정확히 단건 엔드포인트여야 한다 — 다시 페이징 이력으로 회귀하지
+    // 않게 잠근다.
+    expect(mockedApi.get).toHaveBeenCalledWith('/metrics/session/sess-prev/previous-score');
+    expect(mockedApi.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('includePreviousScore=true 일 때 calculateMetrics 와 직전 점수 조회는 병렬로 시작된다 (순차 await 가 아님)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-par' } });
+    // 두 호출 시작 시점을 잡아 둔다 — 순차였다면 calc 가 끝난 뒤에야 get 이 호출된다.
+    let calcStartedAt = -1;
+    let getStartedAt = -1;
+    let tick = 0;
+    mockedApi.calculateMetrics.mockImplementationOnce(async () => {
+      calcStartedAt = ++tick;
+      // 짧게 쉬어 get 이 그 사이에 시작될 기회를 만든다.
+      await Promise.resolve();
+      await Promise.resolve();
+      return { success: true, data: { focus: 70 } };
+    });
+    mockedApi.get.mockImplementationOnce(async () => {
+      getStartedAt = ++tick;
+      return { success: true, data: { previousScore: 50, previousScoreCreatedAt: '2026-04-20T00:00:00.000Z' } };
+    });
+
+    await submitCompletedTrainingWithRetry(
+      baseInput({ includePreviousScore: true }),
+      { backoffsMs: [0], sleep: () => Promise.resolve() },
+    );
+
+    // 두 호출이 모두 시작됐고, get 의 시작 시점이 calc 의 시작 시점과 같은 tick
+    // 또는 그 직후(=병렬 구간) 여야 한다 — calc 가 완료된 뒤에 get 이 시작된다면
+    // tick 차이가 더 벌어진다.
+    expect(calcStartedAt).toBeGreaterThan(0);
+    expect(getStartedAt).toBeGreaterThan(0);
+    expect(getStartedAt - calcStartedAt).toBeLessThanOrEqual(1);
+  });
+
+  it('includePreviousScore=true 인데 직전 점수 조회가 실패해도 제출 자체는 성공으로 끝나고 직전 점수만 null 로 폴백한다', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-fb' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 80 } });
+    mockedApi.get.mockRejectedValueOnce(new Error('network down'));
+
+    const res = await submitCompletedTrainingWithRetry(
+      baseInput({ includePreviousScore: true }),
+      { backoffsMs: [0], sleep: () => Promise.resolve() },
+    );
+
+    expect(res.error).toBeUndefined();
+    expect(res.previousScore).toBeNull();
+    expect(res.previousScoreCreatedAt).toBeNull();
+    // Task #132: 표시용 날짜도 함께 null 로 폴백 — 라벨이 어긋난 채 새어 나가지 않게.
+    expect(res.previousScoreLocalDate).toBeNull();
+  });
+
+  it('includePreviousScore 미지정/false 면 단건 엔드포인트를 호출하지 않는다 (drain 등 비결과 화면 흐름의 불필요한 네트워크 방지)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-no-prev' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 80 } });
+
+    const res = await submitCompletedTrainingWithRetry(baseInput(), {
+      backoffsMs: [0],
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(res.error).toBeUndefined();
+    // 결과 객체에 previousScore 관련 필드가 아예 들어가지 않아야 한다 — undefined.
+    expect(res.previousScore).toBeUndefined();
+    expect(res.previousScoreCreatedAt).toBeUndefined();
+    // get 호출 자체가 일어나지 않아야 한다.
+    expect(mockedApi.get).not.toHaveBeenCalled();
+  });
+
+  it('FREE / yieldsScore=false 모드에서는 includePreviousScore=true 여도 호출하지 않는다 (낭비 방지)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-free' } });
+
+    const res = await submitCompletedTrainingWithRetry(
+      baseInput({ mode: 'FREE', yieldsScore: false, includePreviousScore: true }),
+      { backoffsMs: [0], sleep: () => Promise.resolve() },
+    );
+
+    expect(res.error).toBeUndefined();
+    // FREE 는 calculateMetrics 단계 자체를 건너뛰므로 직전 점수 조회도 건너뛴다.
+    expect(mockedApi.calculateMetrics).not.toHaveBeenCalled();
+    expect(mockedApi.get).not.toHaveBeenCalled();
+    expect(res.previousScore).toBeUndefined();
+    expect(res.previousScoreCreatedAt).toBeUndefined();
   });
 });

@@ -137,15 +137,22 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
   원문을 그대로 노출해 정보 손실이 없도록 한다.
 - 회귀 테스트: `client/src/native/__tests__/nativeAckErrors.test.ts`.
 
-## Result Comparison Card (Task #112 → Task #114)
+## Result Comparison Card (Task #112 → Task #114 → Task #122)
 
 - 결과 화면(`client/src/pages/Result.tsx`) 의 "직전 vs 오늘" 비교 카드 + 코칭 메시지는
   `previousScore` 가 확정됐을 때만 노출된다 — 임시 폴백(`todayScore - 12`) 은
   Task #113 에서 제거됨.
+- 두 진입 경로 모두 같은 단건 엔드포인트(`/metrics/session/:sessionId/previous-score`)
+  하나의 진실원에 묶인다 (Task #122).
 - 우선순위:
   1. `navigate state.previousScore` (정상 완료 직후 흐름) → 그대로 사용.
-  2. 그 외(=기록에서 재진입) → `GET /api/metrics/session/:sessionId/previous-score`
-     를 useEffect 로 호출해 서버에서 받아온 값 사용 (Task #114 — 단건 엔드포인트).
+     `client/src/utils/submitTrainingRun.ts` 가 `includePreviousScore: true`
+     일 때 `calculateMetrics` 와 단건 엔드포인트를 `Promise.all` 로 병렬 호출해
+     결과 객체에 `previousScore`/`previousScoreCreatedAt` 를 함께 담아 돌려준다.
+     `TrainingSessionPlay.tsx` 는 그 값을 그대로 navigate state 로 흘려보낸다 —
+     별도의 페이징 이력 호출(`/sessions/user/:userId?limit=50`) 은 하지 않는다.
+  2. 그 외(=기록에서 재진입) → 같은 단건 엔드포인트를 `Result.tsx` 가 useEffect
+     로 호출해 서버 값 사용.
   3. 서버가 `previousScore: null` 을 돌려주면(첫 세션) 비교 카드와 "직전 대비"
      코칭 문구를 모두 숨겨 가짜 차이 노출을 막는다.
 - 서버 엔드포인트(`server/routes/metrics.ts`): 같은 `userId` + 같은 `mode` +
@@ -163,6 +170,12 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
   - `client/src/pages/Result.test.tsx` — 재진입/첫 세션/state 우선/응답 전 숨김,
     KST 표시용 라벨/자정 경계 (Task #132).
   - `shared/kst-date.test.ts` — `isoToKstLocalDate` 자정/월/연 경계.
+  - `client/src/utils/__tests__/submitTrainingRunRetry.test.ts` —
+    `includePreviousScore` 플래그의 호출/병렬/실패 폴백/생략 정책 (Task #122)
+    및 `previousScoreLocalDate` 전파 (Task #132 ← Task #122).
+  - `client/src/pages/TrainingSessionPlay.test.tsx` — 정상 완료 흐름이 submit
+    결과의 직전 점수/표시용 날짜를 navigate state 로 흘리고, 페이징 이력 호출
+    로 회귀하지 않음을 잠근다 (Task #122 / Task #132 자정 경계 회귀 보호).
 
 ## Deployment
 

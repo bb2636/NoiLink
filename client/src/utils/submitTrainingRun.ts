@@ -34,6 +34,30 @@ export interface SubmitCompletedTrainingResult {
    * 일반(첫 응답) 흐름에서는 undefined.
    */
   replayed?: boolean;
+  /**
+   * 결과 화면 비교 카드에 사용할 직전 세션 점수(Task #122).
+   * `includePreviousScore: true` 가 입력으로 들어와 사용자 결과 화면 진입과
+   * 함께 호출된 경우에만 채워진다(background drain 등은 undefined 로 둔다).
+   * - 직전 세션이 없거나(첫 세션) 모두 점수 미산출이면 `null`.
+   * - 조회 자체가 실패하면(네트워크 등) 그대로 `null` 로 폴백한다 — 결과 화면이
+   *   비교 카드를 자연스럽게 숨기고, 가짜 폴백을 만들지 않는다.
+   * 입력에서 fetch 를 요구하지 않았거나 직전 점수를 의미 있게 조회할 수 없는
+   * 흐름(createSession 실패 / FREE 모드) 에서는 undefined 로 남는다.
+   */
+  previousScore?: number | null;
+  /**
+   * 직전 점수의 세션 `createdAt`(ISO 8601, Task #122).
+   * 결과 화면 비교 카드의 직전 날짜 라벨용 — 점수와 한 쌍으로만 채워져,
+   * 라벨이 어긋난 채 새어 나가는 일이 없다. 직전 세션이 없거나 조회 실패면 `null`.
+   */
+  previousScoreCreatedAt?: string | null;
+  /**
+   * 직전 점수 세션의 KST 기준 표시용 날짜(`YYYY-MM-DD`, Task #132).
+   * 서버가 같은 KST 헬퍼(`shared/kst-date.ts` 의 `isoToKstLocalDate`) 로
+   * 만들어 보낸 값으로, 디바이스 시간대와 무관하게 자정 경계에서도 라벨이
+   * 흔들리지 않게 한다. 점수가 없으면 같이 `null` 로 폴백된다.
+   */
+  previousScoreLocalDate?: string | null;
 }
 
 export interface SubmitCompletedTrainingInput {
@@ -67,6 +91,24 @@ export interface SubmitCompletedTrainingInput {
    * (보통 pending 큐의 `localId` 가 그대로 들어온다.)
    */
   localId?: string;
+  /**
+   * true 면 calculateMetrics 와 함께 직전 점수 단건 엔드포인트
+   * (`/metrics/session/:sessionId/previous-score`) 를 병렬 호출해 결과에
+   * `previousScore`/`previousScoreCreatedAt` 을 채운다(Task #122).
+   *
+   * 사용자가 결과 화면으로 곧장 진입하는 흐름(TrainingSessionPlay) 에서만 true 를
+   * 넘긴다. background drain 같이 결과 화면을 띄우지 않는 흐름은 명시적으로
+   * 생략(또는 false) 해 불필요한 네트워크를 만들지 않는다.
+   *
+   * 호출 시점:
+   *  - createSession 이 성공해 sessionId 가 확보된 직후 calculateMetrics 와
+   *    `Promise.all` 로 묶인다 — 직전 점수 조회 때문에 제출 자체가 느려지지 않는다.
+   *  - FREE 모드 / yieldsScore=false 처럼 결과 화면이 비교 카드를 그리지 않는
+   *    흐름에서는 플래그가 true 여도 호출하지 않는다(낭비 방지).
+   *  - 조회가 실패해도 제출 결과 자체에는 영향이 없다 — 결과 객체에서
+   *    previousScore 가 null 로 폴백된다.
+   */
+  includePreviousScore?: boolean;
 }
 
 /**
@@ -159,11 +201,24 @@ export async function submitCompletedTraining(
   const raw: RawMetrics = input.engineMetrics
     ? { ...input.engineMetrics, sessionId, userId: input.userId }
     : buildSyntheticRawMetrics({ sessionId, userId: input.userId, quality: q });
+  // 직전 점수 단건 엔드포인트(Task #114) 를 calculateMetrics 와 병렬로 호출해
+  // 결과 화면 비교 카드용 직전 점수/날짜를 함께 채운다(Task #122). 이 두 호출은
+  // 서로 의존하지 않으므로 `Promise.all` 로 묶어 직전 점수 조회 때문에 제출이
+  // 느려지지 않게 한다. `includePreviousScore=false` (기본값) 면 호출하지 않아
+  // background drain 등은 기존과 동일한 단일 호출 비용만 든다.
+  // 조회 실패는 제출 결과 자체에 영향을 주지 않는다 — 결과의 previousScore 가
+  // `null` 로 폴백되어 결과 화면이 비교 카드를 자연스럽게 숨긴다.
+  const previousScorePromise = input.includePreviousScore
+    ? fetchPreviousScore(sessionId)
+    : null;
   const calcRes = await api.calculateMetrics(
     raw,
     input.localId ? { idempotencyKey: input.localId } : undefined,
   );
   if (!calcRes.success || !calcRes.data) {
+    // 제출 자체가 실패한 경우에도 직전 점수 promise 는 시작돼 있으므로
+    // unhandled rejection 을 막기 위해 결과를 흡수만 하고 버린다.
+    if (previousScorePromise) await previousScorePromise.catch(() => null);
     return {
       sessionId,
       sessionCreated: true,
@@ -177,13 +232,69 @@ export async function submitCompletedTraining(
     // 어느 쪽(또는 둘 다)이 흡수됐는지 로그만 봐도 즉시 구분 가능하게 한다.
     console.info('[submit] idempotency replay', { stage: 'calculateMetrics' });
   }
+  const previousScoreOutcome = previousScorePromise
+    ? await previousScorePromise
+    : undefined;
 
   return {
     sessionId,
     sessionCreated: true,
     displayScore: avgMetricScore(calcRes.data as MetricsScore),
     ...(replayed ? { replayed: true } : {}),
+    ...(previousScoreOutcome
+      ? {
+          previousScore: previousScoreOutcome.previousScore,
+          previousScoreCreatedAt: previousScoreOutcome.previousScoreCreatedAt,
+          previousScoreLocalDate: previousScoreOutcome.previousScoreLocalDate,
+        }
+      : {}),
   };
+}
+
+/**
+ * 직전 점수 단건 엔드포인트(Task #114, `GET /api/metrics/session/:sessionId/previous-score`)
+ * 를 호출해 점수와 세션 날짜를 한 쌍으로 돌려준다.
+ *
+ * 이 헬퍼의 역할은 "조회 실패를 결코 던지지 않는다" — submit 본문이 직전 점수
+ * 조회 때문에 실패하지 않게 모든 에러/실패 응답을 `null` 한 쌍으로 정규화한다.
+ * 결과 화면은 두 값이 모두 채워진 경우에만 비교 카드를 그리므로(Task #123),
+ * `null`/`null` 폴백은 가짜 비교를 만들지 않고 카드를 자연스럽게 숨긴다.
+ */
+async function fetchPreviousScore(
+  sessionId: string,
+): Promise<{
+  previousScore: number | null;
+  previousScoreCreatedAt: string | null;
+  previousScoreLocalDate: string | null;
+}> {
+  const res = await api
+    .get<{
+      previousScore: number | null;
+      previousScoreCreatedAt?: string | null;
+      // KST 기준 표시용 날짜(Task #132). 서버가 같은 헬퍼로 만들어 보내므로
+      // 여기서는 받기만 하고 클라이언트에서 다시 계산하지 않는다 — 두 경로의
+      // 라벨이 정확히 일치하도록 단일 진실원을 유지한다.
+      previousScoreLocalDate?: string | null;
+    }>(`/metrics/session/${sessionId}/previous-score`)
+    .catch(() => null);
+  if (!res || !res.success || !res.data) {
+    return { previousScore: null, previousScoreCreatedAt: null, previousScoreLocalDate: null };
+  }
+  const score = typeof res.data.previousScore === 'number' ? res.data.previousScore : null;
+  const createdAt =
+    typeof res.data.previousScoreCreatedAt === 'string'
+      ? res.data.previousScoreCreatedAt
+      : null;
+  const localDate =
+    typeof res.data.previousScoreLocalDate === 'string'
+      ? res.data.previousScoreLocalDate
+      : null;
+  // 점수가 없으면 날짜도 비워둬 라벨이 어긋난 채 새어 나가는 일이 없게 한다
+  // (Result.tsx 가 점수 우선 정책으로 카드를 그리지만 안전망을 한 겹 더 둔다).
+  if (score === null) {
+    return { previousScore: null, previousScoreCreatedAt: null, previousScoreLocalDate: null };
+  }
+  return { previousScore: score, previousScoreCreatedAt: createdAt, previousScoreLocalDate: localDate };
 }
 
 // ───────────────────────────────────────────────────────────

@@ -11,14 +11,8 @@ import { MobileLayout } from '../components/Layout';
 import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import PodGrid from '../components/PodGrid/PodGrid';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
-import type { Level, NativeToWebMessage, RawMetrics, Session, TrainingMode } from '@noilink/shared';
-import {
-  SESSION_MAX_MS,
-  isoToKstLocalDate,
-  partialThresholdForMode,
-  resolveBleStabilityThresholds,
-} from '@noilink/shared';
-import api from '../utils/api';
+import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noilink/shared';
+import { SESSION_MAX_MS, partialThresholdForMode, resolveBleStabilityThresholds } from '@noilink/shared';
 import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
 import { createPendingLocalId, enqueuePendingRun } from '../utils/pendingTrainingRuns';
 import { reportBleAbortFireAndForget } from '../utils/reportBleAbort';
@@ -510,19 +504,13 @@ export default function TrainingSessionPlay() {
     setSubmitting(true);
     setErr(null);
     const partialPct = partialProgressPctRef.current;
-    // 직전 점수 조회(Task #113) — 정상 완료 흐름의 비교 카드에 가짜 폴백
-    // (`todayScore - 12`) 대신 서버 이력의 진짜 직전 점수를 보여주기 위해
-    // 제출과 병렬로 사용자 세션 이력을 받아 둔다. 제출 직전에 발사하므로
-    // 응답에는 새 세션이 아직 없을 가능성이 높지만, 응답이 늦어 새 세션이
-    // 포함되더라도 아래에서 `res.sessionId` 로 명시적으로 제외한다.
-    // limit=50 은 Result.tsx 의 재진입 흐름과 동일한 값을 쓴다 — 점수 없는
-    // 세션(자유 트레이닝/거부된 부분 결과 등)이 연속해서 끼더라도 직전 점수
-    // 누락이 줄어든다.
-    // 실패하거나 직전 세션이 없으면 `previousScore` 는 undefined 로 남고,
-    // Result.tsx 가 비교 카드를 자연스럽게 숨긴다 (첫 세션 정책).
-    const previousScorePromise = api
-      .get<Session[]>(`/sessions/user/${state.userId}?limit=50`)
-      .catch(() => null);
+    // 직전 점수 조회는 submitCompletedTraining 안에서 calculateMetrics 와
+    // 병렬로 일어난다(Task #122). 정상 완료 흐름은 결과 화면이 "이미 채워진"
+    // navigate state.previousScore 를 그대로 쓰고, 재진입 흐름은 Result.tsx 가
+    // 같은 단건 엔드포인트를 직접 호출한다 — 두 경로가 같은 서버 진실원에
+    // 묶여 비교 카드 정책이 한 줄로 흐른다.
+    //   `includePreviousScore: true` 는 결과 화면을 곧장 띄울 사용자 흐름에서만
+    //   넘긴다(background drain 은 결과 화면을 띄우지 않으므로 false 로 둔다).
     const res = await submitCompletedTrainingWithRetry(
       {
         userId: state.userId,
@@ -539,6 +527,8 @@ export default function TrainingSessionPlay() {
         // 화면 내 자동·수동 재시도가 모두 같은 idempotency 키를 쓰도록 세션 시작 시
         // 발급한 안정 키를 그대로 흘려보낸다 — 서버가 첫 응답을 흡수해 중복 저장 방지.
         localId: localIdRef.current,
+        // 결과 화면 비교 카드용 직전 점수를 결과 객체에 함께 담아 받는다 (Task #122).
+        includePreviousScore: true,
       },
       {
         onAttempt: ({ result }) => {
@@ -557,47 +547,24 @@ export default function TrainingSessionPlay() {
       submitLock.current = false;
       return;
     }
-    // 직전 점수 결정(Task #113):
-    // 응답이 createdAt desc 정렬이므로 첫 항목부터 훑되, 새로 만든/업데이트된
-    // 현재 세션(`res.sessionId`)은 명시적으로 건너뛴다. 그 다음 score 가 정의된
-    // 첫 항목이 직전 점수다. 응답 실패·빈 이력·점수 누락이면 undefined 로 남기고,
-    // Result.tsx 가 비교 카드와 "직전 대비" 코칭 문구를 함께 숨긴다.
-    const previousScoreRes = await previousScorePromise;
-    let previousScore: number | undefined;
-    // Task #123: 직전 점수와 함께 직전 세션의 `createdAt` 도 한 쌍으로 보관해
-    // 결과 화면 비교 카드의 직전 날짜 라벨이 가짜 "오늘 - 2일" 이 아니라
-    // 실제 세션 날짜로 표시되게 한다. 점수가 없으면 날짜도 비워(undefined)
-    // 라벨이 어긋난 채로 새어 나가는 일이 없게 한다.
-    let previousScoreCreatedAt: string | undefined;
-    // Task #132: 비교 카드 라벨이 디바이스 시간대로 흔들리지 않도록 KST 기준
-    // `YYYY-MM-DD` 표시용 문자열도 한 쌍으로 함께 보낸다. 서버 단건 직전 점수
-    // 엔드포인트와 동일한 헬퍼로 만들어 두 흐름의 라벨을 정확히 일치시킨다.
-    let previousScoreLocalDate: string | undefined;
-    if (previousScoreRes && previousScoreRes.success && previousScoreRes.data) {
-      for (const s of previousScoreRes.data) {
-        if (s.id === res.sessionId) continue;
-        if (typeof s.score === 'number') {
-          previousScore = s.score;
-          previousScoreCreatedAt = s.createdAt;
-          previousScoreLocalDate = isoToKstLocalDate(s.createdAt) ?? undefined;
-          break;
-        }
-      }
-    }
     navigate('/result', {
       replace: true,
       state: {
         title: state.title,
         displayScore: res.displayScore,
-        // 비교 카드에 사용할 직전 점수 (첫 세션·이력 조회 실패 시 undefined).
-        previousScore,
+        // 비교 카드에 사용할 직전 점수 (Task #122).
+        // submitCompletedTraining 이 단건 엔드포인트로 받아둔 값을 그대로 흘려보낸다.
+        // 첫 세션·조회 실패는 서버 측에서 `null` 로 정규화되어 오므로, navigate state
+        // 에는 undefined 로 변환해 Result.tsx 의 "값 없음" 분기와 일관되게 한다.
+        previousScore: res.previousScore ?? undefined,
         // 비교 카드의 직전 날짜 라벨용(Task #123) — 점수와 한 쌍으로 함께 전달.
         // 점수가 없으면 날짜도 undefined 라 라벨이 어긋나는 일이 없다.
-        previousScoreCreatedAt,
+        previousScoreCreatedAt: res.previousScoreCreatedAt ?? undefined,
         // 라벨이 디바이스 시간대로 흔들리지 않도록 KST 기준 표시용 날짜도
-        // 함께 전달(Task #132). 서버 단건 직전 점수 엔드포인트와 동일한
-        // 헬퍼로 만든 값이라 두 흐름의 라벨이 정확히 일치한다.
-        previousScoreLocalDate,
+        // 함께 전달(Task #132). submit 유틸이 서버 단건 엔드포인트(같은 KST 헬퍼
+        // `shared/kst-date.ts` 의 `isoToKstLocalDate` 로 만든 값) 응답을 그대로
+        // 흘려보내므로 정상 완료/재진입 두 흐름의 라벨이 정확히 일치한다.
+        previousScoreLocalDate: res.previousScoreLocalDate ?? undefined,
         yieldsScore: state.yieldsScore,
         sessionId: res.sessionId,
         // 서버 idempotency 캐시 hit(= 사용자가 같은 결과를 두 번 보낸 셈) 신호를

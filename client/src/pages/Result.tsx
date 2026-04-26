@@ -225,12 +225,16 @@ export default function Result() {
   // 데모 프로필. 마지막 폴백은 어떤 경로로도 점수를 못 받았을 때만 노출된다.
   const todayScore =
     state?.displayScore ?? serverComputedDisplayScore ?? DEMO_PROFILE.brainIndex;
-  // 직전 점수 결정 (Task #95 / Task #113):
+  // 직전 점수 결정 (Task #95 / Task #113 / Task #122):
   // - navigate state.previousScore 가 있으면 그대로 사용한다.
-  //   정상 완료 흐름에서도 TrainingSessionPlay 가 서버 이력에서 진짜 직전
-  //   점수를 미리 채워 넣는다 (Task #113 — 가짜 `todayScore - 12` 폴백 제거).
-  // - 재진입 흐름(state.displayScore 미존재)에서는 서버 이력 결과만 신뢰한다.
-  // - 어느 경로로도 직전 점수를 못 얻으면(첫 세션·이력 조회 실패) 비교 카드를
+  //   정상 완료 흐름에서는 submitCompletedTraining 이 calculateMetrics 와 같은
+  //   단건 엔드포인트(`/metrics/session/:id/previous-score`) 를 병렬로 호출해
+  //   결과 객체에 직전 점수를 함께 담아 보낸다(Task #122). TrainingSessionPlay 는
+  //   그 값을 그대로 navigate state 로 흘려보낸다 — 가짜 폴백 / 별도 이력 호출 없음.
+  // - 재진입 흐름(state.displayScore 미존재)에서는 같은 단건 엔드포인트를
+  //   결과 화면이 직접 호출한다 — 두 경로가 같은 서버 진실원에 묶여 비교 카드
+  //   정책이 일관된다.
+  // - 어느 경로로도 직전 점수를 못 얻으면(첫 세션·조회 실패) 비교 카드를
   //   숨긴다 — 가짜 비교를 보여 사용자를 오인시키지 않기 위함.
   let resolvedPreviousScore: number | undefined;
   let resolvedPreviousScoreCreatedAt: string | undefined;
