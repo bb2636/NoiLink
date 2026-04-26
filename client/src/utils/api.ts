@@ -411,6 +411,28 @@ class ApiClient {
     return this.request<User[]>(`/admin/users${queryString}`);
   }
 
+  async getAdminRecoveryStats(params?: { period?: '7d' | '30d' }): Promise<ApiResponse<{
+    period: '7d' | '30d';
+    threshold: { avgMsPerSession: number; minSessions: number };
+    rows: Array<{
+      userId: string;
+      name: string | null;
+      email: string | null;
+      userType: 'PERSONAL' | 'ORGANIZATION' | null;
+      sessionsCount: number;
+      sessionsWithRecovery: number;
+      totalMs: number;
+      windowsTotal: number;
+      avgMsPerSession: number;
+      exceedsThreshold: boolean;
+    }>;
+  }>> {
+    const query = new URLSearchParams();
+    if (params?.period) query.append('period', params.period);
+    const queryString = query.toString() ? `?${query.toString()}` : '';
+    return this.request(`/admin/recovery-stats${queryString}`);
+  }
+
   async getAdminBanners(): Promise<ApiResponse<any[]>> {
     return this.request<any[]>('/admin/banners');
   }

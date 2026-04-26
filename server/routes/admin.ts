@@ -5,7 +5,12 @@
 import { Router, Response } from 'express';
 import { db } from '../db.js';
 import { requireAdmin, AuthRequest } from '../middleware/auth.js';
-import type { User, Session, Organization, Terms, TermsType } from '@noilink/shared';
+import type { User, Session, Organization, Terms, TermsType, RawMetrics, RecoveryRawMetrics } from '@noilink/shared';
+import {
+  aggregateRecoveryStats,
+  RECOVERY_COACHING_THRESHOLD_MS,
+  RECOVERY_COACHING_MIN_SESSIONS,
+} from '@noilink/shared';
 
 const router = Router();
 
@@ -465,6 +470,84 @@ router.post('/inquiries/:id/answer', async (req: AuthRequest, res: Response) => 
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * GET /api/admin/recovery-stats
+ * 사용자별 BLE 회복 통계 (최근 7일/30일 윈도)
+ *
+ * 회복 시간이 잦은 사용자/기기를 식별해 운영자가 환경 점검을 안내할 수 있게 한다.
+ * - period=7d|30d (기본 7d) 의 createdAt 윈도로 rawMetrics 를 자른 뒤 userId 별로 그룹화
+ * - shared/recovery-stats 의 aggregateRecoveryStats 에 "세션당 1엔트리" (recovery 없으면 null)
+ *   를 그대로 넘겨서 분모(sessionsCount)를 올바르게 유지
+ * - exceedsThreshold: shouldShowRecoveryCoaching 과 동일 기준
+ *   (sessionsCount >= 3 AND avgMsPerSession >= 30s)
+ */
+router.get('/recovery-stats', async (req: AuthRequest, res: Response) => {
+  try {
+    const periodParam = String(req.query.period || '7d');
+    const periodDays = periodParam === '30d' ? 30 : 7;
+    const cutoff = Date.now() - periodDays * 24 * 60 * 60 * 1000;
+
+    const [rawMetricsList, users] = await Promise.all([
+      db.get('rawMetrics') as Promise<RawMetrics[] | undefined>,
+      db.get('users') as Promise<User[] | undefined>,
+    ]);
+
+    const rawList = rawMetricsList || [];
+    const userList = users || [];
+
+    // userId -> recovery 엔트리 배열 (세션 1개당 1엔트리, recovery 없으면 null)
+    const buckets = new Map<string, Array<RecoveryRawMetrics | null>>();
+    for (const m of rawList) {
+      if (!m.userId) continue;
+      const ts = m.createdAt ? Date.parse(m.createdAt) : NaN;
+      if (!Number.isFinite(ts) || ts < cutoff) continue;
+      const arr = buckets.get(m.userId) || [];
+      arr.push(m.recovery ?? null);
+      buckets.set(m.userId, arr);
+    }
+
+    const userById = new Map<string, User>();
+    for (const u of userList) userById.set(u.id, u);
+
+    const rows = Array.from(buckets.entries()).map(([userId, recoveries]) => {
+      const stats = aggregateRecoveryStats(recoveries);
+      const u = userById.get(userId);
+      const exceedsThreshold =
+        stats.sessionsCount >= RECOVERY_COACHING_MIN_SESSIONS &&
+        stats.avgMsPerSession >= RECOVERY_COACHING_THRESHOLD_MS;
+      return {
+        userId,
+        name: u?.name ?? null,
+        email: u?.email ?? null,
+        userType: u?.userType ?? null,
+        sessionsCount: stats.sessionsCount,
+        sessionsWithRecovery: stats.sessionsWithRecovery,
+        totalMs: stats.totalMs,
+        windowsTotal: stats.windowsTotal,
+        avgMsPerSession: stats.avgMsPerSession,
+        exceedsThreshold,
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        period: periodDays === 30 ? '30d' : '7d',
+        threshold: {
+          avgMsPerSession: RECOVERY_COACHING_THRESHOLD_MS,
+          minSessions: RECOVERY_COACHING_MIN_SESSIONS,
+        },
+        rows,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 });

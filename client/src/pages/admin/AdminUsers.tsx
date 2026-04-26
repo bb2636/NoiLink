@@ -9,7 +9,31 @@ import Modal from '../../components/Admin/Modal';
 import ConfirmModal from '../../components/ConfirmModal/ConfirmModal';
 import SuccessBanner from '../../components/SuccessBanner/SuccessBanner';
 
-type UserTab = 'personal' | 'organization' | 'deleted';
+type UserTab = 'personal' | 'organization' | 'deleted' | 'recovery';
+
+type RecoveryRow = {
+  userId: string;
+  name: string | null;
+  email: string | null;
+  userType: 'PERSONAL' | 'ORGANIZATION' | null;
+  sessionsCount: number;
+  sessionsWithRecovery: number;
+  totalMs: number;
+  windowsTotal: number;
+  avgMsPerSession: number;
+  exceedsThreshold: boolean;
+};
+
+type RecoverySortKey = 'avgMsPerSession' | 'totalMs' | 'sessionsWithRecovery' | 'sessionsCount';
+
+function formatMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '0초';
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}초`;
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return sec === 0 ? `${min}분` : `${min}분 ${sec}초`;
+}
 
 export default function AdminUsers() {
   const [activeTab, setActiveTab] = useState<UserTab>('personal');
@@ -24,6 +48,14 @@ export default function AdminUsers() {
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [showDeleteToast, setShowDeleteToast] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // BLE 회복 통계 탭 상태
+  const [recoveryPeriod, setRecoveryPeriod] = useState<'7d' | '30d'>('7d');
+  const [recoveryRows, setRecoveryRows] = useState<RecoveryRow[]>([]);
+  const [recoveryThreshold, setRecoveryThreshold] = useState<{ avgMsPerSession: number; minSessions: number } | null>(null);
+  const [recoverySortKey, setRecoverySortKey] = useState<RecoverySortKey>('avgMsPerSession');
+  const [recoveryOnlyExceed, setRecoveryOnlyExceed] = useState(false);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
 
   const itemsPerPage = 10;
 
@@ -43,6 +75,25 @@ export default function AdminUsers() {
       setLoading(false);
     }
   };
+
+  const loadRecoveryStats = useCallback(async (period: '7d' | '30d') => {
+    try {
+      setRecoveryLoading(true);
+      const response = await api.getAdminRecoveryStats({ period });
+      if (response.success && response.data) {
+        setRecoveryRows(response.data.rows);
+        setRecoveryThreshold(response.data.threshold);
+      } else {
+        console.error('Failed to load recovery stats:', response.error);
+        setRecoveryRows([]);
+      }
+    } catch (error) {
+      console.error('Failed to load recovery stats:', error);
+      setRecoveryRows([]);
+    } finally {
+      setRecoveryLoading(false);
+    }
+  }, []);
 
   const filterUsers = useCallback(() => {
     let filtered = [...users];
@@ -73,6 +124,12 @@ export default function AdminUsers() {
   useEffect(() => {
     loadUsers();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'recovery') {
+      loadRecoveryStats(recoveryPeriod);
+    }
+  }, [activeTab, recoveryPeriod, loadRecoveryStats]);
 
   useEffect(() => {
     filterUsers();
@@ -199,36 +256,92 @@ export default function AdminUsers() {
           >
             삭제된 유저 {getTabCount('deleted')}
           </button>
-        </div>
-        {/* 검색창 */}
-        <div className="flex items-center relative">
-          <svg 
-            className="absolute left-3 w-5 h-5" 
-            style={{ color: '#999999' }}
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24"
+          <button
+            onClick={() => setActiveTab('recovery')}
+            className={`px-4 py-2 font-semibold ${
+              activeTab === 'recovery' ? 'border-b-2' : ''
+            }`}
+            style={{
+              color: activeTab === 'recovery' ? '#000000' : '#666666',
+              borderColor: activeTab === 'recovery' ? '#000000' : 'transparent',
+            }}
           >
-            <path 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              strokeWidth={2} 
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" 
-            />
-          </svg>
-          <input
-            type="text"
-            placeholder="유저명, 전화번호 등 검색"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 pr-4 py-2 border rounded-lg"
-            style={{ borderColor: '#E5E5E5', color: '#000000', width: '300px' }}
-          />
+            BLE 회복 통계
+          </button>
         </div>
+        {/* 검색창 / 회복 통계 필터 */}
+        {activeTab === 'recovery' ? (
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-sm" style={{ color: '#000000' }}>
+              <input
+                type="checkbox"
+                checked={recoveryOnlyExceed}
+                onChange={(e) => setRecoveryOnlyExceed(e.target.checked)}
+              />
+              임계 초과만 보기
+            </label>
+            <div className="flex items-center border rounded-lg overflow-hidden" style={{ borderColor: '#E5E5E5' }}>
+              <button
+                onClick={() => setRecoveryPeriod('7d')}
+                className="px-4 py-2 text-sm font-semibold"
+                style={{
+                  backgroundColor: recoveryPeriod === '7d' ? '#2A2A2A' : '#FFFFFF',
+                  color: recoveryPeriod === '7d' ? '#FFFFFF' : '#666666',
+                }}
+              >
+                최근 7일
+              </button>
+              <button
+                onClick={() => setRecoveryPeriod('30d')}
+                className="px-4 py-2 text-sm font-semibold"
+                style={{
+                  backgroundColor: recoveryPeriod === '30d' ? '#2A2A2A' : '#FFFFFF',
+                  color: recoveryPeriod === '30d' ? '#FFFFFF' : '#666666',
+                }}
+              >
+                최근 30일
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center relative">
+            <svg 
+              className="absolute left-3 w-5 h-5" 
+              style={{ color: '#999999' }}
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                strokeWidth={2} 
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" 
+              />
+            </svg>
+            <input
+              type="text"
+              placeholder="유저명, 전화번호 등 검색"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 pr-4 py-2 border rounded-lg"
+              style={{ borderColor: '#E5E5E5', color: '#000000', width: '300px' }}
+            />
+          </div>
+        )}
       </div>
 
       {/* 테이블 */}
-      {loading ? (
+      {activeTab === 'recovery' ? (
+        <RecoveryStatsTable
+          rows={recoveryRows}
+          threshold={recoveryThreshold}
+          loading={recoveryLoading}
+          sortKey={recoverySortKey}
+          onSortKeyChange={setRecoverySortKey}
+          onlyExceed={recoveryOnlyExceed}
+        />
+      ) : loading ? (
         <div className="flex items-center justify-center" style={{ color: '#666666', minHeight: '60vh' }}>
           로딩 중...
         </div>
@@ -475,5 +588,124 @@ export default function AdminUsers() {
         modalStyle={{ backgroundColor: '#FFFFFF', titleColor: '#000000', messageColor: '#000000' }}
       />
     </div>
+  );
+}
+
+interface RecoveryStatsTableProps {
+  rows: RecoveryRow[];
+  threshold: { avgMsPerSession: number; minSessions: number } | null;
+  loading: boolean;
+  sortKey: RecoverySortKey;
+  onSortKeyChange: (key: RecoverySortKey) => void;
+  onlyExceed: boolean;
+}
+
+function RecoveryStatsTable({
+  rows,
+  threshold,
+  loading,
+  sortKey,
+  onSortKeyChange,
+  onlyExceed,
+}: RecoveryStatsTableProps) {
+  const visibleRows = (() => {
+    const filtered = onlyExceed ? rows.filter(r => r.exceedsThreshold) : rows.slice();
+    filtered.sort((a, b) => (b[sortKey] - a[sortKey]) || (b.totalMs - a.totalMs));
+    return filtered;
+  })();
+
+  const headerCellStyle = { color: '#767676', backgroundColor: '#F5F5F5' } as const;
+  const sortable = (key: RecoverySortKey, label: string) => (
+    <th
+      className="px-4 py-3 text-center text-sm font-semibold cursor-pointer select-none"
+      style={headerCellStyle}
+      onClick={() => onSortKeyChange(key)}
+    >
+      {label}{sortKey === key ? ' ▼' : ''}
+    </th>
+  );
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center" style={{ color: '#666666', minHeight: '60vh' }}>
+        로딩 중...
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {threshold && (
+        <div className="mb-3 text-sm" style={{ color: '#666666' }}>
+          임계: 세션당 평균 회복 시간 ≥ {Math.round(threshold.avgMsPerSession / 1000)}초 &amp; 최근 세션 ≥ {threshold.minSessions}회 (강조 표시)
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b" style={{ borderColor: '#E5E5E5' }}>
+              <th className="px-4 py-3 text-center text-sm font-semibold" style={headerCellStyle}>이름</th>
+              <th className="px-4 py-3 text-center text-sm font-semibold" style={headerCellStyle}>이메일</th>
+              <th className="px-4 py-3 text-center text-sm font-semibold" style={headerCellStyle}>회원유형</th>
+              {sortable('sessionsCount', '세션 수')}
+              {sortable('sessionsWithRecovery', '회복 발생 세션')}
+              {sortable('totalMs', '누적 회복 시간')}
+              {sortable('avgMsPerSession', '세션당 평균')}
+              <th className="px-4 py-3 text-center text-sm font-semibold" style={headerCellStyle}>회복 구간</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="px-4 py-12">
+                  <div className="flex flex-col items-center justify-center" style={{ color: '#666666', minHeight: '300px' }}>
+                    <div className="mb-4 text-4xl">📄</div>
+                    <div>표시할 회복 통계가 없습니다.</div>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              visibleRows.map(row => (
+                <tr
+                  key={row.userId}
+                  className="border-b"
+                  style={{
+                    borderColor: '#E5E5E5',
+                    backgroundColor: row.exceedsThreshold ? '#FFF4F4' : 'transparent',
+                  }}
+                >
+                  <td className="px-4 py-3 text-sm text-center" style={{ color: '#000000' }}>
+                    {row.exceedsThreshold && (
+                      <span
+                        className="inline-block mr-1 px-2 py-0.5 text-xs rounded"
+                        style={{ backgroundColor: '#D93B3B', color: '#FFFFFF' }}
+                        title="임계 초과"
+                      >
+                        !
+                      </span>
+                    )}
+                    {row.name || '-'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-center" style={{ color: '#000000' }}>{row.email || '-'}</td>
+                  <td className="px-4 py-3 text-sm text-center" style={{ color: '#000000' }}>
+                    {row.userType === 'ORGANIZATION' ? '기업' : row.userType === 'PERSONAL' ? '개인' : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-center" style={{ color: '#000000' }}>{row.sessionsCount}</td>
+                  <td className="px-4 py-3 text-sm text-center" style={{ color: '#000000' }}>{row.sessionsWithRecovery}</td>
+                  <td className="px-4 py-3 text-sm text-center" style={{ color: '#000000' }}>{formatMs(row.totalMs)}</td>
+                  <td
+                    className="px-4 py-3 text-sm text-center"
+                    style={{ color: row.exceedsThreshold ? '#D93B3B' : '#000000', fontWeight: row.exceedsThreshold ? 600 : 400 }}
+                  >
+                    {formatMs(row.avgMsPerSession)}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-center" style={{ color: '#000000' }}>{row.windowsTotal}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
