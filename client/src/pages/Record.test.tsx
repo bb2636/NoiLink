@@ -32,6 +32,20 @@ vi.mock('../hooks/useAuth', () => ({
   useAuth: () => ({ user: { id: 'user-1', nickname: '테스트유저' } }),
 }));
 
+// 세션 카드 클릭 → /result 네비게이션 검증을 위해 useNavigate 만 가로챈다.
+// react-router-dom 의 다른 export(MemoryRouter 등)는 그대로 두고 한 함수만
+// 교체해 라우팅 컨텍스트는 정상 동작하게 한다.
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>(
+    'react-router-dom',
+  );
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
 // Record 는 api.getUserSessions 만 사용한다. mock 이 반환할 세션 배열은
 // 각 테스트가 `setMockSessions` 로 직접 주입한다.
 let mockSessions: Session[] = [];
@@ -96,6 +110,7 @@ function unmountRecord() {
 describe('Record — 세션 카드 부분 결과 배지 (Task #23 / Task #63)', () => {
   beforeEach(() => {
     mockSessions = [];
+    mockNavigate.mockReset();
   });
 
   afterEach(() => {
@@ -156,5 +171,118 @@ describe('Record — 세션 카드 부분 결과 배지 (Task #23 / Task #63)', 
     const badges = container?.querySelectorAll('[aria-label^="부분 결과"]') ?? [];
     expect(badges.length).toBe(1);
     expect((badges[0] as HTMLElement).textContent).toContain('부분 결과 · 65%');
+  });
+});
+
+/**
+ * Record — 세션 카드 클릭 → /result 네비게이션 (Task #94)
+ *
+ * 보호 대상:
+ *   - 세션 카드를 클릭하면 `navigate('/result', { state: { sessionId, title, ... } })`
+ *     형태로 결과 화면이 열린다. Result 화면은 sessionId 만 있어도 서버에서
+ *     raw.recovery 를 다시 받아 회복 카드를 그리도록 Task #75 에서 정비됐다.
+ *   - 일반 모드(FOCUS 등)는 yieldsScore=true, 자유 트레이닝(FREE)은 yieldsScore=false
+ *     로 명시되어야 Result 의 자유 트레이닝 폴백 분기가 정상 동작한다.
+ *   - 저장된 점수가 있으면 displayScore 로 그대로 넘겨야 점수 원이 데모 폴백
+ *     (DEMO_PROFILE.brainIndex)으로 떨어지지 않는다.
+ */
+describe('Record — 세션 카드 클릭 → /result 네비게이션 (Task #94)', () => {
+  beforeEach(() => {
+    mockSessions = [];
+    mockNavigate.mockReset();
+  });
+
+  afterEach(() => {
+    unmountRecord();
+    vi.clearAllMocks();
+  });
+
+  it('세션 카드를 클릭하면 /result 로 sessionId·title·displayScore·apiMode 가 함께 넘어간다', async () => {
+    await renderRecord([
+      makeSession({
+        id: 'sess-focus',
+        mode: 'FOCUS',
+        score: 81,
+      }),
+    ]);
+
+    const card = container?.querySelector(
+      '[aria-label="집중력 세션 결과 열기"]',
+    ) as HTMLElement | null;
+    expect(card).toBeTruthy();
+
+    act(() => {
+      card!.click();
+    });
+
+    expect(mockNavigate).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith('/result', {
+      state: expect.objectContaining({
+        sessionId: 'sess-focus',
+        title: '집중력',
+        yieldsScore: true,
+        displayScore: 81,
+        apiMode: 'FOCUS',
+      }),
+    });
+  });
+
+  it('자유 트레이닝(FREE) 카드는 yieldsScore=false 로 넘겨 Result 의 점수 없음 폴백을 켠다', async () => {
+    await renderRecord([
+      makeSession({
+        id: 'sess-free',
+        mode: 'FREE',
+        score: undefined,
+      }),
+    ]);
+
+    // FREE 카드는 카탈로그 title("자유 트레이닝")로 aria-label 이 만들어진다.
+    const card = container?.querySelector(
+      '[aria-label$="세션 결과 열기"]',
+    ) as HTMLElement | null;
+    expect(card).toBeTruthy();
+
+    act(() => {
+      card!.click();
+    });
+
+    expect(mockNavigate).toHaveBeenCalledTimes(1);
+    const [, options] = mockNavigate.mock.calls[0] as [
+      string,
+      { state: { sessionId: string; yieldsScore: boolean; displayScore?: number } },
+    ];
+    expect(options.state.sessionId).toBe('sess-free');
+    expect(options.state.yieldsScore).toBe(false);
+    // 점수가 없는 세션은 displayScore 키 자체를 넘기지 않아 Result 의 자체 폴백을 따라간다.
+    expect(options.state.displayScore).toBeUndefined();
+  });
+
+  it('Enter 키로도 카드를 열 수 있다(키보드 접근성)', async () => {
+    await renderRecord([
+      makeSession({
+        id: 'sess-keyboard',
+        mode: 'MEMORY',
+        score: 70,
+      }),
+    ]);
+
+    const card = container?.querySelector(
+      '[aria-label$="세션 결과 열기"]',
+    ) as HTMLElement | null;
+    expect(card).toBeTruthy();
+
+    act(() => {
+      card!.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+
+    expect(mockNavigate).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith(
+      '/result',
+      expect.objectContaining({
+        state: expect.objectContaining({ sessionId: 'sess-keyboard' }),
+      }),
+    );
   });
 });

@@ -9,6 +9,7 @@ import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
 import type { Session, TrainingMode } from '@noilink/shared';
 import { TRAINING_CATALOG, getSessionPartialProgressPct } from '@noilink/shared';
+import type { TrainingResultState } from './Result';
 
 function modeTitle(mode: TrainingMode): string {
   const hit = TRAINING_CATALOG.find((e) => e.apiMode === mode);
@@ -99,17 +100,43 @@ export default function Record() {
               // 이상이라 사용자가 저장에 동의한 세션. 점수가 정상 완료 세션보다
               // 낮게 보일 수 있어, 같은 줄에 "부분 82%" 칩을 노출해 맥락을 함께 전한다.
               const partialPct = getSessionPartialProgressPct(s);
+              const title = modeTitle(s.mode);
+              // 결과 화면 재진입(Task #94): 카드를 누르면 /result 로 sessionId 만 넘겨도
+              // Result 가 서버에서 raw.recovery 를 다시 받아 회복 카드를 그린다(Task #75).
+              // - yieldsScore: FREE 모드만 점수가 없으므로 그 외에는 true 로 둔다.
+              //   FREE 일 때 false 를 명시적으로 넘겨야 Result 의 "자유 트레이닝" 폴백 분기가 켜진다.
+              // - displayScore: 저장된 점수가 있으면 그대로 보여줘 점수 원이 데모 폴백
+              //   (DEMO_PROFILE.brainIndex)으로 떨어지지 않게 한다. score 가 없으면 생략.
+              // - apiMode: ENDURANCE Late 표본 부족 안내(Task #54)에서 사용하므로 함께 넘긴다.
+              const resultState: TrainingResultState = {
+                sessionId: s.id,
+                title,
+                yieldsScore: s.mode !== 'FREE',
+                ...(typeof s.score === 'number' ? { displayScore: s.score } : {}),
+                apiMode: s.mode,
+              };
+              const openResult = () => navigate('/result', { state: resultState });
               return (
               <motion.li
                 key={s.id}
                 layout
-                className="rounded-2xl p-4 border"
+                role="button"
+                tabIndex={0}
+                aria-label={`${title} 세션 결과 열기`}
+                onClick={openResult}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openResult();
+                  }
+                }}
+                className="rounded-2xl p-4 border cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#AAED10]"
                 style={{ backgroundColor: '#1A1A1A', borderColor: '#2a2a2a' }}
               >
                 <div className="flex justify-between items-start gap-3">
                   <div>
                     <p className="font-bold" style={{ color: '#fff' }}>
-                      {modeTitle(s.mode)}
+                      {title}
                     </p>
                     <p className="text-xs mt-1" style={{ color: '#666' }}>
                       {formatWhen(s.createdAt)}
