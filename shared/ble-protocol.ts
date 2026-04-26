@@ -88,6 +88,16 @@ export const BPM_MAX = 200;
 /** 펌웨어가 보내는 TOUCH 프레임 크기 (bytes) */
 export const TOUCH_FRAME_BYTES = 11;
 
+/**
+ * 펌웨어 LE 정수 폭 상한. 브리지 가드가 `tickId` (u32 LE), `onMs` (u16 LE),
+ * `flags` (u8) 같은 필드를 펌웨어 byte 로 silently truncate 되기 전에
+ * 거부하기 위해 사용한다 — 음수/소수/상한 초과는 `writeU16LE`/`writeU32LE`
+ * 가 비트마스킹으로 잘라내 다른 tick / 0ms / 다른 비트 set 으로 오인된다.
+ */
+export const U8_MAX = 0xff;
+export const U16_MAX = 0xffff;
+export const U32_MAX = 0xffffffff;
+
 // ---------------------------------------------------------------------------
 // hex / base64 / Uint8Array 변환 (Buffer 없이)
 // ---------------------------------------------------------------------------

@@ -15,6 +15,9 @@ import {
   MAX_SESSION_SEC,
   POD_INDEX_MAX,
   POD_INDEX_MIN,
+  U16_MAX,
+  U32_MAX,
+  U8_MAX,
 } from './ble-protocol.js';
 
 // ---------------------------------------------------------------------------
@@ -224,6 +227,26 @@ const VALID_WEB_TO_NATIVE: ValidCase[] = [
     },
   },
   {
+    label: 'ble.writeLed (tickId=U32_MAX, onMs=U16_MAX, flags=U8_MAX 상한 경계 통과)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: {
+        tickId: U32_MAX,
+        pod: 0,
+        colorCode: 1,
+        onMs: U16_MAX,
+        flags: U8_MAX,
+      },
+    },
+  },
+  {
+    label: 'ble.writeLed (tickId=0, onMs=0, flags=0 하한 경계 통과)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: 0, pod: 0, colorCode: 0xff, onMs: 0, flags: 0 },
+    },
+  },
+  {
     label: 'ble.writeSession',
     msg: {
       ...baseEnv('ble.writeSession'),
@@ -240,6 +263,20 @@ const VALID_WEB_TO_NATIVE: ValidCase[] = [
         phase: 0,
         durationSec: MAX_SESSION_SEC,
       },
+    },
+  },
+  {
+    label: 'ble.writeSession (flags=U8_MAX 상한 경계 통과)',
+    msg: {
+      ...baseEnv('ble.writeSession'),
+      payload: { bpm: 100, level: 1, phase: 0, durationSec: 30, flags: U8_MAX },
+    },
+  },
+  {
+    label: 'ble.writeSession (flags=0 하한 경계 통과)',
+    msg: {
+      ...baseEnv('ble.writeSession'),
+      payload: { bpm: 100, level: 1, phase: 0, durationSec: 30, flags: 0 },
     },
   },
   {
@@ -481,6 +518,139 @@ const INVALID_WEB_TO_NATIVE: InvalidCase[] = [
     expectedType: 'ble.writeSession',
     expectedField: 'payload.durationSec',
     expectedReason: 'field-range',
+  },
+  // -- Task #84 — tickId(u32) / onMs(u16) / flags(u8) bounds ------------------
+  // 펌웨어 byte 로 silently truncate 되기 전에 브리지가 잡아 다른 tick / 0ms LED /
+  // 다른 비트 set 으로 오인되지 않게 막는다.
+  {
+    label: 'ble.writeLed: tickId=-1 → field-range (u32 음수)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: -1, pod: 0, colorCode: 1, onMs: 100 },
+    },
+    expectedType: 'ble.writeLed',
+    expectedField: 'payload.tickId',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeLed: tickId=U32_MAX+1 → field-range (writeU32LE 가 다른 tick 으로 truncate)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: U32_MAX + 1, pod: 0, colorCode: 1, onMs: 100 },
+    },
+    expectedType: 'ble.writeLed',
+    expectedField: 'payload.tickId',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeLed: tickId=1.5 → field-type (소수면 byte 로 truncate 위험)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: 1.5, pod: 0, colorCode: 1, onMs: 100 },
+    },
+    expectedType: 'ble.writeLed',
+    expectedField: 'payload.tickId',
+    expectedReason: 'field-type',
+  },
+  {
+    label: 'ble.writeLed: onMs=-1 → field-range (u16 음수)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: 1, pod: 0, colorCode: 1, onMs: -1 },
+    },
+    expectedType: 'ble.writeLed',
+    expectedField: 'payload.onMs',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeLed: onMs=U16_MAX+1 → field-range (writeU16LE 가 0 으로 truncate → 즉시 OFF 오인)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: 1, pod: 0, colorCode: 1, onMs: U16_MAX + 1 },
+    },
+    expectedType: 'ble.writeLed',
+    expectedField: 'payload.onMs',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeLed: onMs=120.5 → field-type (정수만 허용)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: 1, pod: 0, colorCode: 1, onMs: 120.5 },
+    },
+    expectedType: 'ble.writeLed',
+    expectedField: 'payload.onMs',
+    expectedReason: 'field-type',
+  },
+  {
+    label: 'ble.writeLed: onMs=NaN → field-type',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: 1, pod: 0, colorCode: 1, onMs: Number.NaN },
+    },
+    expectedType: 'ble.writeLed',
+    expectedField: 'payload.onMs',
+    expectedReason: 'field-type',
+  },
+  {
+    label: 'ble.writeLed: flags=-1 → field-range (u8 음수)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: 1, pod: 0, colorCode: 1, onMs: 100, flags: -1 },
+    },
+    expectedType: 'ble.writeLed',
+    expectedField: 'payload.flags',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeLed: flags=U8_MAX+1 → field-range (다른 비트 set 위험)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: 1, pod: 0, colorCode: 1, onMs: 100, flags: U8_MAX + 1 },
+    },
+    expectedType: 'ble.writeLed',
+    expectedField: 'payload.flags',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeLed: flags=0.5 → field-type (정수만 허용)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: 1, pod: 0, colorCode: 1, onMs: 100, flags: 0.5 },
+    },
+    expectedType: 'ble.writeLed',
+    expectedField: 'payload.flags',
+    expectedReason: 'field-type',
+  },
+  {
+    label: 'ble.writeSession: flags=-1 → field-range (u8 음수)',
+    msg: {
+      ...baseEnv('ble.writeSession'),
+      payload: { bpm: 100, level: 1, phase: 0, durationSec: 30, flags: -1 },
+    },
+    expectedType: 'ble.writeSession',
+    expectedField: 'payload.flags',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeSession: flags=U8_MAX+1 → field-range',
+    msg: {
+      ...baseEnv('ble.writeSession'),
+      payload: { bpm: 100, level: 1, phase: 0, durationSec: 30, flags: U8_MAX + 1 },
+    },
+    expectedType: 'ble.writeSession',
+    expectedField: 'payload.flags',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeSession: flags=1.5 → field-type',
+    msg: {
+      ...baseEnv('ble.writeSession'),
+      payload: { bpm: 100, level: 1, phase: 0, durationSec: 30, flags: 1.5 },
+    },
+    expectedType: 'ble.writeSession',
+    expectedField: 'payload.flags',
+    expectedReason: 'field-type',
   },
   {
     label: 'ble.writeControl: 알려지지 않은 cmd → field-enum',

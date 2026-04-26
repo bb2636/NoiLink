@@ -29,6 +29,9 @@ import {
   MAX_SESSION_SEC,
   POD_INDEX_MAX,
   POD_INDEX_MIN,
+  U16_MAX,
+  U32_MAX,
+  U8_MAX,
 } from './ble-protocol.js';
 
 export const NATIVE_BRIDGE_VERSION = 2 as const;
@@ -577,6 +580,23 @@ function reqIntegerInRange(
   return null;
 }
 
+/**
+ * 선택 정수 + 범위 검사. `ble.writeLed.flags` (u8), `ble.writeSession.flags`
+ * (u8) 처럼 펌웨어 byte 로 직렬화되지만 omit 가능한 필드를 위한 변형.
+ * 누락은 통과시키고, 존재하면 `reqIntegerInRange` 와 같은 규칙을 적용한다.
+ */
+function optIntegerInRange(
+  p: Record<string, unknown>,
+  key: string,
+  type: string,
+  min: number,
+  max: number,
+  prefix = 'payload',
+): BridgeValidationError | null {
+  if (p[key] === undefined) return null;
+  return reqIntegerInRange(p, key, type, min, max, prefix);
+}
+
 /** payload 가 필수인 type 의 1차 검사. payload 가 객체임을 보장하고 반환한다. */
 function requirePayloadObject(
   payload: unknown,
@@ -795,11 +815,11 @@ function validateWebToNativePayload(type: string, payload: unknown): BridgeValid
       if (!r.ok) return r.error;
       const p = r.payload;
       return (
-        reqNumber(p, 'tickId', type) ??
+        reqIntegerInRange(p, 'tickId', type, 0, U32_MAX) ??
         reqIntegerInRange(p, 'pod', type, POD_INDEX_MIN, POD_INDEX_MAX) ??
         reqEnum(p, 'colorCode', type, COLOR_CODE_VALUES) ??
-        reqNumber(p, 'onMs', type) ??
-        optNumber(p, 'flags', type) ??
+        reqIntegerInRange(p, 'onMs', type, 0, U16_MAX) ??
+        optIntegerInRange(p, 'flags', type, 0, U8_MAX) ??
         optEnum(p, 'mode', type, WRITE_MODE_VALUES)
       );
     }
@@ -813,7 +833,7 @@ function validateWebToNativePayload(type: string, payload: unknown): BridgeValid
         reqIntegerInRange(p, 'level', type, LEVEL_MIN, LEVEL_MAX) ??
         reqEnum(p, 'phase', type, SESSION_PHASE_VALUES) ??
         reqIntegerInRange(p, 'durationSec', type, 0, MAX_SESSION_SEC) ??
-        optNumber(p, 'flags', type)
+        optIntegerInRange(p, 'flags', type, 0, U8_MAX)
       );
     }
 
