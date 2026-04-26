@@ -30,10 +30,15 @@ export function useHome(userId: string | null) {
     try {
       if (showLoader) setLoading(true);
 
+      // Task #146 — 같은 endpoint 의 동시 호출은 ApiClient 의
+      // `coalesceInflight` 가드(`getCondition`/`getMission`/`getQuickStart`
+      // 안쪽)로 1회 fetch 로 합쳐진다. 위 `inFlightMap` 가 같은 hook 안의
+      // 중복 트리거를 막고, 이쪽은 hook 바깥 다른 트리거 경로(라우팅 전환,
+      // 포커스 복귀, Strict Mode 이중 마운트 등)와의 경합까지 잠근다.
       const [conditionRes, missionRes, quickStartRes, bannersRes] = await Promise.allSettled([
-        api.get(`/home/condition/${userId}`).catch(() => ({ success: false, data: null })),
-        api.get(`/home/mission/${userId}`).catch(() => ({ success: false, data: null })),
-        api.get(`/home/quickstart/${userId}`).catch(() => ({ success: false, data: null })),
+        api.getCondition(userId).catch(() => ({ success: false, data: null })),
+        api.getMission(userId).catch(() => ({ success: false, data: null })),
+        api.getQuickStart(userId).catch(() => ({ success: false, data: null })),
         api.getBanners().catch(() => ({ success: false, data: [] })),
       ]);
 

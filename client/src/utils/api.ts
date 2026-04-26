@@ -145,16 +145,23 @@ class ApiClient {
   }
   
   // Home API
+  // Task #146 — 자주 호출되는 조회 API 들도 동시 호출이 1회 네트워크 요청으로
+  // 합쳐지도록 `coalesceInflight` 헬퍼(아래)에 키 기반으로 묶는다. 키는
+  // (메서드 + endpoint) 단위라 같은 userId 의 동시 두 번 호출만 합쳐지고,
+  // 다른 userId 호출은 영향이 없다.
   async getCondition(userId: string) {
-    return this.request<any>(`/home/condition/${userId}`);
+    const path = `/home/condition/${userId}`;
+    return this.coalesceInflight<any>(`GET ${path}`, () => this.request<any>(path));
   }
-  
+
   async getMission(userId: string) {
-    return this.request<any>(`/home/mission/${userId}`);
+    const path = `/home/mission/${userId}`;
+    return this.coalesceInflight<any>(`GET ${path}`, () => this.request<any>(path));
   }
-  
+
   async getQuickStart(userId: string) {
-    return this.request<any>(`/home/quickstart/${userId}`);
+    const path = `/home/quickstart/${userId}`;
+    return this.coalesceInflight<any>(`GET ${path}`, () => this.request<any>(path));
   }
   
   // Sessions API
@@ -307,29 +314,50 @@ class ApiClient {
     });
   }
 
-  // Auth API
-  // Task #143 — `getMe` 의 in-flight Promise 공유 가드.
-  // 부트 useEffect, `noilink-native-session` 이벤트 핸들러, 다른 화면의
-  // 재확인 등 여러 트리거가 거의 동시에 `getMe()` 를 부르면 같은 사용자
-  // 정보 조회가 그대로 N 회 서버에 흐른다(Task #142 가 부트 useEffect 자체의
-  // 중복은 잠갔지만, 부트 ↔ 다른 트리거의 경합은 여전히 열려 있다).
-  // 동일 시점의 호출은 같은 Promise 를 그대로 돌려주어 네트워크 요청을 1회로
-  // 합치되, 호출이 settle 된 다음 호출자는 새 요청을 만들 수 있어야 하므로
-  // 정확히 자기 자신일 때만 슬롯을 비운다(이미 다른 새 호출이 들어와
-  // 슬롯을 차지하고 있다면 그쪽을 그대로 둔다).
-  private inflightGetMe: Promise<ApiResponse<User>> | null = null;
+  // Task #143 → Task #146 — in-flight Promise 공유 가드(coalescing) 헬퍼.
+  // 같은 키로 진행 중인 호출이 이미 있으면 그 Promise 를 그대로 돌려줘
+  // 동시 호출이 한 번의 네트워크 요청으로 합쳐진다(부트 useEffect,
+  // `noilink-native-session` 이벤트, 라우팅 전환, 포커스 복귀 트리거,
+  // Strict Mode 이중 마운트 등 여러 트리거가 거의 동시에 같은 조회를
+  // 부르는 경합 보호).
+  //
+  // 정책:
+  //  - settle 후엔 슬롯을 비워 다음 호출이 새 fetch 를 발사할 수 있게 한다
+  //    (가드가 stale 응답을 영구히 돌려주면 안 된다).
+  //  - 이미 다른 새 호출이 슬롯을 차지하고 있다면 그쪽을 그대로 둔다
+  //    (정확히 자기 자신일 때만 비운다).
+  //  - 실패해도 슬롯이 비워진다(error caching 회귀 방지) — `request()` 가
+  //    실패 응답을 resolve 로 돌려주는 정상 경로뿐 아니라 reject 경로도
+  //    `finally` 가 처리한다.
+  //  - 키는 호출자가 직접 설계 — 보통 `'GET ' + endpoint` 처럼 의미 있는
+  //    파라미터까지 포함한 형태로, 같은 의미의 호출만 합쳐지고 다른
+  //    파라미터(예: 다른 userId)는 영향이 없도록 한다.
+  private inflightRequests = new Map<string, Promise<ApiResponse<unknown>>>();
 
-  async getMe(): Promise<ApiResponse<User>> {
-    if (this.inflightGetMe) {
-      return this.inflightGetMe;
+  private coalesceInflight<T>(
+    key: string,
+    factory: () => Promise<ApiResponse<T>>,
+  ): Promise<ApiResponse<T>> {
+    const existing = this.inflightRequests.get(key);
+    if (existing) {
+      return existing as Promise<ApiResponse<T>>;
     }
-    const p = this.request<User>('/users/me').finally(() => {
-      if (this.inflightGetMe === p) {
-        this.inflightGetMe = null;
+    const p = factory().finally(() => {
+      if (this.inflightRequests.get(key) === p) {
+        this.inflightRequests.delete(key);
       }
-    });
-    this.inflightGetMe = p;
-    return p;
+    }) as Promise<ApiResponse<unknown>>;
+    this.inflightRequests.set(key, p);
+    return p as Promise<ApiResponse<T>>;
+  }
+
+  // Auth API
+  // Task #143 → Task #146 — `getMe` 도 위 `coalesceInflight` 헬퍼를 통해
+  // 표현(중복 코드 제거).
+  async getMe(): Promise<ApiResponse<User>> {
+    return this.coalesceInflight<User>('GET /users/me', () =>
+      this.request<User>('/users/me'),
+    );
   }
 
   async getOrganizationMembers(): Promise<ApiResponse<User[]>> {
