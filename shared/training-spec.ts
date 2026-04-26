@@ -4,7 +4,7 @@
  */
 
 import type { Level, LogicColor, HardwareColor, PhaseType, TrainingMode } from './types.js';
-import { COLOR_CODE, type ColorCode } from './ble-protocol.js';
+import { BPM_MAX, BPM_MIN, COLOR_CODE, type ColorCode } from './ble-protocol.js';
 
 // =============================================================================
 // 0. 측정 지표 (Metrics & Data) — 용어 정의
@@ -227,9 +227,6 @@ export interface SessionSuggestionResult {
   levelDelta: number;
   reason: string;
 }
-
-const BPM_MIN = 60;
-const BPM_MAX = 200;
 
 /**
  * 직전 세션 점수 기반 BPM·레벨 제안 (80↑: BPM+5, L+1 / 60↓: BPM-5)
