@@ -451,6 +451,11 @@ export default function TrainingSessionPlay() {
   // 일시적 네트워크 끊김에 데이터를 잃지 않도록 자동 백오프 재시도를 한다.
   // 그래도 실패하면 화면에 안내 + "저장 재시도" 버튼을 노출한다.
   // 사용자가 그 상태로 화면을 떠나면 leaveToList() 가 큐에 적재한다(다음 진입 시 백그라운드 재전송).
+  // 부분 결과 진행률 — handlePartialConfirm 에서 set 한 다음 runSubmit/leaveToList 가
+  // 읽어 서버 meta + navigate state + pending 큐 모두에 동일 값을 전파한다.
+  // 정상 완료 흐름에서는 항상 undefined 로 남아 기존 동작과 동일하다.
+  const partialProgressPctRef = useRef<number | undefined>(undefined);
+
   const runSubmit = useCallback(async (metrics: Omit<RawMetrics, 'sessionId' | 'userId'> | null) => {
     if (!state || submitLock.current) return;
     // 백그라운드로 중단된 세션은 (사용자가 부분 결과 저장을 선택해 aborted 게이트를
@@ -460,6 +465,7 @@ export default function TrainingSessionPlay() {
     submitLock.current = true;
     setSubmitting(true);
     setErr(null);
+    const partialPct = partialProgressPctRef.current;
     const res = await submitCompletedTrainingWithRetry(
       {
         userId: state.userId,
@@ -472,6 +478,7 @@ export default function TrainingSessionPlay() {
         tapCount,
         engineMetrics: metrics ?? undefined,
         existingSessionId: partialSessionIdRef.current,
+        partialProgressPct: partialPct,
       },
       {
         onAttempt: ({ result }) => {
@@ -504,6 +511,10 @@ export default function TrainingSessionPlay() {
         // 결과 화면 안내 카드의 타임라인/평균/최장 끊김 표시용 (Task #36).
         // segments 가 없는 과거/축약 페이로드와의 호환을 위해 빈 배열로 폴백.
         recoverySegments: metrics?.recovery?.segments ?? [],
+        // 부분 결과 안내(Task #23): 결과 화면이 "부분 결과 · X%" 배지를 띄울 수
+        // 있게 진행률을 함께 넘긴다. 정상 완료 흐름에서는 undefined 로 남는다.
+        isPartial: typeof partialPct === 'number',
+        partialProgressPct: partialPct,
       },
     });
   }, [state, totalSec, tapCount, navigate]);
@@ -525,9 +536,14 @@ export default function TrainingSessionPlay() {
     // 모달 isOpen 가드(engineMetrics !== null)와 이 가드를 모두 두어 이중 안전망.
     if (!engineMetrics) return;
     setPartialFinishOpen(false);
+    // 이 시점부터의 제출은 부분 결과로 분류된다 — 진행률을 ref 에 기록해
+    // runSubmit(서버 meta·navigate state) 과 leaveToList(pending 큐) 가 모두
+    // 같은 값을 사용하도록 한다. setState 가 아닌 ref 를 쓰는 이유는 직후
+    // runSubmit 호출이 이전 렌더의 클로저로 실행돼도 즉시 보이게 하기 위함.
+    partialProgressPctRef.current = partialProgressPct;
     aborted.current = false;
     void runSubmit(engineMetrics);
-  }, [engineMetrics, runSubmit]);
+  }, [engineMetrics, partialProgressPct, runSubmit]);
   const handlePartialDismiss = useCallback(() => {
     setPartialFinishOpen(false);
     navigate('/training', {
@@ -566,6 +582,9 @@ export default function TrainingSessionPlay() {
             isComposite: state.isComposite,
             tapCount,
             engineMetrics: engineMetrics ?? undefined,
+            // 부분 결과로 동의된 세션이면 진행률을 큐에도 보존해, 다음 백그라운드
+            // drain 이 createSession 단계에서 동일한 meta.partial 을 영속화하도록 한다.
+            partialProgressPct: partialProgressPctRef.current,
           },
           attempts: accumulatedAttemptsRef.current,
           partialSessionId: partialSessionIdRef.current,

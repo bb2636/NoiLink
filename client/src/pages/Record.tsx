@@ -8,7 +8,7 @@ import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
 import type { Session, TrainingMode } from '@noilink/shared';
-import { TRAINING_CATALOG } from '@noilink/shared';
+import { TRAINING_CATALOG, getSessionPartialProgressPct } from '@noilink/shared';
 
 function modeTitle(mode: TrainingMode): string {
   const hit = TRAINING_CATALOG.find((e) => e.apiMode === mode);
@@ -94,7 +94,12 @@ export default function Record() {
           </div>
         ) : (
           <ul className="space-y-3">
-            {sessions.map((s) => (
+            {sessions.map((s) => {
+              // 부분 결과 배지(Task #23) — 백그라운드로 일찍 끊겼지만 진행률이 임계
+              // 이상이라 사용자가 저장에 동의한 세션. 점수가 정상 완료 세션보다
+              // 낮게 보일 수 있어, 같은 줄에 "부분 82%" 칩을 노출해 맥락을 함께 전한다.
+              const partialPct = getSessionPartialProgressPct(s);
+              return (
               <motion.li
                 key={s.id}
                 layout
@@ -120,6 +125,19 @@ export default function Record() {
                           유효 제외
                         </span>
                       ) : null}
+                      {partialPct !== undefined ? (
+                        <span
+                          className="px-2 py-0.5 rounded-full font-semibold"
+                          style={{
+                            backgroundColor: 'rgba(155,127,230,0.15)',
+                            color: '#C9B8FF',
+                            border: '1px solid rgba(155,127,230,0.45)',
+                          }}
+                          aria-label={`부분 결과 ${partialPct} 퍼센트 진행`}
+                        >
+                          부분 결과 · {partialPct}%
+                        </span>
+                      ) : null}
                       <span>BPM {s.bpm}</span>
                       <span>Lv {s.level}</span>
                       <span>{Math.round((s.duration || 0) / 1000)}초</span>
@@ -138,7 +156,8 @@ export default function Record() {
                   </div>
                 </div>
               </motion.li>
-            ))}
+              );
+            })}
           </ul>
         )}
 

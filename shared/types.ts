@@ -145,6 +145,28 @@ export interface PhaseMeta {
   rhythmGrades?: Record<RhythmGrade, number>; // 판정 등급별 횟수
 }
 
+/**
+ * 부분 결과로 저장된 세션 메타.
+ *
+ * 백그라운드 진입 등으로 트레이닝이 일찍 끊겼지만 진행률이 임계값(80%) 이상이라
+ * "부분 결과 저장" 동의를 받은 세션에만 기록된다. 결과 화면과 히스토리 목록이
+ * 정상 완료 세션과 시각적으로 구분(예: "부분 결과 · 82%")하는 데 사용한다.
+ */
+export interface SessionPartialMeta {
+  /** 백그라운드로 끊긴 시점의 진행률(정수 %). 0~100. */
+  progressPct: number;
+}
+
+/**
+ * 세션 확장 메타 — phases 외 부가 정보.
+ *
+ * 알려진 키는 타입을 보장하고, 시드/실험 등 자유 메타는 그대로 통과시키기 위해
+ * Record<string, unknown> 으로 확장한다.
+ */
+export interface SessionMeta extends Record<string, unknown> {
+  partial?: SessionPartialMeta;
+}
+
 /** 트레이닝 세션 */
 export interface Session {
   id: string;                          // 고유 ID
@@ -158,8 +180,23 @@ export interface Session {
   isValid: boolean;                    // 유효한 세션 여부 (300초 완주 등)
   phases: PhaseMeta[];                 // Phase 메타데이터 배열
   /** 확장 메타(JSON), phases 외 부가 정보 */
-  meta?: Record<string, unknown>;
+  meta?: SessionMeta;
   createdAt: string;                   // 생성일시 (ISO 8601)
+}
+
+/**
+ * 세션 메타에서 부분 결과 진행률을 안전하게 꺼낸다.
+ * 메타가 없거나 partial 키가 없으면 undefined.
+ * 0~100 정수가 아니면(저장 손상 등) undefined 로 취급해 호출 측이 배지를 숨긴다.
+ */
+export function getSessionPartialProgressPct(
+  session: Pick<Session, 'meta'> | null | undefined,
+): number | undefined {
+  const partial = session?.meta?.partial;
+  if (!partial) return undefined;
+  const pct = partial.progressPct;
+  if (typeof pct !== 'number' || !Number.isFinite(pct)) return undefined;
+  return Math.max(0, Math.min(100, Math.round(pct)));
 }
 
 // ============================================================================

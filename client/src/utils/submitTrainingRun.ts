@@ -44,6 +44,13 @@ export interface SubmitCompletedTrainingInput {
    * 세션 중복 생성을 피하고 metrics 단계만 재시도한다.
    */
   existingSessionId?: string;
+  /**
+   * 부분 결과로 저장되는 세션의 진행률(정수 %, 0~100).
+   * 값이 있으면 createSession 시 `meta.partial.progressPct` 로 영속화돼,
+   * 결과 화면·히스토리 목록이 정상 완료 세션과 시각적으로 구분할 수 있다.
+   * 정상 완료(전체 진행) 세션에서는 undefined.
+   */
+  partialProgressPct?: number;
 }
 
 /**
@@ -75,6 +82,20 @@ export async function submitCompletedTraining(
       quality: q,
     });
 
+    // 부분 결과 세션은 meta.partial 로 진행률을 함께 영속화한다(결과·기록 화면 배지 노출용).
+    // 정상 완료 세션은 meta 를 보내지 않아 기존 응답과 동일하게 유지된다.
+    const partialMeta =
+      typeof input.partialProgressPct === 'number'
+        ? {
+            partial: {
+              progressPct: Math.max(
+                0,
+                Math.min(100, Math.round(input.partialProgressPct)),
+              ),
+            },
+          }
+        : undefined;
+
     const sessionRes = await api.createSession({
       userId: input.userId,
       mode: input.mode,
@@ -84,6 +105,7 @@ export async function submitCompletedTraining(
       isComposite: input.mode === 'COMPOSITE' || input.isComposite,
       isValid: true,
       phases,
+      ...(partialMeta ? { meta: partialMeta } : {}),
     });
 
     if (!sessionRes.success || !sessionRes.data?.id) {

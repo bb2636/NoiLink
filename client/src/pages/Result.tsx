@@ -28,6 +28,14 @@ export type TrainingResultState = {
    * 보여주는 데 사용. 누락(과거 세션)이면 카드는 요약만 노출하고 목록은 숨긴다.
    */
   recoverySegments?: { startedAt: number; durationMs: number }[];
+  /**
+   * 부분 결과로 저장된 세션인지(Task #23).
+   * true 면 점수 원 위에 "부분 결과 · {progressPct}%" 배지를 노출해
+   * 정상 완료 세션과 시각적으로 구분한다. 정상 완료에서는 false/undefined.
+   */
+  isPartial?: boolean;
+  /** 백그라운드로 끊긴 시점의 진행률(정수 %, 0~100). isPartial 일 때만 사용. */
+  partialProgressPct?: number;
 };
 
 /** 회복이 N회 이상 발생하면 환경 점검 안내를 추가로 노출 (Task #36). */
@@ -77,6 +85,17 @@ export default function Result() {
   }, [recoverySegments]);
 
   const showEnvCheck = recoveryWindows >= RECOVERY_ENV_CHECK_THRESHOLD;
+
+  // 부분 결과 안내(Task #23): 백그라운드로 끊겨 부분 진행률만 저장된 세션은
+  // 점수 원 위에 "부분 결과 · X%" 배지를 노출해, 사용자가 점수가 낮게 보여도
+  // "왜 이러지?" 가 아니라 "아, 일찍 끊긴 세션이구나" 로 맥락을 이해하게 한다.
+  // 진행률은 0~100 정수로 정규화 — 잘못된 값(NaN/음수/100 초과)은 안전하게 보정.
+  const isPartial = state?.isPartial === true;
+  const rawPartialPct = state?.partialProgressPct;
+  const partialProgressPct =
+    isPartial && typeof rawPartialPct === 'number' && Number.isFinite(rawPartialPct)
+      ? Math.max(0, Math.min(100, Math.round(rawPartialPct)))
+      : undefined;
 
   // 반짝이 입자 (랜덤 시드 안정화)
   const particles = useMemo(
@@ -190,6 +209,37 @@ export default function Result() {
             <span className="text-white"> 님</span>
             <span className="ml-1">👏</span>
           </motion.h2>
+
+          {/* 부분 결과 배지(Task #23) — 점수 원 바로 위에 노출.
+              "수고했어요" 헤더 톤(축하)과 점수(낮을 수 있음) 사이에 배지를 끼워
+              사용자가 점수를 보기 직전에 맥락을 인지하게 한다. 색상은 회복 배너와
+              겹치지 않게 보라/연보라 톤을 써서 "오류" 가 아니라 "안내" 임을 전한다. */}
+          {isPartial && partialProgressPct !== undefined && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.18 }}
+              role="status"
+              aria-label={`부분 결과 ${partialProgressPct} 퍼센트 진행`}
+              className="flex justify-center mb-3"
+            >
+              <span
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold"
+                style={{
+                  backgroundColor: 'rgba(155,127,230,0.15)',
+                  color: '#C9B8FF',
+                  border: '1px solid rgba(155,127,230,0.45)',
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  className="inline-block w-1.5 h-1.5 rounded-full"
+                  style={{ backgroundColor: '#C9B8FF' }}
+                />
+                부분 결과 · {partialProgressPct}% 진행
+              </span>
+            </motion.div>
+          )}
 
           {/* 큰 점수 원 */}
           <motion.div

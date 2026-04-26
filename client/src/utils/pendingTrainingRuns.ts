@@ -39,6 +39,12 @@ export interface PendingTrainingRunInput {
   tapCount: number;
   /** 게임 엔진이 산출한 실제 원시 메트릭(있으면 우선). */
   engineMetrics?: Omit<RawMetrics, 'sessionId' | 'userId'>;
+  /**
+   * 부분 결과로 저장되는 세션의 진행률(정수 %, 0~100).
+   * 큐에서 다음 백그라운드 drain 으로 createSession 이 실행될 때 함께 전달돼,
+   * 결과·기록 화면이 부분 결과 배지를 표시할 수 있게 한다.
+   */
+  partialProgressPct?: number;
 }
 
 export interface PendingTrainingRun {

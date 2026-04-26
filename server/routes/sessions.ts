@@ -5,11 +5,40 @@
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
-import type { Session, PhaseMeta, TrainingMode, Level, MetricsScore, User } from '@noilink/shared';
+import type { Session, SessionMeta, PhaseMeta, TrainingMode, Level, MetricsScore, User } from '@noilink/shared';
 import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
 import { userCanActOnTargetUserId, canAccessOrganizationResource } from '../utils/session-user-policy.js';
 
 const router = Router();
+
+/**
+ * 세션 메타를 저장 전 정규화한다.
+ *  - meta.partial.progressPct: 유한한 숫자만 받아 0~100 정수로 클램프.
+ *    손상값(NaN/Infinity/문자열/객체/null)은 partial 키 자체를 제거해
+ *    UI 가 "부분 결과 · NaN%" 같은 어색한 표기를 만들지 않게 한다.
+ *  - 그 외 미상의 키는 그대로 통과시켜 시드/실험 메타 호환성 유지.
+ *
+ * 정규화 후 남는 키가 하나도 없으면 undefined 를 반환해 호출 측이 meta 자체를
+ * 세션에서 빼버릴 수 있게 한다.
+ */
+function sanitizeSessionMeta(raw: Record<string, unknown>): SessionMeta | undefined {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (k === 'partial') {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const pct = (v as { progressPct?: unknown }).progressPct;
+        if (typeof pct === 'number' && Number.isFinite(pct)) {
+          out.partial = {
+            progressPct: Math.max(0, Math.min(100, Math.round(pct))),
+          };
+        }
+      }
+      continue;
+    }
+    out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? (out as SessionMeta) : undefined;
+}
 
 /**
  * POST /api/sessions
@@ -35,6 +64,7 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
       isComposite,
       isValid,
       phases,
+      meta,
     } = req.body;
     
     if (!userId || !mode || !bpm || !level) {
@@ -52,6 +82,17 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
       });
     }
     
+    // 클라이언트가 meta(예: 부분 결과 진행률)를 함께 보내면 보존하되, 알려진
+    // 키는 서버 단에서 정규화해 저장 데이터의 신뢰도를 보장한다.
+    //  - meta 자체가 객체가 아니면(잘못된 페이로드) 통째로 무시.
+    //  - meta.partial.progressPct 는 유한한 숫자만 받아 0~100 정수로 클램프한다.
+    //    (NaN/Infinity/문자열/음수/100 초과 같은 손상값은 partial 키 자체를 제거)
+    //  - 그 외 미상의 키는 그대로 통과시켜 시드/실험 메타 호환성 유지.
+    const sanitizedMeta =
+      meta && typeof meta === 'object' && !Array.isArray(meta)
+        ? sanitizeSessionMeta(meta as Record<string, unknown>)
+        : undefined;
+
     const session: Session = {
       id: `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       userId,
@@ -63,6 +104,7 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
       isComposite: Boolean(isComposite),
       isValid: isValid !== undefined ? Boolean(isValid) : true,
       phases: (phases || []) as PhaseMeta[],
+      ...(sanitizedMeta ? { meta: sanitizedMeta } : {}),
       createdAt: new Date().toISOString(),
     };
     

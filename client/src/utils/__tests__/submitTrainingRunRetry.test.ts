@@ -158,6 +158,35 @@ describe('submitCompletedTrainingWithRetry', () => {
     expect(mockedApi.calculateMetrics).not.toHaveBeenCalled();
   });
 
+  it('partialProgressPct 가 주어지면 createSession 페이로드에 meta.partial.progressPct 가 포함된다 (Task #23)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-partial' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 70 } });
+
+    await submitCompletedTrainingWithRetry(baseInput({ partialProgressPct: 82.4 }), {
+      backoffsMs: [0, 0],
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(mockedApi.createSession).toHaveBeenCalledTimes(1);
+    const payload = mockedApi.createSession.mock.calls[0][0];
+    // 정수 % 로 정규화돼 영속화돼야 한다 — 결과·기록 화면이 같은 값을 그대로 노출.
+    expect(payload.meta).toEqual({ partial: { progressPct: 82 } });
+  });
+
+  it('partialProgressPct 가 없으면 createSession 페이로드에 meta 가 들어가지 않는다 (정상 완료 회귀 보호)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-full' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 70 } });
+
+    await submitCompletedTrainingWithRetry(baseInput(), {
+      backoffsMs: [0, 0],
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(mockedApi.createSession).toHaveBeenCalledTimes(1);
+    const payload = mockedApi.createSession.mock.calls[0][0];
+    expect(payload.meta).toBeUndefined();
+  });
+
   it('onAttempt 가 매 시도 결과와 함께 호출된다 (부분 진행분 외부 동기화 통로)', async () => {
     mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-on' } });
     mockedApi.calculateMetrics
