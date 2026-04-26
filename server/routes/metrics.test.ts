@@ -504,3 +504,184 @@ describe('POST /api/metrics/ble-abort — 운영 텔레메트리', () => {
     expect(res.body.recorded).toBe(false);
   });
 });
+
+// ───────────────────────────────────────────────────────────
+// Task #114 — `GET /api/metrics/session/:sessionId/previous-score`
+//
+// 결과 화면 재진입 시 직전 점수를 채우기 위한 세션 단건 직전 점수 조회 엔드포인트.
+// 회귀 보호 목적:
+//   - 사용자가 50회 이상 트레이닝한 뒤 옛날 세션을 다시 열어도 직전 점수를
+//     정확히 돌려준다 (페이징 한계에 의존하지 않는다).
+//   - 직전 세션이 없으면 previousScore: null 로 회신해 클라이언트가 가짜 비교
+//     카드를 그리지 않게 한다.
+//   - 본인 세션이 아니면 403, 모르는 세션이면 404, 미인증은 401.
+// ───────────────────────────────────────────────────────────
+describe('GET /api/metrics/session/:sessionId/previous-score (Task #114)', () => {
+  const SESSIONS: Session[] = [
+    {
+      id: 'sess-old-1',
+      userId: 'u1',
+      mode: 'FOCUS',
+      bpm: 60,
+      level: 1,
+      duration: 30_000,
+      score: 50,
+      isComposite: false,
+      isValid: true,
+      phases: [],
+      createdAt: '2025-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'sess-old-2',
+      userId: 'u1',
+      mode: 'FOCUS',
+      bpm: 60,
+      level: 1,
+      duration: 30_000,
+      score: 60,
+      isComposite: false,
+      isValid: true,
+      phases: [],
+      createdAt: '2025-01-02T00:00:00.000Z',
+    },
+    {
+      // 점수 미산출(자유 트레이닝 등) — 직전 점수 후보에서 빠져야 한다.
+      id: 'sess-no-score',
+      userId: 'u1',
+      mode: 'FREE',
+      bpm: 60,
+      level: 1,
+      duration: 30_000,
+      score: undefined,
+      isComposite: false,
+      isValid: true,
+      phases: [],
+      createdAt: '2025-01-03T00:00:00.000Z',
+    },
+    {
+      // 다른 사용자 세션 — 사용자 격리 검증용.
+      id: 'sess-other-user',
+      userId: 'u2',
+      mode: 'FOCUS',
+      bpm: 60,
+      level: 1,
+      duration: 30_000,
+      score: 99,
+      isComposite: false,
+      isValid: true,
+      phases: [],
+      createdAt: '2025-01-03T12:00:00.000Z',
+    },
+    {
+      id: 'sess-current',
+      userId: 'u1',
+      mode: 'FOCUS',
+      bpm: 60,
+      level: 1,
+      duration: 30_000,
+      score: 80,
+      isComposite: false,
+      isValid: true,
+      phases: [],
+      createdAt: '2025-01-04T00:00:00.000Z',
+    },
+  ];
+
+  beforeEach(() => {
+    store.users = [ACTOR_USER, { ...ACTOR_USER, id: 'u2', username: 'other' }];
+    store.sessions = SESSIONS;
+    currentActor.user = ACTOR_USER;
+  });
+
+  it('현재 세션 직전 시점에서 점수가 있는 가장 최신 세션의 점수를 돌려준다', async () => {
+    const app = buildApp();
+
+    const res = await request(app).get('/api/metrics/session/sess-current/previous-score');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true, data: { previousScore: 60 } });
+  });
+
+  it('점수 미산출 세션(score=undefined)은 후보에서 제외되고 그 이전의 점수 있는 세션이 채택된다', async () => {
+    // sess-no-score(2025-01-03) 가 가장 가깝지만 score 가 없으므로 sess-old-2(2025-01-02, score=60) 가 채택돼야 한다.
+    const app = buildApp();
+
+    const res = await request(app).get('/api/metrics/session/sess-current/previous-score');
+
+    expect(res.body.data.previousScore).toBe(60);
+  });
+
+  it('다른 사용자의 세션은 직전 점수 후보에서 제외된다 (사용자 격리)', async () => {
+    // sess-other-user(2025-01-03 12:00, score=99) 는 다른 사용자라 후보에서 빠진다.
+    const app = buildApp();
+
+    const res = await request(app).get('/api/metrics/session/sess-current/previous-score');
+
+    expect(res.body.data.previousScore).not.toBe(99);
+    expect(res.body.data.previousScore).toBe(60);
+  });
+
+  it('첫 세션(과거에 점수 있는 세션이 하나도 없음) 이면 previousScore: null', async () => {
+    store.sessions = [SESSIONS[0]]; // sess-old-1 하나만 — 자기 자신 외 후보 없음.
+    const app = buildApp();
+
+    const res = await request(app).get('/api/metrics/session/sess-old-1/previous-score');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true, data: { previousScore: null } });
+  });
+
+  it('세션 이력이 50건을 넘어 옛날 세션을 다시 열어도 직전 점수를 정확히 돌려준다 (페이징 한계 제거)', async () => {
+    // 페이징 의존 클라이언트 구현이 회귀하지 않도록 60건 이력에서 가장 옛날 세션을 조회한다.
+    const many: Session[] = Array.from({ length: 60 }, (_, i) => ({
+      id: `sess-${i}`,
+      userId: 'u1',
+      mode: 'FOCUS',
+      bpm: 60,
+      level: 1,
+      duration: 30_000,
+      score: 30 + (i % 50),
+      isComposite: false,
+      isValid: true,
+      phases: [],
+      createdAt: new Date(2025, 0, 1 + i).toISOString(),
+    }));
+    store.sessions = many;
+    // 가장 옛날 세션(sess-0) 직전엔 아무 세션도 없어야 한다 (첫 세션).
+    const first = await request(buildApp()).get(
+      '/api/metrics/session/sess-0/previous-score',
+    );
+    expect(first.body.data.previousScore).toBe(null);
+
+    // 두 번째 세션(sess-1) 의 직전은 sess-0 — 점수=30.
+    const second = await request(buildApp()).get(
+      '/api/metrics/session/sess-1/previous-score',
+    );
+    expect(second.body.data.previousScore).toBe(30);
+  });
+
+  it('미인증 요청은 401', async () => {
+    currentActor.user = null;
+    const app = buildApp();
+
+    const res = await request(app).get('/api/metrics/session/sess-current/previous-score');
+
+    expect(res.status).toBe(401);
+  });
+
+  it('모르는 sessionId 는 404', async () => {
+    const app = buildApp();
+
+    const res = await request(app).get('/api/metrics/session/sess-unknown/previous-score');
+
+    expect(res.status).toBe(404);
+  });
+
+  it('타인의 세션을 조회하려 하면 403', async () => {
+    const app = buildApp();
+
+    const res = await request(app).get('/api/metrics/session/sess-other-user/previous-score');
+
+    expect(res.status).toBe(403);
+  });
+});

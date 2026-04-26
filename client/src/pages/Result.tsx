@@ -16,7 +16,6 @@ import {
   type RecoveryRawMetrics,
   type TrainingMode,
 } from '@noilink/shared';
-import type { Session } from '@noilink/shared';
 import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
@@ -118,47 +117,41 @@ export default function Result() {
     };
   }, [needsServerFetch, sessionIdForFetch]);
 
-  // 재진입 시 직전 점수 채우기 (Task #95):
+  // 재진입 시 직전 점수 채우기 (Task #95 → Task #114):
   // navigate state 가 displayScore 를 이미 들고 있는 정상 완료 흐름에선 추가
-  // 호출을 하지 않는다. 재진입 흐름에서만 사용자의 세션 이력을 한 번 받아와,
-  // 현재 세션 직전의 점수 있는 세션을 직전 점수로 사용한다. 이력에 직전 세션이
-  // 없으면(첫 세션) null 로 남기고, 비교 카드는 숨긴다.
+  // 호출을 하지 않는다. 재진입 흐름에서만 세션 단건 직전 점수 엔드포인트
+  // (`GET /metrics/session/:sessionId/previous-score`) 를 호출해 받은 값을
+  // 그대로 채운다. 클라이언트가 페이징·정렬을 다루지 않으므로 사용자가 50회
+  // 이상 트레이닝한 뒤 옛날 세션을 다시 열어도 직전 점수가 빠지지 않는다.
+  // 직전 세션이 없으면(첫 세션) 응답이 `previousScore: null` → 비교 카드는 숨긴다.
   const [serverPreviousScore, setServerPreviousScore] = useState<number | null>(null);
-  const userId = user?.id;
   const needsPreviousScoreFetch =
     Boolean(sessionIdForFetch) &&
     !stateProvidedDisplayScore &&
-    state?.previousScore == null &&
-    Boolean(userId);
+    state?.previousScore == null;
   useEffect(() => {
-    if (!needsPreviousScoreFetch || !sessionIdForFetch || !userId) return;
-    // sessionId/userId 가 바뀌어 새로 조회가 필요해지면 이전 결과를 비워
+    if (!needsPreviousScoreFetch || !sessionIdForFetch) return;
+    // sessionId 가 바뀌어 새로 조회가 필요해지면 이전 결과를 비워
     // 다른 세션의 직전 점수가 잠깐 노출되는 것을 막는다.
     setServerPreviousScore(null);
     let cancelled = false;
     (async () => {
       const res = await api
-        .get<Session[]>(`/sessions/user/${userId}?limit=50`)
+        .get<{ previousScore: number | null }>(
+          `/metrics/session/${sessionIdForFetch}/previous-score`,
+        )
         .catch(() => null);
       if (cancelled) return;
       if (!res || !res.success || !res.data) return;
-      // 응답은 createdAt desc 정렬. 현재 세션을 찾아 그 다음(과거) 항목 중
-      // score 가 있는 첫 세션을 직전 점수로 채택한다.
-      const list = res.data;
-      const idx = list.findIndex((s) => s.id === sessionIdForFetch);
-      if (idx === -1) return;
-      for (let i = idx + 1; i < list.length; i++) {
-        const s = list[i];
-        if (typeof s.score === 'number') {
-          setServerPreviousScore(s.score);
-          break;
-        }
+      const prev = res.data.previousScore;
+      if (typeof prev === 'number') {
+        setServerPreviousScore(prev);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [needsPreviousScoreFetch, sessionIdForFetch, userId]);
+  }, [needsPreviousScoreFetch, sessionIdForFetch]);
 
   // 서버 score 로부터 종합 점수(6대 지표 평균) 산출. 정의돼 있는 항목만
   // 평균에 포함한다 — server/routes/metrics.ts 의 세션 점수 갱신 로직과 동일.
