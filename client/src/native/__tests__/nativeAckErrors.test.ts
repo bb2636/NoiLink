@@ -296,7 +296,11 @@ describe('createAckErrorCoalescer', () => {
 });
 
 describe('subscribeAckErrorBanner', () => {
-  let sub: { unsubscribe(): void; notifyDismissed(): void } | null = null;
+  let sub: {
+    unsubscribe(): void;
+    notifyDismissed(): void;
+    notifyBannerTimeout(): void;
+  } | null = null;
   afterEach(() => {
     if (sub) {
       sub.unsubscribe();
@@ -518,7 +522,11 @@ describe('subscribeAckErrorBanner', () => {
  *  6. 새 burst 가 시작되면 카운터/시각이 1 / 0ms 부터 다시 누적된다.
  */
 describe('subscribeAckErrorBanner — burst 텔레메트리 (Task #116)', () => {
-  let sub: { unsubscribe(): void; notifyDismissed(): void } | null = null;
+  let sub: {
+    unsubscribe(): void;
+    notifyDismissed(): void;
+    notifyBannerTimeout(): void;
+  } | null = null;
   afterEach(() => {
     if (sub) {
       sub.unsubscribe();
@@ -613,6 +621,61 @@ describe('subscribeAckErrorBanner — burst 텔레메트리 (Task #116)', () => 
     // 보류 중이던 자동 닫힘 타이머가 취소되어 큐가 비어 있어야 한다.
     expect(timer.pending()).toBe(0);
     timer.advance(60_000);
+    expect(onTelemetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('notifyBannerTimeout() 는 banner-timeout 한 건 보고 + 보류 중 자동 닫힘 취소 (Task #129)', () => {
+    // SuccessBanner 의 자체 duration 타이머가 발화한 경로 — 사용자 행동이 아니므로
+    // user-dismiss 와는 별도 라벨('banner-timeout') 로 보고되어야 한다. 그래야
+    // 운영 데이터에서 "진짜 사용자 닫힘" 비율을 단독으로 읽을 수 있다.
+    const setBanner = vi.fn();
+    const onTelemetry = vi.fn();
+    const timer = createFakeTimer();
+    sub = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 5000,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+      onTelemetry,
+    });
+
+    dispatchReject('r-0');
+    timer.advance(50);
+    dispatchReject('r-1');
+    timer.advance(2000);
+    sub.notifyBannerTimeout();
+
+    expect(onTelemetry).toHaveBeenCalledTimes(1);
+    expect(onTelemetry.mock.calls[0][0]).toMatchObject({
+      reason: 'banner-timeout',
+      burstCount: 2,
+      burstDurationMs: 2050,
+    });
+    // 보류 중이던 자동 닫힘 타이머가 취소되어 큐가 비어 있어야 한다.
+    expect(timer.pending()).toBe(0);
+    timer.advance(60_000);
+    expect(onTelemetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('자동 닫힘이 먼저 발화한 뒤 notifyBannerTimeout() 이 와도 중복 보고되지 않는다 (Task #129)', () => {
+    const setBanner = vi.fn();
+    const onTelemetry = vi.fn();
+    const timer = createFakeTimer();
+    sub = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 5000,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+      onTelemetry,
+    });
+
+    dispatchReject('r-0');
+    timer.advance(5000); // 자동 닫힘 발화 → reason='auto-dismiss' 한 건.
+    expect(onTelemetry).toHaveBeenCalledTimes(1);
+
+    sub.notifyBannerTimeout(); // 활성 burst 가 없음 → 무시.
     expect(onTelemetry).toHaveBeenCalledTimes(1);
   });
 

@@ -246,14 +246,19 @@ export interface AckBannerSubscriptionOptions extends AckErrorCoalescerOptions {
  * `subscribeAckErrorBanner` 가 돌려주는 핸들. unsubscribe 외에 외부 닫힘 알림 API 를 함께 노출한다.
  *
  * - `unsubscribe()`: useEffect cleanup 에서 호출. 보류 중인 자동 닫힘 타이머도 함께 취소된다.
- * - `notifyDismissed()`: 페이지가 SuccessBanner.onClose 등으로 banner 를 외부에서 닫을 때
- *   호출한다. 자동 닫힘 타이머가 살아있다면 취소되고, burst 가 활성 중이면
- *   `user-dismiss` 텔레메트리가 한 건 흘러간다. 이미 자동 닫힘이 발화한 뒤 호출되면
- *   조용히 무시된다 (중복 보고 금지).
+ * - `notifyDismissed()`: **사용자가 거부 토스트의 X 닫기 버튼을 눌러** banner 가
+ *   닫혔음을 알릴 때 호출한다 (Task #129 부터 의미가 좁아짐). 자동 닫힘 타이머가
+ *   살아있다면 취소되고, burst 가 활성 중이면 `user-dismiss` 텔레메트리가 한 건
+ *   흘러간다. 이미 자동 닫힘/banner timeout 이 발화한 뒤 호출되면 조용히 무시된다.
+ * - `notifyBannerTimeout()`: SuccessBanner 의 자체 `duration` 타이머가 발화해 토스트가
+ *   사라진 경우에 호출한다 (Task #129). `notifyDismissed` 와 같은 정리 로직을 타지만
+ *   텔레메트리 라벨은 `banner-timeout` 으로 분리되어, 운영 데이터에서 "사용자가 진짜
+ *   닫은 비율" 과 "토스트 자체 timeout 으로 닫힌 비율" 을 따로 읽을 수 있게 한다.
  */
 export interface AckBannerSubscription {
   unsubscribe(): void;
   notifyDismissed(): void;
+  notifyBannerTimeout(): void;
 }
 
 /**
@@ -343,9 +348,17 @@ export function subscribeAckErrorBanner(
       off();
     },
     notifyDismissed: () => {
-      // 외부에서 banner 가 먼저 닫힘 — 보류 중인 자동 닫힘은 취소하고 한 건 보고.
+      // 사용자가 X 닫기 버튼으로 banner 를 직접 닫음 (Task #129) — 보류 중인 자동
+      // 닫힘은 취소하고 'user-dismiss' 한 건 보고. 활성 burst 가 없으면 조용히 무시.
       cancelDismiss();
       reportBurstClose('user-dismiss');
+    },
+    notifyBannerTimeout: () => {
+      // SuccessBanner 의 자체 duration 타이머 발화로 닫힘 (Task #129) — 사용자
+      // 행동이 아니므로 'banner-timeout' 라벨로 분리 보고하여 user-dismiss 가
+      // 진짜 사용자 행동만을 의미하도록 한다. 활성 burst 가 없으면 조용히 무시.
+      cancelDismiss();
+      reportBurstClose('banner-timeout');
     },
   };
 }

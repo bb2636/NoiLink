@@ -801,19 +801,21 @@ describe('POST /api/metrics/ack-banner — 운영 텔레메트리', () => {
     );
   });
 
-  it('user-dismiss / unmount 라벨도 동일하게 저장된다', async () => {
+  it('user-dismiss / banner-timeout / unmount 라벨도 동일하게 저장된다', async () => {
+    // Task #129 — banner-timeout 은 SuccessBanner 자체 duration 타이머 발화로
+    // 닫힌 burst 를 user-dismiss 와 분리하기 위한 라벨. 페이로드 모양은 동일.
     const app = buildApp();
 
-    for (const reason of ['user-dismiss', 'unmount'] as const) {
+    for (const reason of ['user-dismiss', 'banner-timeout', 'unmount'] as const) {
       const res = await request(app)
         .post('/api/metrics/ack-banner')
         .send({ reason, burstCount: 2, burstDurationMs: 1_200 });
       expect(res.status).toBe(202);
     }
 
-    expect(store.ackBannerEvents).toHaveLength(2);
+    expect(store.ackBannerEvents).toHaveLength(3);
     expect(store.ackBannerEvents.map((e: { reason: string }) => e.reason).sort()).toEqual(
-      ['unmount', 'user-dismiss'],
+      ['banner-timeout', 'unmount', 'user-dismiss'],
     );
   });
 

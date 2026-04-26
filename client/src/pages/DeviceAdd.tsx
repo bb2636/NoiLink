@@ -137,7 +137,9 @@ export default function DeviceAdd() {
   // ack(ok=false) 구독 — 브릿지가 거부한 사유를 사용자/QA 가 모두 읽을 수 있는
   // 토스트로 노출 (Task #77). 디버그 키도 함께 보여 버그 리포트 단서를 남긴다.
   // 같은 사유가 연속으로 쏟아지면 카운터로 묶어 보여 토스트 깜빡임을 막는다 (Task #106).
-  // 외부 닫힘은 ackBannerSubRef.notifyDismissed() 로 알려 운영 텔레메트리에 흘린다 (Task #116).
+  // 외부 닫힘은 ackBannerSubRef 의 두 콜백으로 분리해 흘린다 — X 닫기 버튼은
+  // notifyDismissed() (user-dismiss), SuccessBanner 자체 duration 타이머는
+  // notifyBannerTimeout() (banner-timeout). Task #116, Task #129 참조.
   const ackBannerSubRef = useRef<AckBannerSubscription | null>(null);
   useEffect(() => {
     const sub = subscribeAckErrorBanner(setAckErrorBanner);
@@ -306,14 +308,20 @@ export default function DeviceAdd() {
         )}
       </div>
 
-      {/* 브릿지 거부(ack ok=false) 토스트 — 한국어 안내 + 디버그 키 (Task #77) */}
+      {/* 브릿지 거부(ack ok=false) 토스트 — 한국어 안내 + 디버그 키 (Task #77).
+          Task #129: X 닫기 버튼을 노출하고 사용자 닫힘만 user-dismiss 로 흘린다. */}
       <SuccessBanner
         isOpen={!!ackErrorBanner}
         message={ackErrorBanner ?? ''}
         backgroundColor="#3a1212"
         textColor="#fca5a5"
         duration={5000}
+        showCloseButton
         onClose={() => {
+          ackBannerSubRef.current?.notifyBannerTimeout();
+          setAckErrorBanner(null);
+        }}
+        onUserClose={() => {
           ackBannerSubRef.current?.notifyDismissed();
           setAckErrorBanner(null);
         }}

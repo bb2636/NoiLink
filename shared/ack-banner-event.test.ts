@@ -22,8 +22,10 @@ describe('sanitizeAckBannerEventInput', () => {
     });
   });
 
-  it('알려진 모든 reason 라벨(auto-dismiss / user-dismiss / unmount)을 통과시킨다', () => {
-    for (const reason of ['auto-dismiss', 'user-dismiss', 'unmount'] as const) {
+  it('알려진 모든 reason 라벨(auto-dismiss / user-dismiss / banner-timeout / unmount)을 통과시킨다', () => {
+    // Task #129 — banner-timeout 은 SuccessBanner 자체 duration 타이머 발화로
+    // 닫힌 burst 를 user-dismiss 와 분리하기 위한 라벨.
+    for (const reason of ['auto-dismiss', 'user-dismiss', 'banner-timeout', 'unmount'] as const) {
       const r = sanitizeAckBannerEventInput({ reason, burstCount: 1, burstDurationMs: 0 });
       expect(r).not.toBeNull();
       expect(r!.reason).toBe(reason);

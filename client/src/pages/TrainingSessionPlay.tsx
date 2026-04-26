@@ -179,7 +179,9 @@ export default function TrainingSessionPlay() {
   // ack(ok=false) 구독 — 트레이닝 도중 BLE write/connect 가 거부되어도 화면은
   // 조용히 보일 수 있으므로, 한국어 안내 + 디버그 키를 짧은 토스트로 노출한다 (Task #77).
   // 같은 사유가 짧은 시간 안에 반복 거부되면 카운터만 올려 토스트 깜빡임을 막는다 (Task #106).
-  // 외부 닫힘은 ackBannerSubRef.notifyDismissed() 로 알려 자동/사용자 닫힘 비율 텔레메트리에 흘린다 (Task #116).
+  // 외부 닫힘은 ackBannerSubRef 의 두 콜백으로 분리해 흘린다 — X 닫기 버튼은
+  // notifyDismissed() (user-dismiss), SuccessBanner 자체 duration 타이머는
+  // notifyBannerTimeout() (banner-timeout). Task #116, Task #129 참조.
   const ackBannerSubRef = useRef<AckBannerSubscription | null>(null);
   useEffect(() => {
     const sub = subscribeAckErrorBanner(setAckErrorBanner);
@@ -891,14 +893,20 @@ export default function TrainingSessionPlay() {
       {/* 브릿지 거부(ack ok=false) 토스트 — 한국어 안내 + 디버그 키 (Task #77).
           BLE 단절 토스트와 동시에 뜰 가능성은 매우 낮지만, 같은 top-0 영역에
           렌더되므로 둘 중 늦게 마운트된 쪽이 위로 보일 수 있다. 둘 다 자동 닫힘이라
-          교차하는 시간은 짧고, 사용자는 어느 쪽이든 즉시 사유를 확인할 수 있다. */}
+          교차하는 시간은 짧고, 사용자는 어느 쪽이든 즉시 사유를 확인할 수 있다.
+          Task #129: X 닫기 버튼을 노출하고 사용자 닫힘만 user-dismiss 로 흘린다. */}
       <SuccessBanner
         isOpen={!!ackErrorBanner}
         message={ackErrorBanner ?? ''}
         backgroundColor="#3a1212"
         textColor="#fca5a5"
         duration={5000}
+        showCloseButton
         onClose={() => {
+          ackBannerSubRef.current?.notifyBannerTimeout();
+          setAckErrorBanner(null);
+        }}
+        onUserClose={() => {
           ackBannerSubRef.current?.notifyDismissed();
           setAckErrorBanner(null);
         }}

@@ -24,7 +24,7 @@ fire-and-forget 으로 `POST /api/metrics/ack-banner` 에 보낸다 (`navigator.
 
 | 필드 | 타입 | 설명 |
 | --- | --- | --- |
-| `reason` | `auto-dismiss` \| `user-dismiss` \| `unmount` | burst 가 어떻게 끝났는지 (아래 표 참고) |
+| `reason` | `auto-dismiss` \| `user-dismiss` \| `banner-timeout` \| `unmount` | burst 가 어떻게 끝났는지 (아래 표 참고) |
 | `burstCount` | int ≥ 1 | burst 안에 누적된 거부 횟수 (단발도 1) |
 | `burstDurationMs` | int ≥ 0 | 첫 거부부터 닫힘 시점까지의 경과 시간(ms) |
 
@@ -33,10 +33,15 @@ fire-and-forget 으로 `POST /api/metrics/ack-banner` 에 보낸다 (`navigator.
 
 ### `reason` 라벨 의미
 
+Task #129 에서 `user-dismiss` 의 의미를 좁히고 `banner-timeout` 을 분리했다 — 그
+이전에는 `SuccessBanner` 의 자체 5초 timeout 도 `user-dismiss` 로 들어와 "진짜
+사용자 닫힘 비율" 의 해상도가 떨어졌다.
+
 | 값 | 의미 | 운영 해석 |
 | --- | --- | --- |
 | `auto-dismiss` | `subscribeAckErrorBanner` 의 자동 닫힘 타이머가 끝까지 살아남아 발화 | 토스트가 "조용히" 사라진 케이스. 비율이 높을수록 사용자는 토스트를 적극적으로 닫지 않고 흘려보낸다는 신호. |
-| `user-dismiss` | 페이지가 `notifyDismissed()` 로 banner 가 외부에서 닫혔음을 알림 (현재는 `SuccessBanner` 의 `onClose` 가 트리거) | 사용자가 토스트를 읽고 닫았거나 SuccessBanner 의 자체 timeout 이 먼저 발화한 케이스. |
+| `user-dismiss` | **사용자가 거부 토스트의 X 닫기 버튼을 눌러** banner 가 닫힘 (Task #129 부터). 페이지가 `notifyDismissed()` 를 호출. | 사용자가 토스트를 읽고 명시적으로 닫은 비율 — 진짜 사용자 행동. 임계값 튜닝의 직접 근거. |
+| `banner-timeout` | `SuccessBanner` 자체의 `duration` 타이머가 발화해 토스트가 사라짐 (Task #129). 페이지가 `notifyBannerTimeout()` 을 호출. | "사용자가 적극적으로 닫지는 않은" 비율 — `auto-dismiss` 와 합산해 읽으면 유사한 의미. `subscribeAckErrorBanner` 의 `autoDismissMs` 보다 짧은 `duration` 이 설정된 화면에서 주로 관측된다. |
 | `unmount` | 활성 burst 가 있는 상태에서 구독 해제(`unsubscribe()`) — 보통 화면 전환/언마운트 | "burst 가 끝났는데 자동 닫힘이 발화 못한" 코너 케이스 추적용. 비율이 비정상적으로 높으면 자동 닫힘 임계값(5초) 보다 짧은 화면 체류로 운영 데이터가 새고 있음을 의미. |
 
 ### 의도적으로 포함하지 않는 정보
@@ -90,11 +95,13 @@ ORDER BY events DESC;
 자동 닫힘 임계값(`ACK_ERROR_AUTO_DISMISS_MS`, 현재 5_000ms) 튜닝 근거는 다음으로
 요약한다.
 
-- **`reason=auto-dismiss` 비율이 압도적으로 높고 `p95_burst_ms` 가 임계값에 가깝다면**
-  → burst 가 임계값 안에서 충분히 식고 있다는 신호. 임계값을 낮춰도 (예: 3000ms)
-  사용자가 카운터를 충분히 인지할 수 있다.
+- **`reason=auto-dismiss` + `reason=banner-timeout` 합산 비율이 압도적으로 높고
+  `p95_burst_ms` 가 임계값에 가깝다면** → burst 가 임계값 안에서 충분히 식고
+  있다는 신호. 임계값을 낮춰도 (예: 3000ms) 사용자가 카운터를 충분히 인지할 수 있다.
+  (Task #129 이후 두 라벨은 모두 "사용자가 적극적으로 닫지는 않은" 케이스.)
 - **`reason=user-dismiss` 비율이 높고 `avg_burst_ms` 가 임계값보다 훨씬 짧다면**
-  → 사용자가 토스트를 적극적으로 닫고 있어 임계값을 더 줄여도 무방하다.
+  → 사용자가 토스트를 X 버튼으로 적극 닫고 있어 임계값을 더 줄여도 무방하다.
+  Task #129 이후 이 라벨은 진짜 사용자 행동만을 의미하므로 단독으로 판단해도 안전.
 - **`reason=unmount` 비율이 비정상적으로 높다면 (예: 10% 초과)**
   → "burst 가 끝났는데도 자동 닫힘이 발화 못한 채 사용자가 페이지를 뜬" 코너 케이스가
   있다는 신호. 자동 닫힘 임계값을 늘리거나 화면 전환 직전 강제 마감 훅 추가를 검토.

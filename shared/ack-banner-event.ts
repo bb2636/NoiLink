@@ -20,17 +20,27 @@
 /**
  * burst 가 어떻게 끝났는지 — 운영 집계에서 자동 닫힘 vs 사용자 닫힘 비율을 계산하는 키.
  *  - `auto-dismiss`: subscriber 의 자동 닫힘 타이머가 끝까지 살아남아 발화한 경우.
- *  - `user-dismiss`: 페이지(SuccessBanner.onClose 등)가 `notifyDismissed()` 로 외부에서
- *    banner 가 닫혔음을 알린 경우.
+ *  - `user-dismiss`: 거부 토스트의 X 닫기 버튼처럼 사용자가 명시적으로 닫은 경우
+ *    (`notifyDismissed()` 트리거). Task #129 이후로는 SuccessBanner 의 자체 timeout
+ *    이 발화한 경우는 포함되지 않는다 — 그 케이스는 `banner-timeout` 으로 분리된다.
+ *  - `banner-timeout`: SuccessBanner (또는 그 변형) 의 자체 `duration` 타이머가
+ *    먼저 발화해 토스트가 사라진 경우. subscriber 의 `autoDismissMs` 보다 짧은
+ *    duration 이 설정된 화면에서 주로 관측된다. 운영 집계에서는 `auto-dismiss` 와
+ *    함께 "사용자가 적극적으로 닫지는 않은" 비율로 묶어 읽으면 된다.
  *  - `unmount`: 화면 이동/언마운트로 `unsubscribe()` 가 먼저 호출돼 자동 닫힘이 발화 못한 경우.
  *    이 비율이 비정상적으로 높으면 "burst 가 끝났는데도 자동 닫힘이 안 떠 사용자가
  *    카운터를 들고 페이지를 뜨는" 코너 케이스를 의심해볼 수 있다.
  */
-export type AckBannerDismissReason = 'auto-dismiss' | 'user-dismiss' | 'unmount';
+export type AckBannerDismissReason =
+  | 'auto-dismiss'
+  | 'user-dismiss'
+  | 'banner-timeout'
+  | 'unmount';
 
 const VALID_DISMISS_REASONS: ReadonlySet<AckBannerDismissReason> = new Set<AckBannerDismissReason>([
   'auto-dismiss',
   'user-dismiss',
+  'banner-timeout',
   'unmount',
 ]);
 
