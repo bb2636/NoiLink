@@ -1,5 +1,6 @@
 /**
- * RecoverySection (Home.tsx) 컴포넌트 회귀 테스트 (Task #99 / Task #74).
+ * RecoverySection (components/RecoverySection.tsx) 컴포넌트 회귀 테스트
+ * (Task #99 / Task #74 / Task #107 — 홈에서 분리된 단일 책임 파일을 직접 렌더).
  *
  * 유틸 단위 테스트(`recoveryCoachingDismissal.test.ts`)는 localStorage 키 정책을
  * 잠그지만, 실제로 사용자가 겪는 시나리오 — "환경 점검" 카드를 닫고 다른 페이지로
@@ -20,7 +21,7 @@ import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { AggregatedRecoveryStats } from '@noilink/shared';
 
-import { RecoverySection } from '../Home';
+import { RecoverySection } from '../../components/RecoverySection';
 import { recoveryCoachingDismissalKey } from '../../utils/recoveryCoachingDismissal';
 
 // React 18 의 act() 가 jsdom 환경에서 정상 동작하도록 플래그를 켠다.
