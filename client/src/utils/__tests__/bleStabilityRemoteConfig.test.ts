@@ -20,7 +20,11 @@ import {
 } from '@noilink/shared';
 import {
   BLE_STABILITY_REMOTE_CONFIG_CACHE_KEY,
+  DEFAULT_BLE_STABILITY_REFRESH_INTERVAL_MS,
+  __resetBleStabilityRefreshThrottleForTests,
   loadBleStabilityRemoteConfig,
+  refreshBleStabilityRemoteConfigIfStale,
+  setupBleStabilityRemoteConfigAutoRefresh,
 } from '../bleStabilityRemoteConfig';
 
 function makeFetchOk(body: unknown): typeof fetch {
@@ -62,6 +66,8 @@ describe('loadBleStabilityRemoteConfig', () => {
     } catch {
       /* ignore */
     }
+    // 모듈 레벨 throttle 시계는 다른 테스트의 호출 흔적이 남지 않도록 매번 비운다.
+    __resetBleStabilityRefreshThrottleForTests();
   });
   afterEach(() => {
     setBleStabilityOverrideResolver(null);
@@ -71,6 +77,7 @@ describe('loadBleStabilityRemoteConfig', () => {
     } catch {
       /* ignore */
     }
+    __resetBleStabilityRefreshThrottleForTests();
   });
 
   it('빈 응답이면 오버라이드를 등록하지 않아 기본 임계값이 그대로 쓰인다', async () => {
@@ -350,5 +357,252 @@ describe('loadBleStabilityRemoteConfig', () => {
       windowThreshold: 8,
       msThreshold: 30_000,
     });
+  });
+});
+
+// ───────────────────────────────────────────────────────────
+// Task #86: 장기 세션 자동 갱신 (throttle / 포그라운드 복귀 / 주기 타이머)
+// ───────────────────────────────────────────────────────────
+
+describe('refreshBleStabilityRemoteConfigIfStale (Task #86 throttle)', () => {
+  beforeEach(() => {
+    __resetBleStabilityRefreshThrottleForTests();
+  });
+  afterEach(() => {
+    setBleStabilityOverrideResolver(null);
+    __resetBleStabilityRefreshThrottleForTests();
+  });
+
+  it('첫 호출은 throttle 을 통과해 실제로 fetch 한다', async () => {
+    const fetcher = makeFetchOk({ success: true, data: { rules: [] } });
+    let clock = 1_000_000;
+    const ran = await refreshBleStabilityRemoteConfigIfStale({
+      fetcher,
+      storage: null,
+      now: () => clock,
+    });
+    expect(ran).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('throttle 간격 안에서 여러 번 호출돼도 fetch 는 한 번으로 합쳐진다', async () => {
+    const fetcher = makeFetchOk({ success: true, data: { rules: [] } });
+    let clock = 1_000_000;
+    const opts = {
+      fetcher,
+      storage: null as Storage | null,
+      now: () => clock,
+      minIntervalMs: 60_000,
+    };
+
+    expect(await refreshBleStabilityRemoteConfigIfStale(opts)).toBe(true);
+    clock += 1_000;
+    expect(await refreshBleStabilityRemoteConfigIfStale(opts)).toBe(false);
+    clock += 30_000;
+    expect(await refreshBleStabilityRemoteConfigIfStale(opts)).toBe(false);
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('throttle 간격이 지난 뒤에는 다시 fetch 한다', async () => {
+    const fetcher = makeFetchOk({ success: true, data: { rules: [] } });
+    let clock = 1_000_000;
+    const opts = {
+      fetcher,
+      storage: null as Storage | null,
+      now: () => clock,
+      minIntervalMs: 60_000,
+    };
+
+    expect(await refreshBleStabilityRemoteConfigIfStale(opts)).toBe(true);
+    clock += 60_001;
+    expect(await refreshBleStabilityRemoteConfigIfStale(opts)).toBe(true);
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('직접 호출(loadBleStabilityRemoteConfig) 도 throttle 시계를 갱신한다', async () => {
+    // 시나리오: 로그인 직후 useAuth 가 직접 호출 → 직후의 포그라운드 복귀가 또
+    // 한 번 fetch 하면 안 된다.
+    const fetcher = makeFetchOk({ success: true, data: { rules: [] } });
+    let clock = 5_000_000;
+    await loadBleStabilityRemoteConfig({
+      fetcher,
+      storage: null,
+      now: () => clock,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    clock += 5_000;
+    const ran = await refreshBleStabilityRemoteConfigIfStale({
+      fetcher,
+      storage: null,
+      now: () => clock,
+      minIntervalMs: 60_000,
+    });
+    expect(ran).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('기본 throttle 간격은 30분으로 노출된다', () => {
+    expect(DEFAULT_BLE_STABILITY_REFRESH_INTERVAL_MS).toBe(30 * 60 * 1000);
+  });
+});
+
+describe('setupBleStabilityRemoteConfigAutoRefresh (Task #86)', () => {
+  type Listener = (...args: unknown[]) => void;
+
+  function makeFakeTarget() {
+    const listeners = new Map<string, Set<Listener>>();
+    return {
+      target: {
+        addEventListener: vi.fn((type: string, fn: Listener) => {
+          if (!listeners.has(type)) listeners.set(type, new Set());
+          listeners.get(type)!.add(fn);
+        }),
+        removeEventListener: vi.fn((type: string, fn: Listener) => {
+          listeners.get(type)?.delete(fn);
+        }),
+      },
+      dispatch(type: string) {
+        for (const fn of listeners.get(type) ?? []) fn();
+      },
+      hasListener(type: string) {
+        return (listeners.get(type)?.size ?? 0) > 0;
+      },
+    };
+  }
+
+  beforeEach(() => {
+    __resetBleStabilityRefreshThrottleForTests();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    setBleStabilityOverrideResolver(null);
+    __resetBleStabilityRefreshThrottleForTests();
+  });
+
+  it('포그라운드 복귀(focus / visibilitychange) 때 한 번 더 받는다', async () => {
+    const win = makeFakeTarget();
+    const docListeners = makeFakeTarget();
+    const doc = {
+      ...docListeners.target,
+      visibilityState: 'visible' as DocumentVisibilityState,
+    };
+    const fetcher = makeFetchOk({ success: true, data: { rules: [] } });
+    let clock = 10_000_000;
+
+    const cleanup = setupBleStabilityRemoteConfigAutoRefresh({
+      fetcher,
+      storage: null,
+      windowTarget: win.target,
+      documentTarget: doc,
+      now: () => clock,
+      minIntervalMs: 60_000,
+      intervalMs: 0, // 타이머는 이 테스트의 관심 밖.
+    });
+
+    // focus 이벤트 → 첫 fetch.
+    win.dispatch('focus');
+    await vi.runAllTimersAsync();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    // 같은 throttle 창 안의 visibilitychange → 합쳐진다.
+    clock += 30_000;
+    docListeners.dispatch('visibilitychange');
+    await vi.runAllTimersAsync();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    // throttle 창을 넘기면 다시 받는다.
+    clock += 31_000;
+    docListeners.dispatch('visibilitychange');
+    await vi.runAllTimersAsync();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    cleanup();
+    expect(win.hasListener('focus')).toBe(false);
+    expect(docListeners.hasListener('visibilitychange')).toBe(false);
+  });
+
+  it('숨김 상태에서 visibilitychange 가 와도 fetch 하지 않는다', async () => {
+    const docListeners = makeFakeTarget();
+    const doc = {
+      ...docListeners.target,
+      visibilityState: 'hidden' as DocumentVisibilityState,
+    };
+    const fetcher = makeFetchOk({ success: true, data: { rules: [] } });
+
+    const cleanup = setupBleStabilityRemoteConfigAutoRefresh({
+      fetcher,
+      storage: null,
+      windowTarget: null,
+      documentTarget: doc,
+      minIntervalMs: 60_000,
+      intervalMs: 0,
+    });
+
+    docListeners.dispatch('visibilitychange');
+    await vi.runAllTimersAsync();
+    expect(fetcher).not.toHaveBeenCalled();
+
+    cleanup();
+  });
+
+  it('주기 타이머도 throttle 안에서 합쳐지고, 창을 넘기면 다시 트리거한다', async () => {
+    const fetcher = makeFetchOk({ success: true, data: { rules: [] } });
+    let clock = 0;
+
+    const cleanup = setupBleStabilityRemoteConfigAutoRefresh({
+      fetcher,
+      storage: null,
+      windowTarget: null,
+      documentTarget: null,
+      now: () => clock,
+      minIntervalMs: 60_000,
+      intervalMs: 10_000, // throttle 보다 짧은 주기로 폭주를 시뮬레이션.
+    });
+
+    // 60초 안에 6번 트리거되지만 throttle 로 1번만 fetch.
+    for (let i = 0; i < 6; i++) {
+      clock += 10_000;
+      await vi.advanceTimersByTimeAsync(10_000);
+    }
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    // throttle 창을 넘기는 다음 tick.
+    clock += 10_000;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    cleanup();
+  });
+
+  it('cleanup 후에는 listener 와 타이머가 모두 해제된다', async () => {
+    const win = makeFakeTarget();
+    const docListeners = makeFakeTarget();
+    const doc = {
+      ...docListeners.target,
+      visibilityState: 'visible' as DocumentVisibilityState,
+    };
+    const fetcher = makeFetchOk({ success: true, data: { rules: [] } });
+
+    const cleanup = setupBleStabilityRemoteConfigAutoRefresh({
+      fetcher,
+      storage: null,
+      windowTarget: win.target,
+      documentTarget: doc,
+      minIntervalMs: 60_000,
+      intervalMs: 30_000,
+    });
+    cleanup();
+
+    // throttle 시계는 비워 두고, 이벤트/타이머가 살아 있다면 fetch 가 일어났을 것.
+    __resetBleStabilityRefreshThrottleForTests();
+    win.dispatch('focus');
+    docListeners.dispatch('visibilitychange');
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });
