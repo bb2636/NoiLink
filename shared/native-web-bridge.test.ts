@@ -7,6 +7,15 @@ import {
   validateNativeToWebMessage,
   type BridgeValidationError,
 } from './native-web-bridge.js';
+import {
+  BPM_MAX,
+  BPM_MIN,
+  LEVEL_MAX,
+  LEVEL_MIN,
+  MAX_SESSION_SEC,
+  POD_INDEX_MAX,
+  POD_INDEX_MIN,
+} from './ble-protocol.js';
 
 // ---------------------------------------------------------------------------
 // 버전 상수 잠금 — 네이티브 핸드셰이크 호환성
@@ -208,10 +217,29 @@ const VALID_WEB_TO_NATIVE: ValidCase[] = [
     msg: { ...baseEnv('ble.writeLed'), payload: { tickId: 1, pod: 0, colorCode: 0xff, onMs: 0 } },
   },
   {
+    label: 'ble.writeLed (pod=POD_INDEX_MAX 경계값 통과)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: 1, pod: POD_INDEX_MAX, colorCode: 1, onMs: 100 },
+    },
+  },
+  {
     label: 'ble.writeSession',
     msg: {
       ...baseEnv('ble.writeSession'),
       payload: { bpm: 60, level: 1, phase: 0, durationSec: 30 },
+    },
+  },
+  {
+    label: 'ble.writeSession (level=LEVEL_MAX, bpm=BPM_MAX, durationSec=MAX_SESSION_SEC 경계 통과)',
+    msg: {
+      ...baseEnv('ble.writeSession'),
+      payload: {
+        bpm: BPM_MAX,
+        level: LEVEL_MAX,
+        phase: 0,
+        durationSec: MAX_SESSION_SEC,
+      },
     },
   },
   {
@@ -352,6 +380,107 @@ const INVALID_WEB_TO_NATIVE: InvalidCase[] = [
     expectedType: 'ble.writeSession',
     expectedField: 'payload.phase',
     expectedReason: 'field-enum',
+  },
+  // -- Task #68 — pod 0..3, level 1..5, bpm/durationSec bounds ----------------
+  {
+    label: 'ble.writeLed: pod=-1 → field-range (POD_INDEX_MIN-1)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: 1, pod: POD_INDEX_MIN - 1, colorCode: 1, onMs: 100 },
+    },
+    expectedType: 'ble.writeLed',
+    expectedField: 'payload.pod',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeLed: pod=4 → field-range (POD_INDEX_MAX+1)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: 1, pod: POD_INDEX_MAX + 1, colorCode: 1, onMs: 100 },
+    },
+    expectedType: 'ble.writeLed',
+    expectedField: 'payload.pod',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeLed: pod=1.5 → field-type (정수가 아니면 byte 로 truncate 위험)',
+    msg: {
+      ...baseEnv('ble.writeLed'),
+      payload: { tickId: 1, pod: 1.5, colorCode: 1, onMs: 100 },
+    },
+    expectedType: 'ble.writeLed',
+    expectedField: 'payload.pod',
+    expectedReason: 'field-type',
+  },
+  {
+    label: 'ble.writeSession: level=0 → field-range (LEVEL_MIN-1)',
+    msg: {
+      ...baseEnv('ble.writeSession'),
+      payload: { bpm: 100, level: LEVEL_MIN - 1, phase: 0, durationSec: 30 },
+    },
+    expectedType: 'ble.writeSession',
+    expectedField: 'payload.level',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeSession: level=6 → field-range (LEVEL_MAX+1)',
+    msg: {
+      ...baseEnv('ble.writeSession'),
+      payload: { bpm: 100, level: LEVEL_MAX + 1, phase: 0, durationSec: 30 },
+    },
+    expectedType: 'ble.writeSession',
+    expectedField: 'payload.level',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeSession: bpm=BPM_MIN-1 → field-range',
+    msg: {
+      ...baseEnv('ble.writeSession'),
+      payload: { bpm: BPM_MIN - 1, level: 1, phase: 0, durationSec: 30 },
+    },
+    expectedType: 'ble.writeSession',
+    expectedField: 'payload.bpm',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeSession: bpm=BPM_MAX+1 → field-range',
+    msg: {
+      ...baseEnv('ble.writeSession'),
+      payload: { bpm: BPM_MAX + 1, level: 1, phase: 0, durationSec: 30 },
+    },
+    expectedType: 'ble.writeSession',
+    expectedField: 'payload.bpm',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeSession: bpm=120.5 → field-type (정수만 허용)',
+    msg: {
+      ...baseEnv('ble.writeSession'),
+      payload: { bpm: 120.5, level: 1, phase: 0, durationSec: 30 },
+    },
+    expectedType: 'ble.writeSession',
+    expectedField: 'payload.bpm',
+    expectedReason: 'field-type',
+  },
+  {
+    label: 'ble.writeSession: durationSec=MAX_SESSION_SEC+1 → field-range (5분 상한)',
+    msg: {
+      ...baseEnv('ble.writeSession'),
+      payload: { bpm: 100, level: 1, phase: 0, durationSec: MAX_SESSION_SEC + 1 },
+    },
+    expectedType: 'ble.writeSession',
+    expectedField: 'payload.durationSec',
+    expectedReason: 'field-range',
+  },
+  {
+    label: 'ble.writeSession: durationSec=-1 → field-range (음수)',
+    msg: {
+      ...baseEnv('ble.writeSession'),
+      payload: { bpm: 100, level: 1, phase: 0, durationSec: -1 },
+    },
+    expectedType: 'ble.writeSession',
+    expectedField: 'payload.durationSec',
+    expectedReason: 'field-range',
   },
   {
     label: 'ble.writeControl: 알려지지 않은 cmd → field-enum',

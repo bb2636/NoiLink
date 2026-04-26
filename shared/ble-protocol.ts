@@ -57,6 +57,34 @@ export type ColorCode = (typeof COLOR_CODE)[keyof typeof COLOR_CODE];
 /** 펌웨어 명세 상한. 클라이언트에서 SESSION 길이 검증에 사용 */
 export const MAX_SESSION_MS = 300_000;
 
+/**
+ * 초 단위 SESSION 길이 상한 (`MAX_SESSION_MS / 1000 = 300`).
+ * SESSION Write 의 `durationSec` 필드는 펌웨어 u16 이지만 사용자 트레이닝
+ * 길이는 5분(300s)로 제한된다. 브리지 가드가 이 값을 초과한 페이로드를 거부.
+ */
+export const MAX_SESSION_SEC = MAX_SESSION_MS / 1000;
+
+/**
+ * LED Write `pod` 인덱스 범위 (펌웨어 u8 이지만 NoiPod 본체에 4 pod 만 존재).
+ * 0..3 외의 값은 펌웨어가 byte 로 misinterpret 하기 전에 브리지에서 거부한다.
+ */
+export const POD_INDEX_MIN = 0;
+export const POD_INDEX_MAX = 3;
+
+/**
+ * SESSION Write `level` 범위 (트레이닝 사양: 1..5). 0 이나 6+ 은 브리지가 거부.
+ */
+export const LEVEL_MIN = 1;
+export const LEVEL_MAX = 5;
+
+/**
+ * SESSION Write `bpm` 범위. 트레이닝 spec(`shared/training-spec.ts`)의
+ * BPM clamp 와 동일한 60..200. 펌웨어 u16 으로 직렬화되지만 그 전에 브리지가
+ * 사용자/엔진의 잘못된 BPM 을 거부한다.
+ */
+export const BPM_MIN = 60;
+export const BPM_MAX = 200;
+
 /** 펌웨어가 보내는 TOUCH 프레임 크기 (bytes) */
 export const TOUCH_FRAME_BYTES = 11;
 

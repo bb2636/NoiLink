@@ -21,6 +21,15 @@
 
 import type { BleDisconnectReason, BleErrorAction, BleErrorCode, NoiPodCharacteristicKey } from './ble-constants.js';
 import type { ChannelCode, ColorCode, ControlCmd, SessionPhase, TouchEvent } from './ble-protocol.js';
+import {
+  BPM_MAX,
+  BPM_MIN,
+  LEVEL_MAX,
+  LEVEL_MIN,
+  MAX_SESSION_SEC,
+  POD_INDEX_MAX,
+  POD_INDEX_MIN,
+} from './ble-protocol.js';
 
 export const NATIVE_BRIDGE_VERSION = 2 as const;
 
@@ -311,6 +320,9 @@ export type NativeToWebMessage =
  * - `field-missing`: 필수 필드 누락.
  * - `field-type`: 필드 타입이 다름.
  * - `field-enum`: enum 값이 허용 집합 밖.
+ * - `field-range`: 정수 범위 (예: pod 0..3, level 1..5, bpm 60..200,
+ *   durationSec 0..MAX_SESSION_SEC) 밖. 펌웨어 byte 로 silently truncate
+ *   되기 전에 브리지가 잡는다.
  */
 export type BridgeValidationErrorReason =
   | 'not-object'
@@ -322,7 +334,8 @@ export type BridgeValidationErrorReason =
   | 'payload-shape'
   | 'field-missing'
   | 'field-type'
-  | 'field-enum';
+  | 'field-enum'
+  | 'field-range';
 
 export type BridgeValidationError = {
   /** Bridge 메시지의 type (envelope 검증 실패 등으로 미상이면 생략). */
@@ -510,6 +523,44 @@ function optEnum<T>(
       'field-enum',
       `${prefix}.${key}`,
       `${type}: ${prefix}.${key} must be one of [${allowed.map((x) => String(x)).join(', ')}] (got ${String(v)})`,
+    );
+  return null;
+}
+
+/**
+ * 필수 정수 + 범위 검사. `pod` (0..3), `level` (1..5), `bpm` (60..200),
+ * `durationSec` (0..MAX_SESSION_SEC) 처럼 펌웨어 바이트로 직렬화되는
+ * 필드를 silently truncate 되기 전에 브리지에서 잡는다.
+ *
+ * - 누락 → field-missing
+ * - 비유한수/비정수(예: 1.5, NaN, Infinity) → field-type
+ * - 범위 밖 → field-range
+ */
+function reqIntegerInRange(
+  p: Record<string, unknown>,
+  key: string,
+  type: string,
+  min: number,
+  max: number,
+  prefix = 'payload',
+): BridgeValidationError | null {
+  const v = p[key];
+  const field = `${prefix}.${key}`;
+  if (v === undefined)
+    return makeError(type, 'field-missing', field, `${type}: ${field} is required (integer ${min}..${max})`);
+  if (!isFiniteNumber(v) || !Number.isInteger(v))
+    return makeError(
+      type,
+      'field-type',
+      field,
+      `${type}: ${field} must be an integer in [${min}, ${max}] (got ${String(v)})`,
+    );
+  if (v < min || v > max)
+    return makeError(
+      type,
+      'field-range',
+      field,
+      `${type}: ${field} must be in [${min}, ${max}] (got ${v})`,
     );
   return null;
 }
@@ -733,7 +784,7 @@ function validateWebToNativePayload(type: string, payload: unknown): BridgeValid
       const p = r.payload;
       return (
         reqNumber(p, 'tickId', type) ??
-        reqNumber(p, 'pod', type) ??
+        reqIntegerInRange(p, 'pod', type, POD_INDEX_MIN, POD_INDEX_MAX) ??
         reqEnum(p, 'colorCode', type, COLOR_CODE_VALUES) ??
         reqNumber(p, 'onMs', type) ??
         optNumber(p, 'flags', type) ??
@@ -746,10 +797,10 @@ function validateWebToNativePayload(type: string, payload: unknown): BridgeValid
       if (!r.ok) return r.error;
       const p = r.payload;
       return (
-        reqNumber(p, 'bpm', type) ??
-        reqNumber(p, 'level', type) ??
+        reqIntegerInRange(p, 'bpm', type, BPM_MIN, BPM_MAX) ??
+        reqIntegerInRange(p, 'level', type, LEVEL_MIN, LEVEL_MAX) ??
         reqEnum(p, 'phase', type, SESSION_PHASE_VALUES) ??
-        reqNumber(p, 'durationSec', type) ??
+        reqIntegerInRange(p, 'durationSec', type, 0, MAX_SESSION_SEC) ??
         optNumber(p, 'flags', type)
       );
     }
