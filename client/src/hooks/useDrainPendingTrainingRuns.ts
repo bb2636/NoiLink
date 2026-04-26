@@ -37,6 +37,12 @@
  *    한 줄(`[drain] ...`)로 남겨, 어느 트리거가 큐를 가장 많이 비우는지
  *    운영 데이터로 추적할 수 있게 한다. 사용자 식별 정보(userId 등)는 포함하지
  *    않는다. 큐가 비어 cycle 이 시작되지 않은 경우는 로그도 남기지 않는다.
+ *  - 네트워크 복구 트리거는 두 채널(브라우저 `online` / 네이티브 셸의
+ *    `noilink-native-network-online`)이 별도 trigger 값(`browser-online`,
+ *    `native-online`)으로 기록된다. 며칠 운영 데이터에서 비-mount drain 중
+ *    어느 채널이 실제로 큐를 비우는지(혹은 둘 다 거의 안 오는지) 비교해,
+ *    WebView 환경에서 브라우저 `online` 이벤트의 신뢰성과 네이티브 트리거
+ *    유지/강화 여부를 판단하는 근거로 쓴다.
  */
 import { useEffect } from 'react';
 import { useAuth } from './useAuth';
@@ -75,8 +81,24 @@ interface DrainOptions {
 // userId 단위로 충분).
 // ───────────────────────────────────────────────────────────
 
-/** drain cycle 을 시작시킨 트리거 종류. 운영 로그/디버깅용. */
-export type DrainTrigger = 'mount' | 'online' | 'visibility' | 'pageshow';
+/**
+ * drain cycle 을 시작시킨 트리거 종류. 운영 로그/디버깅용.
+ *
+ * 네트워크 복구 트리거는 두 채널을 분리해 기록한다:
+ *  - `browser-online`: 브라우저(WebView 포함) 의 `window.online` 이벤트.
+ *  - `native-online`: 네이티브 셸이 OS 단에서 네트워크 복구를 감지해
+ *    `noilink-native-network-online` 메시지를 보낸 경우.
+ *
+ * 두 신호는 같은 시점에 동시에 들어와도 in-flight/throttle 가드 덕분에
+ * cycle 은 한 번만 실행된다 — 운영 로그에서 어느 쪽이 cycle 을 시작시켰는지
+ * 만 분리되어 기록된다(흡수된 다른 신호는 별도 줄을 만들지 않는다).
+ */
+export type DrainTrigger =
+  | 'mount'
+  | 'browser-online'
+  | 'native-online'
+  | 'visibility'
+  | 'pageshow';
 
 interface UserDrainState {
   inFlight: Promise<void> | null;
@@ -246,10 +268,14 @@ export function useDrainPendingTrainingRuns(options: DrainOptions = {}): void {
     // 앱이 켜진 채 네트워크가 재연결되면 즉시 다시 시도한다.
     // 두 트리거(브라우저 `online` + 네이티브 셸 `network.online` 메시지)는 동일한
     // tryTriggerDrain 경로를 통과한다 — 두 신호가 같은 시점에 동시에 들어와도
-    // in-flight/throttle 가드 덕분에 cycle 이 중복 실행되지 않는다. 운영 로그에서는
-    // 두 신호 모두 trigger=online 으로 합쳐지며, 네이티브 vs 브라우저 분리 추적은
-    // 별도 태스크에서 다룬다.
-    const onOnline = () => tryTriggerDrain(userId, 'online');
+    // in-flight/throttle 가드 덕분에 cycle 이 중복 실행되지 않는다.
+    //
+    // 운영 데이터 비교를 위해 두 채널은 별도 trigger 값(`browser-online` /
+    // `native-online`)으로 로그에 남는다. 비-mount drain 중 어느 채널이 실제로
+    // 큐를 비우는지 파악해, WebView 의 `online` 신뢰성과 네이티브 트리거 유지
+    // 여부를 판단하는 근거로 쓴다.
+    const onBrowserOnline = () => tryTriggerDrain(userId, 'browser-online');
+    const onNativeOnline = () => tryTriggerDrain(userId, 'native-online');
     // 앱이 다시 화면에 보일 때(visibilitychange → visible, pageshow)에도 한 번
     // 더 시도한다. 백그라운드에서 발생한 짧은 네트워크 단절로 `online` 이벤트가
     // 누락된 경우에도 사용자가 앱을 다시 보는 순간 큐가 비워진다. throttle/in-flight
@@ -260,15 +286,15 @@ export function useDrainPendingTrainingRuns(options: DrainOptions = {}): void {
       }
     };
     const onPageShow = () => tryTriggerDrain(userId, 'pageshow');
-    window.addEventListener('online', onOnline);
-    window.addEventListener('noilink-native-network-online', onOnline);
+    window.addEventListener('online', onBrowserOnline);
+    window.addEventListener('noilink-native-network-online', onNativeOnline);
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', onVisibilityChange);
     }
     window.addEventListener('pageshow', onPageShow);
     return () => {
-      window.removeEventListener('online', onOnline);
-      window.removeEventListener('noilink-native-network-online', onOnline);
+      window.removeEventListener('online', onBrowserOnline);
+      window.removeEventListener('noilink-native-network-online', onNativeOnline);
       if (typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', onVisibilityChange);
       }

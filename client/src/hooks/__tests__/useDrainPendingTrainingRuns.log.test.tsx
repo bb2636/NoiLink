@@ -91,7 +91,7 @@ describe('useDrainPendingTrainingRuns: 운영 로그', () => {
     expect(drainLogs()).toEqual([]);
   });
 
-  it('online 트리거 cycle 의 로그 한 줄에 트리거/성공수/잔여 가 정확히 기록되고 userId 원문은 노출되지 않는다', async () => {
+  it('브라우저 online 트리거 cycle 의 로그 한 줄에 trigger=browser-online 이 기록되고 userId 원문은 노출되지 않는다', async () => {
     renderHook(() => useDrainPendingTrainingRuns());
     await act(async () => {
       await flushMicrotasks();
@@ -108,13 +108,38 @@ describe('useDrainPendingTrainingRuns: 운영 로그', () => {
 
     const logs = drainLogs();
     expect(logs).toHaveLength(1);
-    expect(logs[0]).toContain('trigger=online');
+    expect(logs[0]).toContain('trigger=browser-online');
     expect(logs[0]).toContain('succeeded=1');
     expect(logs[0]).toContain('failed=0');
     expect(logs[0]).toContain('remaining=0');
     // userId 원문이 어떤 형태로도 새어 나가서는 안 된다.
     expect(logs[0]).not.toContain('user-secret-1234');
     expect(logs[0]).not.toContain('secret');
+  });
+
+  it('네이티브 셸의 network.online 트리거 cycle 의 로그는 trigger=native-online 으로 별도 기록된다 (브라우저 vs 네이티브 비교용)', async () => {
+    renderHook(() => useDrainPendingTrainingRuns());
+    await act(async () => {
+      await flushMicrotasks();
+    });
+
+    enqueuePendingRun({ input: baseInput(), title: '판단력' });
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 's-native' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 80 } });
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('noilink-native-network-online'));
+      await flushMicrotasks();
+    });
+
+    const logs = drainLogs();
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain('trigger=native-online');
+    // 운영 데이터에서 두 채널을 분리 추적해야 하므로, 합쳐진 옛 trigger 값(`online`)이
+    // 다시 섞여 들어가서는 안 된다.
+    expect(logs[0]).not.toMatch(/trigger=online\b/);
+    expect(logs[0]).not.toContain('trigger=browser-online');
+    expect(logs[0]).toContain('succeeded=1');
   });
 
   it('visibility 트리거 cycle 은 trigger=visibility 로 기록된다', async () => {
