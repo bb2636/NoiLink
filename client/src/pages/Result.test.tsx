@@ -1,20 +1,29 @@
 /**
- * 결과 화면(Result.tsx) 회복 카드 회귀 테스트 — Task #60
+ * 결과 화면(Result.tsx) 회귀 테스트
  *
- * 보호 대상 정책 (Result.tsx 의 BLE 회복 안내 카드, Task #36 에서 추가됨):
- *   1. recoverySegments 가 비었을 때:
+ * 이 파일은 Result.tsx 의 두 가지 분기 정책을 함께 잠근다:
+ *
+ * 1) BLE 회복 안내 카드 (Task #36 / Task #60)
+ *    - recoverySegments 가 비었을 때:
  *      - 카드(요약 1줄)는 노출되지만 펼치기 토글은 비활성(disabled)이다.
  *      - 펼침 영역(recovery-segment-list) 과 환경 점검 안내(recovery-env-check) 는
  *        모두 DOM 에 없다.
- *   2. recoverySegments 가 2건일 때:
+ *    - recoverySegments 가 2건일 때:
  *      - 토글이 활성이고, 클릭하면 평균/최장/횟수와 segment 목록이 보인다.
  *      - 환경 점검 안내(recovery-env-check) 는 노출되지 않는다 (windows < 3).
- *   3. recoverySegments 가 3건 이상일 때:
+ *    - recoverySegments 가 3건 이상일 때:
  *      - 환경 점검 안내(recovery-env-check) 가 펼침/접힘 상태와 무관하게 노출된다.
  *
- * 카피·임계값(현재 RECOVERY_ENV_CHECK_THRESHOLD = 3) 변경이 조용히 깨지지
- * 않도록 직접 렌더링 테스트로 잠근다. 엔진 단의 `recovery.segments` 회귀는
- * `engine.metrics.test.ts` 에서 별도로 보호한다.
+ * 2) 부분 결과 배지 (Task #23 / Task #63)
+ *    - `location.state.isPartial === true` + `partialProgressPct` 가 함께 전달되면
+ *      "부분 결과 · X% 진행" 배지가 점수 원 위쪽에 노출된다.
+ *    - 배지의 X% 값은 navigate state 의 `partialProgressPct` 와 일치해야 한다.
+ *    - 정상 완료 (`isPartial !== true`) 에서는 배지가 절대로 보이지 않는다
+ *      (디자인 변경으로 항상 노출되거나 사라지는 회귀를 막는다).
+ *
+ * 카피·임계값(예: RECOVERY_ENV_CHECK_THRESHOLD = 3) 변경이 조용히 깨지지 않도록
+ * 직접 렌더링 테스트로 잠근다. 엔진 단의 `recovery.segments` 회귀 와
+ * `submitTrainingRun` 의 메타 동봉 로직은 각각 별도 단위 테스트가 보호한다.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -28,7 +37,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
   .IS_REACT_ACT_ENVIRONMENT = true;
 
 // ───────────────────────────────────────────────────────────
-// 의존성 모킹 — 회복 카드 분기 외 부수효과 제거
+// 의존성 모킹 — 회복 카드/부분 배지 분기 외 부수효과 제거
 // (모듈 평가 전에 등록되어야 하므로 import 보다 앞에 둔다)
 // ───────────────────────────────────────────────────────────
 
@@ -225,3 +234,58 @@ describe('Result — BLE 회복 안내 카드 (Task #36 / Task #60)', () => {
   });
 });
 
+describe('Result — 부분 결과 배지 (Task #23 / Task #63)', () => {
+  afterEach(() => {
+    unmountResult();
+    vi.clearAllMocks();
+  });
+
+  it('isPartial=true + partialProgressPct=65 면 "부분 결과 · 65% 진행" 배지가 보인다', () => {
+    renderResult({
+      isPartial: true,
+      partialProgressPct: 65,
+    });
+
+    const text = container?.textContent ?? '';
+    expect(text).toContain('부분 결과 · 65% 진행');
+
+    // 접근성 라벨도 함께 노출되어야 스크린 리더 사용자도 맥락을 인지한다.
+    const badge = container?.querySelector(
+      '[aria-label="부분 결과 65 퍼센트 진행"]',
+    );
+    expect(badge).toBeTruthy();
+  });
+
+  it('isPartial=false 일 때는 부분 결과 배지가 노출되지 않는다 (정상 완료 회귀 보호)', () => {
+    renderResult({
+      isPartial: false,
+      // partialProgressPct 가 함께 와도 isPartial 가 false 면 배지는 숨겨진다.
+      partialProgressPct: 80,
+    });
+
+    const text = container?.textContent ?? '';
+    expect(text).not.toContain('부분 결과');
+    expect(text).not.toContain('% 진행');
+  });
+
+  it('isPartial=true 라도 partialProgressPct 가 없으면 배지를 숨긴다 (불완전 페이로드 안전망)', () => {
+    renderResult({
+      isPartial: true,
+      // partialProgressPct 미지정 — 잘못된 값으로 "부분 결과 · undefined% 진행" 같은
+      // 깨진 표기가 노출되어선 안 된다.
+    });
+
+    const text = container?.textContent ?? '';
+    expect(text).not.toContain('부분 결과');
+  });
+
+  it('partialProgressPct 가 100 초과/음수여도 0~100 범위로 보정된 값이 노출된다', () => {
+    renderResult({
+      isPartial: true,
+      partialProgressPct: 150,
+    });
+
+    const text = container?.textContent ?? '';
+    expect(text).toContain('부분 결과 · 100% 진행');
+  });
+});
