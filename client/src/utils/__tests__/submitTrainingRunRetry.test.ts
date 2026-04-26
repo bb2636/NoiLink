@@ -235,6 +235,51 @@ describe('submitCompletedTrainingWithRetry', () => {
     expect(mockedApi.createSession.mock.calls[1][1]).toEqual({ idempotencyKey: localId });
   });
 
+  it('createSession 응답에 replayed 가 있으면 결과에도 replayed: true 가 흘러간다 (Task #65 — UI 안내 신호)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({
+      success: true,
+      data: { id: 'sess-replay' },
+      replayed: true,
+    });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 60 } });
+
+    const res = await submitCompletedTrainingWithRetry(baseInput(), {
+      backoffsMs: [0, 0],
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(res.error).toBeUndefined();
+    expect(res.replayed).toBe(true);
+  });
+
+  it('calculateMetrics 응답만 replayed 여도 결과에 replayed: true 가 합쳐진다 (단계별 hit 합산)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-mix' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({
+      success: true,
+      data: { focus: 70 },
+      replayed: true,
+    });
+
+    const res = await submitCompletedTrainingWithRetry(baseInput(), {
+      backoffsMs: [0, 0],
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(res.replayed).toBe(true);
+  });
+
+  it('두 단계 모두 replayed 가 없으면 결과에도 replayed 가 합쳐지지 않는다 (정상 첫 응답 회귀)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-fresh' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 50 } });
+
+    const res = await submitCompletedTrainingWithRetry(baseInput(), {
+      backoffsMs: [0, 0],
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(res.replayed).toBeUndefined();
+  });
+
   it('onAttempt 가 매 시도 결과와 함께 호출된다 (부분 진행분 외부 동기화 통로)', async () => {
     mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-on' } });
     mockedApi.calculateMetrics

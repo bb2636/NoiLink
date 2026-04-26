@@ -560,6 +560,14 @@ export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
+  /**
+   * 서버 idempotency 캐시 hit 으로 첫 응답이 그대로 재반환됐음을 알리는 신호.
+   * 서버 응답 본문에 들어가지 않고, 응답 헤더(`X-Idempotent-Replayed`)를
+   * 클라이언트가 읽어 결과 객체에 합쳐 둔 값이다. UI 는 이 값을 보고
+   * "이미 저장된 결과를 불러왔어요" 같은 1회성 안내를 띄울 수 있다.
+   * 일반(첫 응답) 흐름에서는 undefined.
+   */
+  replayed?: boolean;
 }
 
 /** 페이지네이션 응답 */

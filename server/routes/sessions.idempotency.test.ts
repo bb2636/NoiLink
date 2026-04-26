@@ -100,6 +100,8 @@ describe('POST /api/sessions — Idempotency-Key 보호 (task #33)', () => {
     expect(first.body.success).toBe(true);
     expect((store.sessions as Session[])).toHaveLength(1);
     const firstSessionId = first.body.data.id;
+    // 첫 응답에는 replayed 신호가 붙으면 안 된다 — 새 부수효과(insert)가 발생한 응답이므로.
+    expect(first.headers['x-idempotent-replayed']).toBeUndefined();
 
     const second = await request(app)
       .post('/api/sessions')
@@ -115,6 +117,27 @@ describe('POST /api/sessions — Idempotency-Key 보호 (task #33)', () => {
     const cacheKey = buildIdempotencyCacheKey('sessions.create', ACTOR.id, 'pending-abc');
     expect(store[IDEMPOTENCY_STORE_KEY][cacheKey]).toBeDefined();
     expect(store[IDEMPOTENCY_STORE_KEY][cacheKey].status).toBe(201);
+  });
+
+  it('캐시 hit 응답에는 X-Idempotent-Replayed: true 헤더가 붙는다 (Task #65 — 클라이언트가 사용자에게 안내할 신호)', async () => {
+    const app = buildApp();
+
+    // 첫 요청은 신호 없음.
+    const first = await request(app)
+      .post('/api/sessions')
+      .set('Idempotency-Key', 'replay-key')
+      .send(PAYLOAD);
+    expect(first.status).toBe(201);
+    expect(first.headers['x-idempotent-replayed']).toBeUndefined();
+
+    // 같은 키로 재시도 — 본문은 동일하게 유지하되 replayed 신호만 헤더로 노출.
+    const second = await request(app)
+      .post('/api/sessions')
+      .set('Idempotency-Key', 'replay-key')
+      .send(PAYLOAD);
+    expect(second.status).toBe(201);
+    expect(second.body).toEqual(first.body);
+    expect(second.headers['x-idempotent-replayed']).toBe('true');
   });
 
   it('Idempotency-Key 헤더가 없으면 매 요청마다 새 세션이 생성된다 (기존 동작 유지)', async () => {

@@ -568,6 +568,10 @@ export default function TrainingSessionPlay() {
         previousScore,
         yieldsScore: state.yieldsScore,
         sessionId: res.sessionId,
+        // 서버 idempotency 캐시 hit(= 사용자가 같은 결과를 두 번 보낸 셈) 신호를
+        // 결과 화면에 그대로 흘려보낸다. 결과 화면이 "이미 저장된 결과를 불러왔어요"
+        // 식의 1회성 안내를 띄울 수 있다(Task #65).
+        replayed: res.replayed,
         // 회복 구간 안내(Task #27): 결과 화면이 "BLE 단절 회복 X초가 채점에서
         // 제외됨" 배너를 띄울 수 있게 메트릭에서 추출해 navigate state로 전달.
         recoveryExcludedMs: metrics?.recovery?.excludedMs ?? 0,

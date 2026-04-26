@@ -26,6 +26,14 @@ export interface SubmitCompletedTrainingResult {
   error?: string;
   /** createSession 단계가 성공했는지 — 실패한 단계 식별과 재시도 시 활용. */
   sessionCreated: boolean;
+  /**
+   * 이번 제출이 서버 idempotency 캐시 hit 으로 흡수되었는지(= 첫 응답이 그대로
+   * 재반환됐는지) 여부. createSession / calculateMetrics 두 단계 중 하나라도
+   * 캐시 hit 으로 응답되면 true 가 된다 — 한 단계라도 첫 응답을 다시 받았다면
+   * 사용자 입장에선 "이미 저장된 결과를 또 보낸 셈" 이므로 안내가 필요하다.
+   * 일반(첫 응답) 흐름에서는 undefined.
+   */
+  replayed?: boolean;
 }
 
 export interface SubmitCompletedTrainingInput {
@@ -79,6 +87,11 @@ export async function submitCompletedTraining(
 
   let sessionId = input.existingSessionId ?? '';
   let sessionCreated = !!input.existingSessionId;
+  // 두 단계(createSession / calculateMetrics) 중 하나라도 캐시 hit 으로 흡수되면
+  // true 가 되어 호출부에 함께 반환된다. existingSessionId 로 createSession 단계를
+  // 건너뛴 경우는 metrics 단계의 신호만 반영된다(이전 시도에서 createSession 의
+  // replayed 신호는 그 시도 결과로 이미 노출되었기 때문).
+  let replayed = false;
 
   if (!sessionCreated) {
     const phases = buildTrainingPhases({
@@ -129,10 +142,11 @@ export async function submitCompletedTraining(
 
     sessionId = sessionRes.data.id as string;
     sessionCreated = true;
+    if (sessionRes.replayed) replayed = true;
   }
 
   if (!input.yieldsScore || input.mode === 'FREE') {
-    return { sessionId, sessionCreated };
+    return { sessionId, sessionCreated, ...(replayed ? { replayed: true } : {}) };
   }
 
   const raw: RawMetrics = input.engineMetrics
@@ -147,13 +161,16 @@ export async function submitCompletedTraining(
       sessionId,
       sessionCreated: true,
       error: calcRes.error || '지표 계산 실패',
+      ...(replayed ? { replayed: true } : {}),
     };
   }
+  if (calcRes.replayed) replayed = true;
 
   return {
     sessionId,
     sessionCreated: true,
     displayScore: avgMetricScore(calcRes.data as MetricsScore),
+    ...(replayed ? { replayed: true } : {}),
   };
 }
 

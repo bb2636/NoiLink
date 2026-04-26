@@ -31,6 +31,13 @@ export function getOutcomeNoticeStyle(o: PendingTrainingOutcome): OutcomeNoticeS
 export function formatOutcomeNoticeMessage(o: PendingTrainingOutcome): string {
   const what = o.title ? `'${o.title}'` : '이전';
   if (o.outcome === 'success') {
+    // 서버 idempotency 캐시 hit 으로 흡수된 성공(Task #65) — 이번 재시도가 새로
+    // 저장한 게 아니라, 이전에 사실 서버까지 도달해 저장된 결과를 다시 받은
+    // 것이므로 톤을 "다시 확인했다" 로 바꿔 사용자가 같은 결과가 두 건 저장된 게
+    // 아닌지 헷갈리지 않도록 한다.
+    if (o.replayed) {
+      return `${what} 트레이닝 결과는 이미 저장되어 있었어요. 다시 확인했어요.`;
+    }
     return `${what} 트레이닝 결과를 백그라운드에서 안전하게 저장했어요.`;
   }
   return `${what} 트레이닝 결과를 끝내 저장하지 못했어요. 네트워크가 안정될 때 다시 시도해 주세요.`;

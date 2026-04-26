@@ -61,7 +61,16 @@ class ApiClient {
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
-      return await response.json();
+      const body = (await response.json()) as ApiResponse<T>;
+      // 서버 idempotency 캐시 hit 신호(`X-Idempotent-Replayed: true`) 를 헤더에서
+      // 읽어 응답 객체에 합쳐 둔다. 본문은 첫 응답과 동일하게 유지되도록 서버가
+      // 의도적으로 변경하지 않으므로(회귀 보호 중), 신호는 헤더 → 객체 필드로만
+      // 흘려보낸다. 호출부(예: 결과 저장)는 이 값을 보고 사용자에게 "이미 저장된
+      // 결과를 불러왔어요" 같은 1회성 안내를 띄울 수 있다.
+      if (response.headers.get('X-Idempotent-Replayed') === 'true') {
+        body.replayed = true;
+      }
+      return body;
     } catch (error) {
       return {
         success: false,

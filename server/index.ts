@@ -17,7 +17,10 @@ dotenv.config({ path: join(__dirname, '..', '.env') });
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+// 기본 CORS 는 응답 본문만 허용하고 비표준 헤더는 브라우저 JS 에서 읽지 못한다.
+// `X-Idempotent-Replayed` 는 클라이언트가 캐시 hit 안내(Task #65) 를 띄우려고
+// 직접 읽어야 하므로, cross-origin 배포 시에도 안전하게 노출되도록 명시한다.
+app.use(cors({ exposedHeaders: ['X-Idempotent-Replayed'] }));
 app.use(express.json({ limit: '30mb' }));
 app.use(express.urlencoded({ extended: true, limit: '30mb' }));
 

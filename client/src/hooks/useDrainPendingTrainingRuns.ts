@@ -394,6 +394,10 @@ async function drainOne(
       outcome: 'success',
       title: run.title,
       at: Date.now(),
+      // 서버 idempotency 캐시 hit 으로 흡수된 성공이라면 — 즉, 이전 시도에서
+      // 사실 서버까지는 도달해 있었던 케이스 — 토스트 톤을 "이미 저장된 결과를
+      // 다시 확인했어요" 로 바꿔 같은 결과가 두 건 저장된 게 아니라는 신호를 준다.
+      ...(result.replayed ? { replayed: true } : {}),
     });
     removePendingRun(run.localId);
     return 'success';

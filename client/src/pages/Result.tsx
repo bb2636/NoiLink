@@ -55,6 +55,14 @@ export type TrainingResultState = {
    * 미존재(undefined) 면 정보 없음으로 간주해 배너를 띄우지 않는다.
    */
   enduranceLateSampleCount?: number;
+  /**
+   * 결과 저장 요청이 서버 idempotency 캐시 hit 으로 흡수되었는지(Task #65).
+   * 사용자가 "재시도" 를 반복했지만 사실 첫 요청이 이미 서버에 도달해 저장된
+   * 케이스 — 결과 화면 상단에 "이미 저장된 결과를 불러왔어요" 식의 1회성
+   * 안내(subtle hint)를 띄워 같은 결과가 두 건 저장된 게 아니라는 신호를 준다.
+   * 일반(첫 응답) 흐름에서는 undefined 로 안내가 뜨지 않는다.
+   */
+  replayed?: boolean;
 };
 
 /** 회복이 N회 이상 발생하면 환경 점검 안내를 추가로 노출 (Task #36). */
@@ -242,6 +250,12 @@ export default function Result() {
     typeof state?.enduranceLateSampleCount === 'number' &&
     !isEnduranceLateConfident(state.enduranceLateSampleCount);
 
+  // idempotency 캐시 hit 안내(Task #65) — 사용자가 "재시도" 버튼을 반복해서 눌렀지만
+  // 사실 첫 요청이 이미 서버에 도달해 같은 결과가 저장되었던 케이스.
+  // 점수/배지 위에 1회성 subtle hint 로 노출해 "방금 다시 저장된 게 아니라
+  // 같은 결과를 다시 불러온 것" 임을 명확히 한다. 사용자 흐름은 막지 않는다.
+  const showReplayedHint = state?.replayed === true;
+
   // 반짝이 입자 (랜덤 시드 안정화)
   const particles = useMemo(
     () =>
@@ -354,6 +368,39 @@ export default function Result() {
             <span className="text-white"> 님</span>
             <span className="ml-1">👏</span>
           </motion.h2>
+
+          {/* idempotency 캐시 hit 안내(Task #65) — "재시도" 를 반복했지만 사실
+              첫 요청이 이미 서버에 저장되어 있던 케이스. 흐름을 막지 않는 1회성
+              subtle hint 로, 부분 결과 배지/점수보다도 위에 배치해 사용자가 맨
+              먼저 맥락을 알아채게 한다. 색상은 점수 원의 라임/회복 카드의 호박색,
+              부분 결과 배지의 연보라와 모두 겹치지 않는 차분한 회청색 톤을 사용. */}
+          {showReplayedHint && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.15 }}
+              role="status"
+              data-testid="replayed-hint"
+              aria-label="이미 저장된 결과를 불러왔습니다"
+              className="flex justify-center mb-3"
+            >
+              <span
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium"
+                style={{
+                  backgroundColor: 'rgba(124,217,255,0.10)',
+                  color: '#9CC8DC',
+                  border: '1px solid rgba(124,217,255,0.30)',
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  className="inline-block w-1.5 h-1.5 rounded-full"
+                  style={{ backgroundColor: '#9CC8DC' }}
+                />
+                이미 저장된 결과를 불러왔어요
+              </span>
+            </motion.div>
+          )}
 
           {/* 부분 결과 배지(Task #23) — 점수 원 바로 위에 노출.
               "수고했어요" 헤더 톤(축하)과 점수(낮을 수 있음) 사이에 배지를 끼워

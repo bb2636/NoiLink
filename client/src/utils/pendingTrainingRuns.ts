@@ -74,6 +74,14 @@ export interface PendingTrainingOutcome {
   at: number;
   /** 최종 실패의 경우 마지막 에러 메시지. */
   lastError?: string;
+  /**
+   * outcome 이 'success' 일 때, 이번 제출이 서버 idempotency 캐시 hit 으로
+   * 흡수된 결과인지(Task #65) 여부. true 면 토스트/배너에 "이미 저장된 결과를
+   * 다시 확인했어요" 톤의 안내가 노출된다 — 사용자가 같은 결과가 두 건 저장된
+   * 게 아닌지 헷갈리지 않도록 한다.
+   * 'final-failure' 에서는 의미가 없어 항상 undefined.
+   */
+  replayed?: boolean;
 }
 
 function safeReadArray<T>(key: string): T[] {

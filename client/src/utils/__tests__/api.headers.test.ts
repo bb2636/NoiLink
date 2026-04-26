@@ -17,6 +17,9 @@ const okResponse = () =>
   Promise.resolve({
     ok: true,
     status: 200,
+    // headers 가 없으면 api.ts 가 X-Idempotent-Replayed 헤더를 읽을 때 throw 한다.
+    // Headers() 인스턴스를 넘겨 실제 fetch 의 응답 객체와 동일한 동작을 흉내낸다.
+    headers: new Headers(),
     json: () => Promise.resolve({ success: true, data: { id: 'x' } }),
   } as unknown as Response);
 
@@ -80,5 +83,41 @@ describe('ApiClient: 헤더 합성 회귀', () => {
     const h = lastHeaders();
     expect(h['Authorization']).toBe('Bearer tok-4');
     expect(h['Idempotency-Key']).toBeUndefined();
+  });
+
+  // ───────────────────────────────────────────────────────────
+  // X-Idempotent-Replayed 헤더 → 응답 객체의 replayed 플래그 (Task #65)
+  // 서버는 캐시 hit 일 때 본문을 바꾸지 않고 헤더로만 신호를 보내므로,
+  // 클라이언트가 헤더를 ApiResponse.replayed 로 변환해 호출부에 흘려보낸다.
+  // ───────────────────────────────────────────────────────────
+  it('응답에 X-Idempotent-Replayed: true 헤더가 있으면 ApiResponse.replayed 가 true 로 합쳐진다 (Task #65)', async () => {
+    fetchSpy.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        status: 201,
+        headers: new Headers({ 'X-Idempotent-Replayed': 'true' }),
+        json: () => Promise.resolve({ success: true, data: { id: 'sess-cached' } }),
+      } as unknown as Response),
+    );
+
+    const res = await api.createSession({ foo: 'bar' }, { idempotencyKey: 'k' });
+    expect(res.success).toBe(true);
+    expect(res.data?.id).toBe('sess-cached');
+    expect(res.replayed).toBe(true);
+  });
+
+  it('헤더가 없으면 replayed 는 합쳐지지 않는다 (정상 첫 응답 회귀 보호)', async () => {
+    fetchSpy.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        status: 201,
+        headers: new Headers(),
+        json: () => Promise.resolve({ success: true, data: { id: 'sess-new' } }),
+      } as unknown as Response),
+    );
+
+    const res = await api.createSession({ foo: 'bar' });
+    expect(res.success).toBe(true);
+    expect(res.replayed).toBeUndefined();
   });
 });

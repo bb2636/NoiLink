@@ -32,6 +32,16 @@ export const IDEMPOTENCY_MAX_ENTRIES = 1000;
 export const IDEMPOTENCY_MAX_KEY_LEN = 200;
 /** KV 저장소 키. */
 export const IDEMPOTENCY_STORE_KEY = 'idempotency';
+/**
+ * 캐시 hit 으로 응답을 그대로 재반환할 때 함께 내려보내는 응답 헤더.
+ * 클라이언트는 이 헤더가 붙은 응답을 보면 "방금 보낸 요청은 사실 이미 서버에 도달해
+ * 첫 응답을 받은 적이 있다" 는 사실을 알 수 있다 — 같은 결과를 두 번 안내해
+ * 사용자를 혼란시키는 일을 막기 위한 신호.
+ *
+ * 본문(body)은 첫 응답을 그대로 보존하기 위해 절대 변경하지 않는다(동일성 회귀
+ * 테스트가 보호 중). 따라서 replayed 신호는 헤더로만 흘려보낸다.
+ */
+export const IDEMPOTENCY_REPLAYED_HEADER = 'X-Idempotent-Replayed';
 
 export interface IdempotencyEntry {
   status: number;
@@ -121,6 +131,11 @@ export async function withIdempotency(
   const store = await loadStore();
   const hit = store[cacheKey];
   if (hit && now - hit.createdAt < IDEMPOTENCY_TTL_MS) {
+    // 본문은 첫 응답과 비트 수준에서 동일하게 유지(회귀 테스트가 동일성 보장)하고,
+    // "이건 첫 응답의 재반환이다" 라는 신호는 헤더로만 흘려보낸다 — 클라이언트는
+    // 이 헤더를 보고 사용자에게 "이미 저장된 결과를 불러왔어요" 식의 1회성 안내를
+    // 띄울 수 있다.
+    res.setHeader(IDEMPOTENCY_REPLAYED_HEADER, 'true');
     res.status(hit.status).json(hit.body);
     return;
   }
