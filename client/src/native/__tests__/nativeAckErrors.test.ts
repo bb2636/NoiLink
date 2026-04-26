@@ -10,6 +10,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  ACK_ERROR_AUTO_DISMISS_MS,
   ACK_ERROR_COALESCE_WINDOW_MS,
   createAckErrorCoalescer,
   describeAckError,
@@ -18,6 +19,45 @@ import {
   subscribeAckErrorBanner,
   subscribeNativeAckErrors,
 } from '../nativeAckErrors';
+
+/**
+ * 가짜 타이머 — `subscribeAckErrorBanner` 의 자동 닫힘 회귀 테스트(Task #109)에서
+ * 결정적으로 시간을 흘리기 위해 setTimeout/clearTimeout 을 주입 가능한 큐로 대체한다.
+ */
+interface FakeTimerEntry {
+  id: number;
+  fireAt: number;
+  fn: () => void;
+}
+function createFakeTimer() {
+  let now = 0;
+  let nextId = 1;
+  const queue: FakeTimerEntry[] = [];
+  return {
+    now: () => now,
+    setTimer: (fn: () => void, ms: number) => {
+      const id = nextId;
+      nextId += 1;
+      queue.push({ id, fireAt: now + ms, fn });
+      return id;
+    },
+    clearTimer: (handle: unknown) => {
+      const idx = queue.findIndex((e) => e.id === handle);
+      if (idx >= 0) queue.splice(idx, 1);
+    },
+    advance(ms: number) {
+      now += ms;
+      // 누적 시간 안에 만료된 모든 타이머를 발화 (등록 순서 유지).
+      while (true) {
+        const i = queue.findIndex((e) => e.fireAt <= now);
+        if (i < 0) break;
+        const [entry] = queue.splice(i, 1);
+        entry.fn();
+      }
+    },
+    pending: () => queue.length,
+  };
+}
 
 describe('parseAckErrorString', () => {
   it('type:reason@field: message 형식을 분해한다', () => {
@@ -295,5 +335,163 @@ describe('subscribeAckErrorBanner', () => {
       new CustomEvent('noilink-native-ack', { detail: { id: 'ok', ok: true } }),
     );
     expect(setBanner).toHaveBeenCalledTimes(5);
+  });
+
+  /**
+   * Task #109 — 같은 사유의 거부가 짧은 시간 안에 폭주한 뒤 멎으면, 사용자가 토스트를
+   * 직접 닫지 않아도 마지막 거부로부터 `ACK_ERROR_AUTO_DISMISS_MS` 가 지나면 banner 가
+   * 자동으로 비워진다(`setBanner(null)`).
+   *
+   * 보호 정책:
+   *  1. 자동 닫힘 임계값 상수가 양수로 노출된다 (한 곳에서 관리).
+   *  2. burst 가 끝나고 임계값이 지나면 setBanner 가 한 번 더 호출되며 인자는 null 이다.
+   *  3. burst 가 이어지는 동안에는 자동 닫힘이 발화하지 않는다 — 새 거부마다 타이머가 재시작.
+   *  4. 구독 해제 시 보류 중인 자동 닫힘 타이머는 취소된다 — 언마운트 후 setBanner 호출 금지.
+   */
+  it('자동 닫힘 임계값은 양수의 단일 상수로 노출된다', () => {
+    expect(ACK_ERROR_AUTO_DISMISS_MS).toBeGreaterThan(0);
+  });
+
+  it('burst 가 멎고 자동 닫힘 임계값이 지나면 setBanner(null) 로 banner 를 비운다', () => {
+    const setBanner = vi.fn();
+    const timer = createFakeTimer();
+    unsub = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 5000,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+    });
+
+    // burst: 같은 키 3번 (50ms 간격) — 카운터로 묶인 단일 banner 가 갱신된다.
+    for (let i = 0; i < 3; i += 1) {
+      window.dispatchEvent(
+        new CustomEvent('noilink-native-ack', {
+          detail: {
+            id: `req-${i}`,
+            ok: false,
+            error: 'ble.writeLed:field-enum@payload.colorCode: bad enum',
+          },
+        }),
+      );
+      timer.advance(50);
+    }
+    expect(setBanner).toHaveBeenCalledTimes(3);
+    expect(setBanner.mock.calls[2][0]).toBe(
+      '내부 오류: ble.writeLed의 colorCode 허용되지 않은 값 (3건)\n[ble.writeLed:field-enum@payload.colorCode]',
+    );
+
+    // 마지막 거부 직후 임계값 직전까지는 자동 닫힘이 발화하지 않는다.
+    timer.advance(4000);
+    expect(setBanner).toHaveBeenCalledTimes(3);
+
+    // 마지막 거부 후 5000ms 경과 → 자동 닫힘 발화.
+    timer.advance(1000);
+    expect(setBanner).toHaveBeenCalledTimes(4);
+    expect(setBanner.mock.calls[3][0]).toBeNull();
+    // 큐가 비어 더 이상 발화할 타이머가 없다.
+    expect(timer.pending()).toBe(0);
+  });
+
+  it('burst 가 이어지는 동안은 자동 닫힘이 발화하지 않는다 (타이머 재시작)', () => {
+    const setBanner = vi.fn();
+    const timer = createFakeTimer();
+    unsub = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 5000,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+    });
+
+    // 첫 거부.
+    window.dispatchEvent(
+      new CustomEvent('noilink-native-ack', {
+        detail: {
+          id: 'req-0',
+          ok: false,
+          error: 'ble.writeLed:field-enum@payload.colorCode: bad enum',
+        },
+      }),
+    );
+    expect(setBanner).toHaveBeenCalledTimes(1);
+
+    // 4500ms 뒤 (자동 닫힘 직전) 새 거부 — 타이머가 재시작되어야 한다.
+    timer.advance(4500);
+    window.dispatchEvent(
+      new CustomEvent('noilink-native-ack', {
+        detail: {
+          id: 'req-1',
+          ok: false,
+          error: 'ble.writeLed:field-enum@payload.colorCode: bad enum',
+        },
+      }),
+    );
+    expect(setBanner).toHaveBeenCalledTimes(2);
+
+    // 추가 4500ms 경과 — 첫 타이머가 살아있었다면 발화했겠지만, 재시작되었으므로 아직 안 됨.
+    timer.advance(4500);
+    expect(setBanner).toHaveBeenCalledTimes(2);
+
+    // 마지막 거부 후 5000ms 누적되면 비로소 발화.
+    timer.advance(500);
+    expect(setBanner).toHaveBeenCalledTimes(3);
+    expect(setBanner.mock.calls[2][0]).toBeNull();
+  });
+
+  it('구독 해제 시 보류 중인 자동 닫힘 타이머는 취소된다', () => {
+    const setBanner = vi.fn();
+    const timer = createFakeTimer();
+    const off = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 5000,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+    });
+
+    window.dispatchEvent(
+      new CustomEvent('noilink-native-ack', {
+        detail: {
+          id: 'req-0',
+          ok: false,
+          error: 'ble.writeLed:field-enum@payload.colorCode: bad enum',
+        },
+      }),
+    );
+    expect(setBanner).toHaveBeenCalledTimes(1);
+    expect(timer.pending()).toBe(1);
+
+    off();
+    // 해제 직후 큐에서 자동 닫힘 타이머가 사라져 있어야 한다 — 언마운트 후 setBanner(null) 금지.
+    expect(timer.pending()).toBe(0);
+    timer.advance(60_000);
+    expect(setBanner).toHaveBeenCalledTimes(1);
+  });
+
+  it('autoDismissMs <= 0 이면 자동 닫힘이 비활성된다', () => {
+    const setBanner = vi.fn();
+    const timer = createFakeTimer();
+    unsub = subscribeAckErrorBanner(setBanner, {
+      windowMs: 2000,
+      now: timer.now,
+      autoDismissMs: 0,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+    });
+
+    window.dispatchEvent(
+      new CustomEvent('noilink-native-ack', {
+        detail: {
+          id: 'req-0',
+          ok: false,
+          error: 'ble.writeLed:field-enum@payload.colorCode: bad enum',
+        },
+      }),
+    );
+    expect(setBanner).toHaveBeenCalledTimes(1);
+    expect(timer.pending()).toBe(0);
+    timer.advance(60_000);
+    expect(setBanner).toHaveBeenCalledTimes(1);
   });
 });

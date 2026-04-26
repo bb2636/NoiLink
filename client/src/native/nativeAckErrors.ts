@@ -206,17 +206,74 @@ export function createAckErrorCoalescer(opts: AckErrorCoalescerOptions = {}) {
 }
 
 /**
+ * 마지막 ack 거부 후 새 거부가 들어오지 않은 채 이 시간이 지나면 banner 를
+ * 자동으로 닫아 (`setBanner(null)`) 화면을 비워준다 (Task #109).
+ *
+ * Task #106 의 카운터 표기 덕분에 burst 중에는 같은 토스트 자리에서 `(N건)` 만
+ * 갱신되지만, burst 가 끝난 뒤 사용자가 토스트를 닫지 않으면 마지막 카운터가
+ * 화면에 계속 남는다. burst 가 식었음을 사용자가 인지할 수 있도록 일정 시간
+ * 동안 추가 거부가 없으면 알아서 사라지게 만든다.
+ */
+export const ACK_ERROR_AUTO_DISMISS_MS = 5000;
+
+export interface AckBannerSubscriptionOptions extends AckErrorCoalescerOptions {
+  /**
+   * 마지막 ack 거부 후 새 거부 없이 이 시간이 지나면 `setBanner(null)` 로 자동 닫는다
+   * (기본 `ACK_ERROR_AUTO_DISMISS_MS`). 0 이하면 자동 닫힘 비활성.
+   */
+  autoDismissMs?: number;
+  /**
+   * 테스트 주입용 타이머. 기본 `setTimeout` / `clearTimeout`. `now` 와 마찬가지로
+   * 가짜 시계 환경에서 자동 닫힘 회귀 테스트를 결정적으로 돌리기 위한 훅.
+   */
+  setTimer?: (fn: () => void, ms: number) => unknown;
+  clearTimer?: (handle: unknown) => void;
+}
+
+/**
  * `subscribeNativeAckErrors` + `createAckErrorCoalescer` 조합 헬퍼.
  *
  * Device / DeviceAdd / TrainingSessionPlay 가 동일하게 사용하는 패턴 — 거부 사유를
  * `setBanner` 로 흘리되 같은 키가 짧은 시간 안에 쏟아지면 카운터만 올린다.
+ *
+ * 추가로, 마지막 거부 후 `autoDismissMs` 동안 새 거부가 없으면 `setBanner(null)` 을
+ * 호출해 banner 를 자동으로 닫는다 (Task #109). 새 거부가 들어올 때마다 타이머는
+ * 다시 시작되므로, burst 가 이어지는 동안은 토스트가 닫히지 않는다.
  */
 export function subscribeAckErrorBanner(
-  setBanner: (banner: string) => void,
-  opts?: AckErrorCoalescerOptions,
+  setBanner: (banner: string | null) => void,
+  opts?: AckBannerSubscriptionOptions,
 ): () => void {
   const next = createAckErrorCoalescer(opts);
-  return subscribeNativeAckErrors((payload) => {
+  const autoDismissMs = opts?.autoDismissMs ?? ACK_ERROR_AUTO_DISMISS_MS;
+  const setTimer =
+    opts?.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+  const clearTimer =
+    opts?.clearTimer ??
+    ((handle: unknown) =>
+      clearTimeout(handle as ReturnType<typeof setTimeout>));
+
+  let dismissHandle: unknown = null;
+  const cancelDismiss = () => {
+    if (dismissHandle != null) {
+      clearTimer(dismissHandle);
+      dismissHandle = null;
+    }
+  };
+
+  const off = subscribeNativeAckErrors((payload) => {
     setBanner(next(payload.error).banner);
+    cancelDismiss();
+    if (autoDismissMs > 0) {
+      dismissHandle = setTimer(() => {
+        dismissHandle = null;
+        setBanner(null);
+      }, autoDismissMs);
+    }
   });
+
+  return () => {
+    cancelDismiss();
+    off();
+  };
 }
