@@ -584,3 +584,37 @@ export const trainingCatalogById = Object.fromEntries(
 
 /** 멀티태스킹 표기 ↔ API */
 export const MULTITASKING_API_MODE: TrainingMode = 'AGILITY';
+
+// =============================================================================
+// 8. 부분 결과 저장 임계값 (모드별)
+// =============================================================================
+
+/**
+ * 백그라운드 중단 시 "부분 결과 저장" 모달을 띄우는 진행률 임계값(0~1).
+ *
+ * 모든 모드에 동일한 80%를 쓰면 모드 특성에 맞지 않는 케이스가 생긴다:
+ *  - ENDURANCE: Late 구간(200~300s) 점수가 핵심이라 90% 이상이 아니면 점수가
+ *    의미 없다 (Late 구간 표본 자체가 비어 있게 됨).
+ *  - FOCUS / JUDGMENT: 자극 빈도가 균질해 60% 진행이면 표본이 충분히 모여
+ *    Commission/Omission/RT 안정성 지표 신뢰도가 확보된다.
+ *  - COMPOSITE 5사이클: 4사이클(=80%) 이상이어야 6대 지표가 어느 정도 순환된다.
+ *  - 그 외 (MEMORY/COMPREHENSION/AGILITY/FREE): 80% 기본값을 유지한다.
+ *
+ * 0.0 = 항상 부분 저장 / 1.0 = 사실상 항상 즉시 종료. 단일 출처로 두어 클라이언트와
+ * 회귀 테스트가 같은 값을 참조하도록 한다.
+ */
+export const MODE_PARTIAL_RESULT_THRESHOLDS: Record<TrainingMode, number> = {
+  MEMORY: 0.8,
+  COMPREHENSION: 0.8,
+  FOCUS: 0.6,
+  JUDGMENT: 0.6,
+  AGILITY: 0.8,
+  ENDURANCE: 0.9,
+  COMPOSITE: 0.8,
+  FREE: 0.8,
+};
+
+/** 모드별 부분 결과 저장 임계값(0~1)을 반환한다. 미정의 모드는 0.8 폴백. */
+export function partialThresholdForMode(mode: TrainingMode): number {
+  return MODE_PARTIAL_RESULT_THRESHOLDS[mode] ?? 0.8;
+}

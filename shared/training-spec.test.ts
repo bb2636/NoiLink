@@ -24,6 +24,8 @@ import {
   scoreJudgment,
   scoreEndurance,
   scoreAgilityMultitasking,
+  partialThresholdForMode,
+  MODE_PARTIAL_RESULT_THRESHOLDS,
   buildCompositePhasePlan,
   maintainRatio,
   freeModeYieldsScore,
@@ -664,5 +666,35 @@ describe('TRAINING_CATALOG / trainingCatalogById', () => {
   });
   it('MULTITASKING_API_MODE = AGILITY (멀티태스킹 표기 ↔ API)', () => {
     expect(MULTITASKING_API_MODE).toBe('AGILITY');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. 부분 결과 저장 임계값 (모드별) — Task #24
+// ---------------------------------------------------------------------------
+
+describe('partialThresholdForMode / MODE_PARTIAL_RESULT_THRESHOLDS', () => {
+  it('ENDURANCE 는 0.9 (Late 구간 점수 보장)', () => {
+    expect(partialThresholdForMode('ENDURANCE')).toBe(0.9);
+    expect(MODE_PARTIAL_RESULT_THRESHOLDS.ENDURANCE).toBe(0.9);
+  });
+  it('FOCUS / JUDGMENT 는 0.6 (자극 균질, 표본 충분)', () => {
+    expect(partialThresholdForMode('FOCUS')).toBe(0.6);
+    expect(partialThresholdForMode('JUDGMENT')).toBe(0.6);
+  });
+  it('COMPOSITE 는 0.8 (5사이클 중 4사이클)', () => {
+    expect(partialThresholdForMode('COMPOSITE')).toBe(0.8);
+  });
+  it('MEMORY / COMPREHENSION / AGILITY / FREE 는 기본 0.8', () => {
+    expect(partialThresholdForMode('MEMORY')).toBe(0.8);
+    expect(partialThresholdForMode('COMPREHENSION')).toBe(0.8);
+    expect(partialThresholdForMode('AGILITY')).toBe(0.8);
+    expect(partialThresholdForMode('FREE')).toBe(0.8);
+  });
+  it('모든 모드의 임계값이 0~1 범위 안에 있다', () => {
+    for (const v of Object.values(MODE_PARTIAL_RESULT_THRESHOLDS)) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
   });
 });

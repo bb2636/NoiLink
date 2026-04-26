@@ -12,7 +12,7 @@ import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import PodGrid from '../components/PodGrid/PodGrid';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noilink/shared';
-import { resolveBleStabilityThresholds, SESSION_MAX_MS } from '@noilink/shared';
+import { SESSION_MAX_MS, partialThresholdForMode, resolveBleStabilityThresholds } from '@noilink/shared';
 import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
 import { enqueuePendingRun } from '../utils/pendingTrainingRuns';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
@@ -21,17 +21,14 @@ import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import type { TrainingAbortReason } from './trainingAbortReason';
 
 /**
- * 백그라운드 중단 시 부분 결과 저장을 제안하는 진행률 임계값.
- * 0.8 = 전체 시간의 80% 이상 진행한 세션은 사용자에게 결과 저장 선택지를 제시한다.
- *
- * 근거:
- *  - 너무 낮으면 표본이 부족해 산출 점수의 신뢰도가 떨어진다(특히 ENDURANCE의
- *    Late 구간 점수, COMPOSITE의 마지막 사이클 모드 등은 후반부에 누적된다).
- *  - 너무 높으면 "거의 끝났는데 아무것도 안 남았다"는 사용자 불만이 그대로 남는다.
- *  - 80%는 RHYTHM/COGNITIVE 페이즈가 한 번씩 돌아 6대 지표 중 다수가 산출되는
- *    실용적 하한선이다 (COMPOSITE 5사이클 기준 4사이클 완료 직전).
+ * 백그라운드 중단 시 부분 결과 저장을 제안하는 진행률 임계값은 모드별로 다르다.
+ * 단일 출처는 `shared/training-spec` 의 `partialThresholdForMode(mode)` 이며,
+ * 본 화면은 그 값을 그대로 참조한다. 모드별 사유 요약:
+ *  - ENDURANCE 0.90: Late 구간(200~300s)이 점수의 핵심이라 90% 미만은 표본이 비어 의미 없음.
+ *  - FOCUS / JUDGMENT 0.60: 자극이 균질해 60%만 진행해도 표본이 충분.
+ *  - COMPOSITE 0.80: 5사이클 중 4사이클(=80%) 이상이어야 6대 지표가 어느 정도 순환.
+ *  - 그 외 (MEMORY/COMPREHENSION/AGILITY/FREE) 0.80 기본값.
  */
-const PARTIAL_RESULT_THRESHOLD = 0.8;
 
 /**
  * BLE 단절이 잦을 때 사용자에게 환경 점검을 부드럽게 권하는 토스트의 임계값 (Task #38).
@@ -230,7 +227,7 @@ export default function TrainingSessionPlay() {
     if (!state) return;
     if (!isNoiLinkNativeShell()) return;
     // 백그라운드 진입은 두 갈래로 분기한다:
-    //   (1) 거의 끝났던 점수 산출 세션 (진행률 ≥ PARTIAL_RESULT_THRESHOLD)
+    //   (1) 거의 끝났던 점수 산출 세션 (진행률 ≥ partialThresholdForMode(apiMode))
     //       → engine.endNow()로 부분 메트릭만 산출해두고, 화면을 유지한 채
     //         "결과 보러가기 / 그만두기" 모달을 띄운다. finalizeAndAbort 는
     //         호출하지 않으므로 navigate 가 발생하지 않고, aborted ref 가
@@ -246,8 +243,9 @@ export default function TrainingSessionPlay() {
       const elapsedAtAbort = elapsedMsRef.current;
       const progressRatio = totalMs > 0 ? Math.min(1, elapsedAtAbort / totalMs) : 0;
       const scorable = state.yieldsScore && state.apiMode !== 'FREE';
+      const partialThreshold = partialThresholdForMode(state.apiMode);
 
-      if (scorable && progressRatio >= PARTIAL_RESULT_THRESHOLD) {
+      if (scorable && progressRatio >= partialThreshold) {
         // 부분 결과 모달 경로: aborted 만 직접 set 하여 자동 제출을 차단하고,
         // 엔진을 즉시 종료해 부분 메트릭(setEngineMetrics)을 산출해둔다.
         aborted.current = true;
