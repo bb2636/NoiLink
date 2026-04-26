@@ -100,7 +100,10 @@ ORDER BY events DESC;
   있다는 신호. 자동 닫힘 임계값을 늘리거나 화면 전환 직전 강제 마감 훅 추가를 검토.
 
 로컬 JSON / Replit DB 백엔드에서는 `ackBannerEvents` 키를 직접 읽어 동일한
-집계를 스크립트로 돌리면 된다.
+집계를 스크립트로 돌리면 된다 — `node scripts/ack-banner-stats.mjs --days 7`
+한 줄이 reason 별 events / avg_burst_count / avg_burst_ms / p50/p95 burst_ms 를
+PostgreSQL 백엔드와 같은 한 줄 형식으로 출력한다 (스크립트는 `server/db.ts` 의
+동일 추상화를 거치므로 PostgreSQL 백엔드에서도 같은 명령으로 동작한다).
 
 ---
 
