@@ -15,7 +15,6 @@
  *    호출 횟수도 정확히 1 로 잠근다(중복 호출 회귀 방지).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';

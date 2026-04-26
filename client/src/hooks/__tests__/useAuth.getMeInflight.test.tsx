@@ -16,7 +16,6 @@
  *  요청으로 합쳐지게 한다.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';

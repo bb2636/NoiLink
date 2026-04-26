@@ -315,7 +315,6 @@ describe('POST /api/metrics/raw — recovery 페이로드 정규화', () => {
   it('음수·NaN 으로 들어온 recovery 를 저장 직전에 0 으로 정규화하고 (양 끝이 모두 0이면) 필드를 제거한다', async () => {
     const app = buildApp();
     const payload = baseRawMetrics({
-      // @ts-expect-error - 잘못된 모양을 의도적으로 보냄
       recovery: { excludedMs: -500, windows: Number.NaN },
     });
 
@@ -331,7 +330,6 @@ describe('POST /api/metrics/raw — recovery 페이로드 정규화', () => {
   it('한쪽 필드만 살아있는 부분 손상 페이로드는 유효 부분을 보존하면서 음수·NaN 만 정규화한다', async () => {
     const app = buildApp();
     const payload = baseRawMetrics({
-      // @ts-expect-error - excludedMs 는 정상, windows 는 음수
       recovery: { excludedMs: 12_345.7, windows: -3 },
     });
 
