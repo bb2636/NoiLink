@@ -308,8 +308,28 @@ class ApiClient {
   }
 
   // Auth API
+  // Task #143 — `getMe` 의 in-flight Promise 공유 가드.
+  // 부트 useEffect, `noilink-native-session` 이벤트 핸들러, 다른 화면의
+  // 재확인 등 여러 트리거가 거의 동시에 `getMe()` 를 부르면 같은 사용자
+  // 정보 조회가 그대로 N 회 서버에 흐른다(Task #142 가 부트 useEffect 자체의
+  // 중복은 잠갔지만, 부트 ↔ 다른 트리거의 경합은 여전히 열려 있다).
+  // 동일 시점의 호출은 같은 Promise 를 그대로 돌려주어 네트워크 요청을 1회로
+  // 합치되, 호출이 settle 된 다음 호출자는 새 요청을 만들 수 있어야 하므로
+  // 정확히 자기 자신일 때만 슬롯을 비운다(이미 다른 새 호출이 들어와
+  // 슬롯을 차지하고 있다면 그쪽을 그대로 둔다).
+  private inflightGetMe: Promise<ApiResponse<User>> | null = null;
+
   async getMe(): Promise<ApiResponse<User>> {
-    return this.request<User>('/users/me');
+    if (this.inflightGetMe) {
+      return this.inflightGetMe;
+    }
+    const p = this.request<User>('/users/me').finally(() => {
+      if (this.inflightGetMe === p) {
+        this.inflightGetMe = null;
+      }
+    });
+    this.inflightGetMe = p;
+    return p;
   }
 
   async getOrganizationMembers(): Promise<ApiResponse<User[]>> {
