@@ -14,6 +14,11 @@ import {
   shouldShowRecoveryCoaching,
   type AggregatedRecoveryStats,
 } from '@noilink/shared';
+import {
+  clearDismissed as clearRecoveryCoachingDismissed,
+  readDismissed as readRecoveryCoachingDismissed,
+  writeDismissed as writeRecoveryCoachingDismissed,
+} from '../utils/recoveryCoachingDismissal';
 
 // 데모 프로필 단일 출처 — 리포트/랭킹과 동일한 수치를 사용
 // TODO: 실제 API 데이터로 교체
@@ -318,7 +323,7 @@ function StandardHome({ variant, home, user }: StandardProps) {
         </div>
 
         {/* BLE 재연결 회복 통계·코칭(Task #37) — 트레이닝 요약 직후 노출 */}
-        <RecoverySection stats={stats.recoveryStats} />
+        <RecoverySection stats={stats.recoveryStats} userId={user?.id ?? null} />
 
         {/* 나의 트렌드 */}
         <h2 className="text-white text-base font-semibold mb-3">나의 트렌드</h2>
@@ -361,18 +366,41 @@ function StandardHome({ variant, home, user }: StandardProps) {
 // - 최근 N개 세션의 세션당 평균 회복 시간이 30초 이상이면 "환경 점검" 카드를
 //   띄운다(트리거 = 카드 카피와 1:1 일치). 단발성 outlier 만으로는 띄우지 않는다.
 // 회복이 한 번도 없었던 경우엔 카드를 통째로 숨겨 잡음을 만들지 않는다.
-function RecoverySection({ stats }: { stats: AggregatedRecoveryStats }) {
+function RecoverySection({
+  stats,
+  userId,
+}: {
+  stats: AggregatedRecoveryStats;
+  userId: string | null;
+}) {
   const showCoaching = shouldShowRecoveryCoaching(stats);
 
   // 사용자가 안내를 닫을 수 있도록 하되(과도한 잔소리 방지),
-  // 신호가 임계 미만으로 내려가면 닫힘 상태를 자동으로 초기화 —
-  // 다음에 다시 30초를 넘으면 카드가 새로 등장한다(auto re-arm).
+  // 닫힘 상태를 사용자별로 영속화해 다음 페이지 진입에서도 같은 트립 동안에는
+  // 다시 노출되지 않도록 한다(Task #74). 신호가 임계 미만으로 내려가면(=트립 종료)
+  // 닫힘 기억을 자동으로 비워, 다음에 다시 임계를 넘으면 새 안내로 다시 등장한다.
+  //
   // Hooks 규칙(early return 보다 위에서 무조건 호출) 준수 — 회복이
   // 한 번도 없던 상태와 있는 상태가 오가도 호출 순서가 깨지지 않는다.
-  const [coachingDismissed, setCoachingDismissed] = useState(false);
+  // userId 가 바뀌면(다른 계정 로그인) 해당 사용자의 저장값으로 다시 동기화한다.
+  const [coachingDismissed, setCoachingDismissed] = useState<boolean>(() =>
+    readRecoveryCoachingDismissed(userId),
+  );
   useEffect(() => {
-    if (!showCoaching) setCoachingDismissed(false);
-  }, [showCoaching]);
+    setCoachingDismissed(readRecoveryCoachingDismissed(userId));
+  }, [userId]);
+  useEffect(() => {
+    if (!showCoaching) {
+      // 트립이 끝났다 — 다음 트립에선 새 안내로 떠야 하므로 기억을 비운다.
+      clearRecoveryCoachingDismissed(userId);
+      setCoachingDismissed(false);
+    }
+  }, [showCoaching, userId]);
+
+  const handleDismiss = () => {
+    setCoachingDismissed(true);
+    writeRecoveryCoachingDismissed(userId);
+  };
 
   // 회복이 한 번도 없었던 사용자에게는 카드를 노출하지 않는다 — 잡음 방지.
   if (stats.sessionsWithRecovery === 0) return null;
@@ -419,7 +447,7 @@ function RecoverySection({ stats }: { stats: AggregatedRecoveryStats }) {
               type="button"
               aria-label="안내 닫기"
               data-testid="recovery-coaching-dismiss"
-              onClick={() => setCoachingDismissed(true)}
+              onClick={handleDismiss}
               className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-full text-base leading-none"
               style={{ color: '#F5E0A0', backgroundColor: 'transparent' }}
             >
