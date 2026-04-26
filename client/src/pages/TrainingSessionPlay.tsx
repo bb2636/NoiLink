@@ -18,7 +18,7 @@ import { enqueuePendingRun } from '../utils/pendingTrainingRuns';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
 import { bleReconnectNow, bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
-import type { TrainingAbortReason } from './trainingAbortReason';
+import { isBleUnstableForAbort, type TrainingAbortReason } from './trainingAbortReason';
 
 /**
  * 백그라운드 중단 시 부분 결과 저장을 제안하는 진행률 임계값은 모드별로 다르다.
@@ -208,13 +208,25 @@ export default function TrainingSessionPlay() {
     if (aborted.current) return;
     if (engineMetrics || submitting) return;
     aborted.current = true;
+    // BLE 단절 종료에 한해, 회복 누적 통계가 임계 이상이면 목록 화면 배너에
+    // 환경 점검 한 줄을 덧붙이도록 navigate state 에 bleUnstable 플래그를 함께 전달
+    // (Task #43). 임계 미달이거나 첫 단절 즉시 종료 케이스는 false 가 되어
+    // 기존 메시지 그대로 노출된다. 통계는 endNow() 직전에 읽어 진행 중 회복
+    // 구간(getRecoveryStats 가 ongoing 시간을 포함)까지 반영되도록 한다.
+    const bleUnstable =
+      reason === 'ble-disconnect'
+        ? isBleUnstableForAbort(engineRef.current?.getRecoveryStats())
+        : false;
     const eng = engineRef.current;
     if (eng) {
       // LED OFF + CONTROL_STOP + onComplete(메트릭) 발사
       eng.endNow();
       // engineRef는 비우지 않는다 — 이 시점부터는 endNow() 호출이 idempotent.
     }
-    navigate('/training', { replace: true, state: { abortReason: reason } });
+    navigate('/training', {
+      replace: true,
+      state: { abortReason: reason, bleUnstable },
+    });
   }, [engineMetrics, submitting, navigate]);
 
   // ── 앱이 백그라운드로 들어가면 즉시 세션 종료 (네이티브 셸에서만) ──

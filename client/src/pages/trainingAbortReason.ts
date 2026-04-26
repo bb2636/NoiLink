@@ -15,7 +15,10 @@ export type TrainingAbortReason =
   | 'ble-disconnect'    // NoiPod(BLE) 기기와의 연결이 끊김
   | 'save-failed';      // 결과 제출 실패 후 사용자가 재시도 없이 화면을 떠남
 
-export type TrainingAbortTone = 'neutral' | 'warning';
+// neutral: 일반 안내(검정 톤),
+// warning: 주의가 필요한 사유(주황 톤),
+// caution: 회복 가능성이 있는 환경 점검 안내(노란 톤 — Task #38 토스트와 동일).
+export type TrainingAbortTone = 'neutral' | 'warning' | 'caution';
 
 export interface TrainingAbortNotice {
   message: string;
@@ -37,6 +40,60 @@ export const TRAINING_ABORT_NOTICE: Record<TrainingAbortReason, TrainingAbortNot
   },
 };
 
+/**
+ * BLE 단절이 누적되어 환경 점검을 권할 때 abort 배너에 덧붙이는 한 줄 (Task #43).
+ * 트레이닝 화면 토스트(Task #38)와 동일한 어휘를 사용해 일관된 메시지를 전달한다.
+ *  - 토스트: "기기 연결이 자주 끊겨요" (현재 진행형 — 세션 도중 안내)
+ *  - abort 배너: "기기 연결이 자주 끊겼어요" (과거형 — 이미 종료된 시점에서 회고)
+ */
+export const TRAINING_BLE_UNSTABLE_HINT =
+  '기기 연결이 자주 끊겼어요. 거리·간섭을 확인해 보세요.';
+
+/**
+ * abort 사유 + 부가 신호로부터 최종 안내(메시지/톤)를 만든다.
+ *
+ * Task #43:
+ *  - reason === 'ble-disconnect' 이고 bleUnstable === true 면 환경 점검 한 줄을
+ *    줄바꿈으로 덧붙이고 톤을 'caution'(노란 톤)으로 바꾼다.
+ *    → 이 경우는 한 세션에서 회복 시도가 누적된 흔적이 있어 사용자가 즉시 취할 수
+ *      있는 행동(가까이 두기 / 간섭원 제거)이 있다.
+ *  - bleUnstable 이 false 거나 다른 사유면 기존 사전 항목을 그대로 사용한다.
+ *    → 첫 단절 즉시 종료된 케이스는 기존의 일반 안내만 보여준다.
+ */
+export function getTrainingAbortNotice(
+  reason: TrainingAbortReason,
+  opts?: { bleUnstable?: boolean },
+): TrainingAbortNotice {
+  const base = TRAINING_ABORT_NOTICE[reason];
+  if (reason === 'ble-disconnect' && opts?.bleUnstable) {
+    return {
+      message: `${base.message}\n${TRAINING_BLE_UNSTABLE_HINT}`,
+      tone: 'caution',
+    };
+  }
+  return base;
+}
+
 export function isTrainingAbortReason(v: unknown): v is TrainingAbortReason {
   return v === 'background' || v === 'ble-disconnect' || v === 'save-failed';
+}
+
+/**
+ * 회복 통계가 abort 시점에 환경 점검 안내를 덧붙일 임계를 넘었는지 판정 (Task #43).
+ *  - 회복 구간이 1회 이상 시작되었거나
+ *  - 회복 누적 시간이 5초 이상이면 true.
+ *
+ * 트레이닝 화면 안내 토스트(Task #38)는 더 보수적인 임계(3회 / 15s)를 쓰지만,
+ * abort 시점에는 "이미 끝나버린 세션"이므로 사용자가 다음 행동을 바로 잡도록
+ * 좀 더 낮은 임계로 안내한다.
+ */
+export const TRAINING_BLE_UNSTABLE_WINDOW_THRESHOLD = 1;
+export const TRAINING_BLE_UNSTABLE_MS_THRESHOLD = 5_000;
+
+export function isBleUnstableForAbort(stats: { windows: number; totalMs: number } | null | undefined): boolean {
+  if (!stats) return false;
+  return (
+    stats.windows >= TRAINING_BLE_UNSTABLE_WINDOW_THRESHOLD ||
+    stats.totalMs >= TRAINING_BLE_UNSTABLE_MS_THRESHOLD
+  );
 }

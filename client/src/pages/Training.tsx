@@ -12,9 +12,10 @@ import { MobileLayout } from '../components/Layout';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import { TRAINING_BY_ID } from '../utils/trainingConfig';
 import {
-  TRAINING_ABORT_NOTICE,
+  getTrainingAbortNotice,
   isTrainingAbortReason,
   type TrainingAbortReason,
+  type TrainingAbortTone,
 } from './trainingAbortReason';
 import {
   popOutcomeNotices,
@@ -22,10 +23,13 @@ import {
 } from '../utils/pendingTrainingRuns';
 
 // 비정상 종료 안내 배너의 톤별 색상.
-// neutral: 일반 안내(검정 배경/흰 글자), warning: 주의가 필요한 사유(주황 배경/검정 글자).
-const ABORT_BANNER_STYLE: Record<'neutral' | 'warning', { background: string; text: string }> = {
+// neutral: 일반 안내(검정 배경/흰 글자),
+// warning: 주의가 필요한 사유(주황 배경/검정 글자),
+// caution: 환경 점검을 권하는 회복 가능한 사유(노란 톤 — Task #38 토스트와 동일한 #3A2A00 / #FFD66B).
+const ABORT_BANNER_STYLE: Record<TrainingAbortTone, { background: string; text: string }> = {
   neutral: { background: '#1A1A1A', text: '#FFFFFF' },
   warning: { background: '#F59E0B', text: '#1A1A1A' },
+  caution: { background: '#3A2A00', text: '#FFD66B' },
 };
 
 interface CardItem {
@@ -76,9 +80,19 @@ export default function Training() {
   // - 한 번 표시 후 history state를 즉시 비워, 같은 화면을 다시 마운트해도 재노출되지 않는다.
   // - 사용자가 명시적으로 취소(뒤로/취소 버튼) — 단, 결과 저장 실패 후 떠난 경우는 제외 — 하거나
   //   정상 종료된 경로에서는 state가 없으므로 배너가 뜨지 않는다.
-  const [abortReason, setAbortReason] = useState<TrainingAbortReason | null>(() => {
-    const raw = (location.state as { abortReason?: unknown } | null)?.abortReason;
-    return isTrainingAbortReason(raw) ? raw : null;
+  const [abortInfo, setAbortInfo] = useState<{
+    reason: TrainingAbortReason;
+    bleUnstable: boolean;
+  } | null>(() => {
+    const raw = location.state as
+      | { abortReason?: unknown; bleUnstable?: unknown }
+      | null;
+    if (!raw || !isTrainingAbortReason(raw.abortReason)) return null;
+    // bleUnstable 은 'ble-disconnect' 사유에서만 의미가 있다 — 다른 사유에는 무시.
+    // 알 수 없는 값(미설정/잘못된 타입)도 false 로 안전 회귀.
+    const bleUnstable =
+      raw.abortReason === 'ble-disconnect' && raw.bleUnstable === true;
+    return { reason: raw.abortReason, bleUnstable };
   });
 
   // 백그라운드 drain 결과(성공/최종 실패)를 1회성 배너로 안내하기 위해
@@ -87,7 +101,7 @@ export default function Training() {
   const [outcomes, setOutcomes] = useState<PendingTrainingOutcome[]>(() => popOutcomeNotices());
 
   useEffect(() => {
-    if (abortReason) {
+    if (abortInfo) {
       // React Router state를 즉시 비워, 새로고침/뒤로가기 등으로 같은 화면이 재마운트되어도
       // 안내 배너가 재노출되지 않도록 한다.
       // window.history.replaceState 대신 router의 navigate(replace)를 사용해
@@ -98,15 +112,18 @@ export default function Training() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const abortNotice = abortReason ? TRAINING_ABORT_NOTICE[abortReason] : null;
+  const abortNotice = abortInfo
+    ? getTrainingAbortNotice(abortInfo.reason, { bleUnstable: abortInfo.bleUnstable })
+    : null;
   const abortStyle = abortNotice ? ABORT_BANNER_STYLE[abortNotice.tone] : null;
 
   // 배너는 위치(fixed top-0)가 겹치므로 한 번에 하나씩 노출.
   // 우선순위: 비정상 종료(abort) → 백그라운드 drain 결과 outcome 들 (FIFO).
   const banners: QueuedBanner[] = [];
-  if (abortNotice && abortStyle) {
+  if (abortInfo && abortNotice && abortStyle) {
     banners.push({
-      key: `abort-${abortReason}`,
+      // 같은 사유라도 bleUnstable 여부에 따라 메시지/톤이 달라지므로 키에 포함.
+      key: `abort-${abortInfo.reason}-${abortInfo.bleUnstable ? 'unstable' : 'plain'}`,
       message: abortNotice.message,
       background: abortStyle.background,
       textColor: abortStyle.text,
@@ -124,8 +141,8 @@ export default function Training() {
   const activeBanner = banners[0];
 
   const dismissActiveBanner = () => {
-    if (abortReason) {
-      setAbortReason(null);
+    if (abortInfo) {
+      setAbortInfo(null);
       return;
     }
     setOutcomes((prev) => prev.slice(1));

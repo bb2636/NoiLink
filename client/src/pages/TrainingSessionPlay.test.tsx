@@ -298,6 +298,12 @@ function onTrainingListWithReason(reason: string): boolean {
   return state?.abortReason === reason;
 }
 
+/** navigate state 의 bleUnstable 값을 그대로 노출 (Task #43 회귀 검증용). */
+function bleUnstableFromLastLocation(): unknown {
+  const state = lastLocation?.state as { bleUnstable?: unknown } | null;
+  return state?.bleUnstable;
+}
+
 // ───────────────────────────────────────────────────────────
 // 테스트
 // ───────────────────────────────────────────────────────────
@@ -392,6 +398,88 @@ describe('TrainingSessionPlay — BLE 단절/재연결 분기', () => {
     });
     expect(lastLocation).toBeNull();
     expect(container?.querySelector('[data-testid="pod-grid"]')).toBeTruthy();
+  });
+});
+
+/**
+ * Task #43 — BLE 자동 종료 시 회복 통계에 따라 환경 점검 안내를 함께 띄우는 신호 회귀 테스트
+ *
+ * 정책 (TrainingSessionPlay.finalizeAndAbort):
+ *   - reason='ble-disconnect' 종료 시점에 engineRef.getRecoveryStats() 를 읽어
+ *     임계(1회 이상 OR 5초 이상)를 넘으면 navigate state 에 bleUnstable=true 를 함께 전달.
+ *   - 임계 미달이거나 첫 단절 즉시 종료된 케이스는 bleUnstable=false.
+ *   - retry-failed 즉시 종료 분기와 그레이스 만료 분기 모두에서 동일하게 동작해야 한다.
+ *
+ * navigate state 의 message/톤 가공은 Training.tsx 책임이므로 여기서는 신호(플래그)
+ * 전달만 검증한다.
+ */
+describe('TrainingSessionPlay — BLE 자동 종료 시 환경 점검 신호 (Task #43)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    lastLocation = null;
+    (window as unknown as { ReactNativeWebView?: { postMessage: (s: string) => void } })
+      .ReactNativeWebView = { postMessage: () => {} };
+  });
+
+  afterEach(() => {
+    unmountApp();
+    delete (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView;
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it('첫 단절 즉시 종료(retry-failed, 회복 통계 0) 케이스는 bleUnstable=false', () => {
+    renderApp();
+    // 회복 통계는 기본값 {windows:0, totalMs:0} — 임계 미달.
+    dispatchBridge(bleConnectionMessage({ connected: false, reason: 'retry-failed' }));
+
+    expect(onTrainingListWithReason('ble-disconnect')).toBe(true);
+    expect(bleUnstableFromLastLocation()).toBe(false);
+  });
+
+  it('회복 windows ≥ 1 이면 retry-failed 종료에서도 bleUnstable=true 를 전달한다', () => {
+    renderApp();
+    // 한 번 회복했지만 다시 끊겨 최종 실패한 시나리오를 통계로만 모사.
+    getFakeEngine().setRecoveryStats({ windows: 1, totalMs: 1_000 });
+    dispatchBridge(bleConnectionMessage({ connected: false, reason: 'retry-failed' }));
+
+    expect(onTrainingListWithReason('ble-disconnect')).toBe(true);
+    expect(bleUnstableFromLastLocation()).toBe(true);
+  });
+
+  it('누적 회복 시간이 5초 이상이면 windows 0 이어도 bleUnstable=true', () => {
+    renderApp();
+    // 회복이 한 번도 마감되지 않았더라도(=현재 진행 중 구간 포함) 5s 누적이면 임계 충족.
+    getFakeEngine().setRecoveryStats({ windows: 0, totalMs: 5_000 });
+    dispatchBridge(bleConnectionMessage({ connected: false, reason: 'retry-failed' }));
+
+    expect(onTrainingListWithReason('ble-disconnect')).toBe(true);
+    expect(bleUnstableFromLastLocation()).toBe(true);
+  });
+
+  it('누적 회복 시간이 5초 미만이고 windows 도 0 이면 bleUnstable=false', () => {
+    renderApp();
+    getFakeEngine().setRecoveryStats({ windows: 0, totalMs: 4_999 });
+    dispatchBridge(bleConnectionMessage({ connected: false, reason: 'retry-failed' }));
+
+    expect(onTrainingListWithReason('ble-disconnect')).toBe(true);
+    expect(bleUnstableFromLastLocation()).toBe(false);
+  });
+
+  it('그레이스 만료 분기에서도 회복 통계가 임계 이상이면 bleUnstable=true', () => {
+    renderApp();
+    // unexpected 단절 → 그레이스 시작.
+    dispatchBridge(bleConnectionMessage({ connected: false, reason: 'unexpected' }));
+    expect(reconnectingBannerVisible()).toBe(true);
+
+    // 그레이스 만료 직전에 통계 임계를 충족시키고, 시간 경과로 자동 종료를 유발.
+    getFakeEngine().setRecoveryStats({ windows: 2, totalMs: 8_000 });
+    act(() => {
+      vi.advanceTimersByTime(8_000);
+    });
+
+    expect(onTrainingListWithReason('ble-disconnect')).toBe(true);
+    expect(bleUnstableFromLastLocation()).toBe(true);
   });
 });
 

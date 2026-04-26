@@ -44,7 +44,13 @@ export default function SuccessBanner({
             className="w-full max-w-md rounded-lg px-4 py-3"
             style={{ backgroundColor: backgroundColor || '#1A1A1A' }}
           >
-            <p className="text-sm text-center" style={{ color: textColor || '#FFFFFF' }}>{message}</p>
+            {/* whiteSpace: 'pre-line' — message 안의 '\n' 을 시각적인 줄바꿈으로 노출.
+                여러 줄짜리 안내(예: BLE 자동 종료 + 환경 점검 가이드 — Task #43)가
+                한 줄로 합쳐 보이지 않도록 한다. */}
+            <p
+              className="text-sm text-center"
+              style={{ color: textColor || '#FFFFFF', whiteSpace: 'pre-line' }}
+            >{message}</p>
           </div>
         </motion.div>
       )}
