@@ -153,8 +153,13 @@ interface ModeAcc {
   // RECOVERY (BLE 단절 → 자동 재연결 회복 구간)
   /** 누적 회복 구간 길이(ms) — 채점에서 제외된 시간 */
   recoveryMs: number;
-  /** 회복 구간 발생 횟수 */
-  recoveryWindows: number;
+  /**
+   * 회복 구간별 타임라인.
+   * - startedAt: 세션 시작으로부터 경과한 ms (사용자가 "언제 끊겼는지" 가늠 가능).
+   * - durationMs: 해당 구간의 길이 (현재 진행 중인 구간은 endRecoveryWindow 호출 전까지 0).
+   * 횟수는 `recoveryWindows.length` 로 노출한다 (Task #36).
+   */
+  recoveryWindows: { startedAt: number; durationMs: number }[];
 }
 
 function emptyAcc(): ModeAcc {
@@ -170,7 +175,7 @@ function emptyAcc(): ModeAcc {
     midHits: 0, midTotal: 0, midRTs: [],
     lateHits: 0, lateTotal: 0, lateRTs: [],
     earlyOmissions: 0, lateOmissions: 0,
-    recoveryMs: 0, recoveryWindows: 0,
+    recoveryMs: 0, recoveryWindows: [],
   };
 }
 
@@ -362,7 +367,10 @@ export class TrainingEngine {
     if (this.destroyed || this.inRecoveryWindow) return;
     this.inRecoveryWindow = true;
     this.recoveryEnteredAt = Date.now();
-    this.acc.recoveryWindows += 1;
+    // 결과 화면 타임라인용 — 시작 시각은 세션 시작으로부터의 경과 ms 로 기록.
+    // 종료(endRecoveryWindow) 시점에 마지막 항목의 durationMs 를 채워 넣는다.
+    const elapsedAtStart = Math.max(0, this.recoveryEnteredAt - this.startedAt);
+    this.acc.recoveryWindows.push({ startedAt: elapsedAtStart, durationMs: 0 });
     // 켜져 있던 자극은 정리 — 사용자가 채점되지 않을 점등을 입력하려 시도하지
     // 않게 한다. allOff 가 자체적으로 BLE OFF 프레임을 송신.
     this.allOff();
@@ -371,12 +379,16 @@ export class TrainingEngine {
   /**
    * 회복 구간 종료(재연결 성공 또는 그레이스 만료) 알림.
    * - 누적 회복 시간을 acc.recoveryMs 에 더한다 → buildMetrics 가 채점 제외 시간으로 노출.
+   * - 직전 beginRecoveryWindow 가 push 한 segment 의 durationMs 를 채워 결과 화면이
+   *   "언제/얼마나" 끊겼는지 보여줄 수 있게 한다 (Task #36).
    * - 회복 중이 아니면 no-op (멱등).
    */
   endRecoveryWindow(): void {
     if (this.destroyed || !this.inRecoveryWindow) return;
     const dur = Math.max(0, Date.now() - this.recoveryEnteredAt);
     this.acc.recoveryMs += dur;
+    const last = this.acc.recoveryWindows[this.acc.recoveryWindows.length - 1];
+    if (last) last.durationMs = dur;
     this.inRecoveryWindow = false;
     this.recoveryEnteredAt = 0;
   }
@@ -393,7 +405,7 @@ export class TrainingEngine {
       ? Math.max(0, Date.now() - this.recoveryEnteredAt)
       : 0;
     return {
-      windows: this.acc.recoveryWindows,
+      windows: this.acc.recoveryWindows.length,
       totalMs: this.acc.recoveryMs + ongoing,
     };
   }
@@ -1097,7 +1109,13 @@ export class TrainingEngine {
       },
       recovery: {
         excludedMs: Math.max(0, Math.round(a.recoveryMs)),
-        windows: a.recoveryWindows,
+        windows: a.recoveryWindows.length,
+        // 결과 화면(Result.tsx)이 회복 구간 타임라인/평균/최장 끊김을 보여주기
+        // 위해 세그먼트 배열을 함께 노출 (Task #36). 정수 ms 로 정규화한다.
+        segments: a.recoveryWindows.map((w) => ({
+          startedAt: Math.max(0, Math.round(w.startedAt)),
+          durationMs: Math.max(0, Math.round(w.durationMs)),
+        })),
       },
     };
   }

@@ -501,6 +501,9 @@ export default function TrainingSessionPlay() {
         // 제외됨" 배너를 띄울 수 있게 메트릭에서 추출해 navigate state로 전달.
         recoveryExcludedMs: metrics?.recovery?.excludedMs ?? 0,
         recoveryWindows: metrics?.recovery?.windows ?? 0,
+        // 결과 화면 안내 카드의 타임라인/평균/최장 끊김 표시용 (Task #36).
+        // segments 가 없는 과거/축약 페이로드와의 호환을 위해 빈 배열로 폴백.
+        recoverySegments: metrics?.recovery?.segments ?? [],
       },
     });
   }, [state, totalSec, tapCount, navigate]);

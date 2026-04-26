@@ -265,6 +265,16 @@ export interface RecoveryRawMetrics {
   excludedMs: number;
   /** 회복 구간 발생 횟수 */
   windows: number;
+  /**
+   * 회복 구간별 세부 타임라인 (Task #36).
+   * - startedAt: 세션 시작으로부터의 경과 ms (사용자에게 "언제 끊겼는지" 가늠 가능)
+   * - durationMs: 해당 구간 길이(ms)
+   *
+   * 결과 화면 안내 카드의 타임라인/평균/최장 끊김 표시에만 사용한다.
+   * 누적 통계(`aggregateRecoveryStats`)는 excludedMs/windows 만 보면 충분하므로
+   * optional 로 둔다 — 과거 세션·서버 응답·축약된 페이로드와의 호환성을 유지.
+   */
+  segments?: { startedAt: number; durationMs: number }[];
 }
 
 /** 원시 메트릭 통합 */

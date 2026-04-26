@@ -72,7 +72,9 @@ function freshAcc() {
     midHits: 0, midTotal: 0, midRTs: [] as number[],
     lateHits: 0, lateTotal: 0, lateRTs: [] as number[],
     earlyOmissions: 0, lateOmissions: 0,
-    recoveryMs: 0, recoveryWindows: 0,
+    recoveryMs: 0,
+    // Task #36: recoveryWindows 는 segment 배열로 확장됨 ({startedAt, durationMs}[]).
+    recoveryWindows: [] as { startedAt: number; durationMs: number }[],
   };
 }
 
@@ -124,7 +126,12 @@ describe('buildMetrics: 결정론적 누적기에서 핵심 필드가 기댓값�
       earlyOmissions: 1, lateOmissions: 4,
 
       // RECOVERY: 회복 구간 4123ms 누적·2회 → excludedMs=4123(반올림), windows=2
-      recoveryMs: 4123, recoveryWindows: 2,
+      // Task #36: segments 도 함께 노출 — startedAt(세션 경과 ms)/durationMs.
+      recoveryMs: 4123,
+      recoveryWindows: [
+        { startedAt: 5_000, durationMs: 1_500 },
+        { startedAt: 22_000, durationMs: 2_623 },
+      ],
     });
 
     const m = callBuildMetrics(engine) as {
@@ -137,7 +144,11 @@ describe('buildMetrics: 결정론적 누적기에서 핵심 필드가 기댓값�
       judgment: { noGoSuccessRate: number; goSuccessRate: number; doubleTapSuccessRate: number; avgGoReactionTime: number; reactionTimeSD: number; impulseCount: number };
       agility: { footAccuracy: number; anchorOmissionRate: number; simultaneousSuccessRate: number; switchCost: number; syncError: number; reactionTime: number };
       endurance: { earlyScore: number; midScore: number; lateScore: number; maintainRatio: number; drift: number; earlyReactionTime: number; lateReactionTime: number; omissionIncrease: number };
-      recovery: { excludedMs: number; windows: number };
+      recovery: {
+        excludedMs: number;
+        windows: number;
+        segments: { startedAt: number; durationMs: number }[];
+      };
     };
 
     // RHYTHM
@@ -201,6 +212,11 @@ describe('buildMetrics: 결정론적 누적기에서 핵심 필드가 기댓값�
     // RECOVERY (Task #27): 채점 제외 시간/횟수가 그대로 노출
     expect(m.recovery.excludedMs).toBe(4123);
     expect(m.recovery.windows).toBe(2);
+    // RECOVERY (Task #36): segments 배열은 입력 그대로 유지 (정수 ms 정규화).
+    expect(m.recovery.segments).toEqual([
+      { startedAt: 5_000, durationMs: 1_500 },
+      { startedAt: 22_000, durationMs: 2_623 },
+    ]);
 
     // 통합 통계
     // allRTs = [...fRTs, ...cRTs, ...jGoRTs, ...aRTs, ...mRTs]
@@ -244,7 +260,11 @@ describe('buildMetrics: 빈 누적기에서 분모 0 보호와 기본값이 일�
       judgment: { goSuccessRate: number; noGoSuccessRate: number; doubleTapSuccessRate: number; avgGoReactionTime: number; reactionTimeSD: number; impulseCount: number };
       agility: { footAccuracy: number; anchorOmissionRate: number; simultaneousSuccessRate: number; reactionTime: number };
       endurance: { earlyScore: number; midScore: number; lateScore: number; maintainRatio: number; drift: number; earlyReactionTime: number; lateReactionTime: number; omissionIncrease: number };
-      recovery: { excludedMs: number; windows: number };
+      recovery: {
+        excludedMs: number;
+        windows: number;
+        segments: { startedAt: number; durationMs: number }[];
+      };
     };
 
     // NaN/Infinity 부재 검증 (모든 숫자 필드)
@@ -319,9 +339,10 @@ describe('buildMetrics: 빈 누적기에서 분모 0 보호와 기본값이 일�
     expect(m.touchCount).toBe(0);
     expect(m.hitCount).toBe(0);
 
-    // RECOVERY: 비누적 → 0/0
+    // RECOVERY: 비누적 → 0/0/[]
     expect(m.recovery.excludedMs).toBe(0);
     expect(m.recovery.windows).toBe(0);
+    expect(m.recovery.segments).toEqual([]);
   });
 });
 
@@ -463,5 +484,58 @@ describe('buildMetrics: 모든 시도 성공 시 적중률·정확도가 1, 오�
     expect(m.endurance.maintainRatio).toBe(1); // 100/100
     expect(m.endurance.drift).toBe(0); // earlyRTm == lateRTm == 200
     expect(m.endurance.omissionIncrease).toBe(0);
+  });
+});
+
+// ───────────────────────────────────────────────────────────
+// (5) Task #36: 회복 segments 회귀 — begin/end 흐름이 결과 화면용
+//     타임라인을 누적·노출하는지 검증
+// ───────────────────────────────────────────────────────────
+
+describe('buildMetrics: 회복 segments 가 begin/end 흐름으로 누적되어 결과에 노출된다 (Task #36)', () => {
+  it('연속된 begin/end 호출이 startedAt(세션 경과 ms)/durationMs 쌍의 배열로 누적된다', () => {
+    const engine = makeEngine({ level: 1 });
+
+    // 시간 경과를 결정론적으로 모사 — 세션 시작(0ms) → +5s 회복 시작 → +1s 종료
+    // → +20s 두번째 회복 시작 → +3s 종료. Date.now 를 직접 스텁한다.
+    // 본 테스트는 start()를 우회하고 startedAt 을 직접 세팅하므로, stamps 는
+    // begin/end 4 회 호출이 소비할 4 개만 둔다.
+    const sessionStart = 1_700_000_000_000;
+    const stamps = [
+      sessionStart + 5_000,            // beginRecoveryWindow #1 → elapsed 5s
+      sessionStart + 6_000,            // endRecoveryWindow   #1 → dur 1s
+      sessionStart + 26_000,           // beginRecoveryWindow #2 → elapsed 26s
+      sessionStart + 29_000,           // endRecoveryWindow   #2 → dur 3s
+    ];
+    let i = 0;
+    const dateNowSpy = vi.spyOn(Date, 'now').mockImplementation(() => stamps[Math.min(i++, stamps.length - 1)]);
+
+    try {
+      // start() 부수효과(RAF/타이머)를 피하기 위해 startedAt/acc 만 직접 세팅.
+      (engine as unknown as { startedAt: number }).startedAt = sessionStart;
+      (engine as unknown as { acc: ReturnType<typeof freshAcc> }).acc = freshAcc();
+
+      engine.beginRecoveryWindow();
+      engine.endRecoveryWindow();
+      engine.beginRecoveryWindow();
+      engine.endRecoveryWindow();
+    } finally {
+      dateNowSpy.mockRestore();
+    }
+
+    const m = callBuildMetrics(engine) as {
+      recovery: { excludedMs: number; windows: number; segments: { startedAt: number; durationMs: number }[] };
+    };
+
+    expect(m.recovery.windows).toBe(2);
+    expect(m.recovery.excludedMs).toBe(4_000); // 1s + 3s
+    expect(m.recovery.segments).toEqual([
+      { startedAt: 5_000, durationMs: 1_000 },
+      { startedAt: 26_000, durationMs: 3_000 },
+    ]);
+
+    // 정리 — start() 우회로 RAF/타이머 부수효과는 없지만, 다른 테스트와의
+    // 격리를 위해 명시적으로 destroy 한다.
+    (engine as unknown as { destroy?: () => void }).destroy?.();
   });
 });
