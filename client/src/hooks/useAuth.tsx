@@ -19,6 +19,7 @@ import {
   cleanupExpiredDismissals as cleanupRecoveryCoachingDismissals,
   clearAllDismissals as clearAllRecoveryCoachingDismissals,
 } from '../utils/recoveryCoachingDismissal';
+import { clearAllReplayedHintSeen } from '../utils/replayedHintSeen';
 
 /**
  * 인증 상태를 앱 전역에서 공유하기 위한 컨텍스트.
@@ -220,6 +221,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Task #98 — 다음에 같은 기기에서 다른 계정으로 로그인해도 이전 사용자의
     // 회복 코칭 닫힘 기억이 남지 않도록 prefix 의 모든 키를 비운다.
     clearAllRecoveryCoachingDismissals();
+    // Task #130 — 결과 화면 "이미 저장된 결과를 불러왔어요" 안내의 sessionId
+    // 기준 "본 적 있음" 기억도 함께 비운다. 이전 사용자의 sessionId 가 남아 있어
+    // 새 사용자가 같은 sessionId 로 진입할 가능성은 사실상 없지만(=세션 식별자는
+    // 사용자별로 분리됨), 다른 계정의 데이터가 한 기기에 영속화돼 누적되는 것을
+    // 막기 위한 정리 차원에서도 동일 패턴으로 비워 둔다.
+    clearAllReplayedHintSeen();
     if (isNoiLinkNativeShell()) {
       notifyNativeClearSession();
     }
