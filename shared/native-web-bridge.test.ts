@@ -1,11 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import {
+  BRIDGE_VALIDATION_ERROR_REASONS,
   NATIVE_BRIDGE_VERSION,
+  formatBridgeValidationError,
   isWebToNativeMessage,
   isNativeToWebMessage,
+  parseBridgeAckError,
   validateWebToNativeMessage,
   validateNativeToWebMessage,
   type BridgeValidationError,
+  type BridgeValidationErrorReason,
 } from './native-web-bridge.js';
 import {
   BPM_MAX,
@@ -1225,5 +1229,177 @@ describe('validate* — envelope 단계 에러도 구조화된 reason 으로 식
       expect(r.error.reason).toBe('envelope-id');
       expect(r.error.field).toBe('id');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatBridgeValidationError ↔ parseBridgeAckError 라운드트립 (Task #105)
+// ---------------------------------------------------------------------------
+//
+// 모바일 디스패처는 거부 사유를 `formatBridgeValidationError` 로 직렬화해
+// `native.ack.payload.error` 에 실어 보내고, 웹 수신기는 `parseBridgeAckError`
+// 로 다시 분해한다. 두 함수가 같은 파일에 있어 한쪽만 바꿔도 이 라운드트립이
+// 깨지면 즉시 테스트가 실패한다 — 구분자 변경/누락 시 토스트가 조용히 깨지는
+// 회귀를 막는다.
+//
+describe('formatBridgeValidationError ↔ parseBridgeAckError 라운드트립', () => {
+  // 검증기가 실제로 만들 수 있는 다양한 모양의 에러 — type/field/reason 조합을
+  // 가급적 망라해 한쪽 분기만 깨지는 변경을 잡는다.
+  const SAMPLES: BridgeValidationError[] = [
+    {
+      type: 'ble.connect',
+      reason: 'field-missing',
+      field: 'payload.deviceId',
+      message: 'ble.connect: payload.deviceId is required (string)',
+    },
+    {
+      type: 'ble.writeLed',
+      reason: 'field-range',
+      field: 'payload.pod',
+      message: 'ble.writeLed: payload.pod must be in [0, 3] (got 4)',
+    },
+    {
+      type: 'ble.writeLed',
+      reason: 'field-enum',
+      field: 'payload.colorCode',
+      message: 'ble.writeLed: payload.colorCode must be one of [...]',
+    },
+    {
+      // envelope 검증 실패 — type 미상
+      reason: 'envelope-version',
+      field: 'v',
+      message: `envelope.v must be ${NATIVE_BRIDGE_VERSION} (got 1)`,
+    },
+    {
+      // envelope.id 누락 — type 은 있고 field 만 있음
+      type: 'ble.ensureReady',
+      reason: 'envelope-id',
+      field: 'id',
+      message: 'envelope.id must be a string for web→native messages',
+    },
+    {
+      // payload 객체 자체가 누락 — field 가 'payload'
+      type: 'ble.connect',
+      reason: 'payload-missing',
+      field: 'payload',
+      message: 'ble.connect: payload is required',
+    },
+    {
+      // unknown-type — field 없음
+      type: 'no.such.type',
+      reason: 'unknown-type',
+      message: 'unknown bridge message type: no.such.type',
+    },
+  ];
+
+  for (const err of SAMPLES) {
+    const label = `${err.type ?? 'envelope'}/${err.reason}${err.field ? '@' + err.field : ''}`;
+    it(`${label} 직렬화 → 파싱 시 type/field/reason/message 보존`, () => {
+      const raw = formatBridgeValidationError(err);
+      const parsed = parseBridgeAckError(raw);
+      expect(parsed.reason).toBe(err.reason);
+      // type 이 없는 에러는 'envelope' 으로 직렬화됐다가 그대로 파싱된다.
+      expect(parsed.type).toBe(err.type ?? 'envelope');
+      expect(parsed.field).toBe(err.field);
+      expect(parsed.message).toBe(err.message);
+    });
+  }
+
+  it('모든 BridgeValidationErrorReason 값이 라운드트립한다', () => {
+    // KNOWN_REASONS 와 BRIDGE_VALIDATION_ERROR_REASONS 가 어긋나지 않는다는
+    // 회귀 보장 — shared 에 reason 을 추가하면 자동으로 이 케이스에 포함된다.
+    for (const reason of BRIDGE_VALIDATION_ERROR_REASONS) {
+      const err: BridgeValidationError = {
+        type: 'sample.type',
+        reason,
+        field: 'payload.x',
+        message: `sample message for ${reason}`,
+      };
+      const parsed = parseBridgeAckError(formatBridgeValidationError(err));
+      expect(parsed.reason).toBe(reason);
+      expect(parsed.field).toBe('payload.x');
+      expect(parsed.type).toBe('sample.type');
+    }
+  });
+
+  it('field 가 없는 에러는 prefix 에 @ 가 붙지 않는다', () => {
+    const err: BridgeValidationError = {
+      type: 'ble.foo',
+      reason: 'unknown-type',
+      message: 'no field here',
+    };
+    const raw = formatBridgeValidationError(err);
+    expect(raw).toBe('ble.foo:unknown-type: no field here');
+    const parsed = parseBridgeAckError(raw);
+    expect(parsed.field).toBeUndefined();
+  });
+
+  it('type 이 없는 에러는 envelope 로 직렬화된다', () => {
+    const err: BridgeValidationError = {
+      reason: 'not-object',
+      message: 'Bridge message must be a plain object',
+    };
+    const raw = formatBridgeValidationError(err);
+    expect(raw.startsWith('envelope:not-object:')).toBe(true);
+    const parsed = parseBridgeAckError(raw);
+    expect(parsed.type).toBe('envelope');
+    expect(parsed.reason).toBe('not-object');
+  });
+});
+
+describe('parseBridgeAckError — 자유 문자열 / 짧은 형태 폴백', () => {
+  it('알 수 없는 reason 은 자유 문자열로 취급', () => {
+    const r = parseBridgeAckError('version-mismatch');
+    expect(r.reason).toBeUndefined();
+    expect(r.type).toBeUndefined();
+    expect(r.field).toBeUndefined();
+    expect(r.message).toBe('version-mismatch');
+  });
+
+  it('BleManagerError.message 같은 자유 문자열도 원문 보존', () => {
+    const raw = 'Device is not connected';
+    const r = parseBridgeAckError(raw);
+    expect(r.reason).toBeUndefined();
+    expect(r.message).toBe(raw);
+  });
+
+  it('주변 공백은 trim 한다', () => {
+    const r = parseBridgeAckError('   ble.connect:field-missing@payload.deviceId: msg   ');
+    expect(r.reason).toBe('field-missing');
+    expect(r.field).toBe('payload.deviceId');
+    expect(r.message).toBe('msg');
+  });
+
+  it('reason 이 알려진 enum 처럼 보이지만 enum 이 아닌 경우 자유 문자열로 폴백', () => {
+    // reason 이 enum 집합에 없으면 형식이 prefix 같아도 자유 문자열로 취급해야
+    // BleManagerError 메시지(`X: Y` 같은 자연스러운 텍스트)가 망가지지 않는다.
+    const r = parseBridgeAckError('SomeError: human readable explanation');
+    expect(r.reason).toBeUndefined();
+    expect(r.type).toBeUndefined();
+    expect(r.message).toBe('SomeError: human readable explanation');
+  });
+});
+
+describe('BRIDGE_VALIDATION_ERROR_REASONS — 타입과 런타임 enum 일치', () => {
+  it('배열에서 derive 한 타입은 배열 원소를 모두 커버한다', () => {
+    // 컴파일 시점 잠금 — 배열에서 derive 한 union type 을 사용해 컴파일러가
+    // 누락된 reason 을 검출하도록 한다.
+    const seen: Record<BridgeValidationErrorReason, true> = {
+      'not-object': true,
+      'envelope-version': true,
+      'envelope-type': true,
+      'envelope-id': true,
+      'unknown-type': true,
+      'payload-missing': true,
+      'payload-shape': true,
+      'field-missing': true,
+      'field-type': true,
+      'field-enum': true,
+      'field-range': true,
+    };
+    for (const r of BRIDGE_VALIDATION_ERROR_REASONS) {
+      expect(seen[r]).toBe(true);
+    }
+    expect(BRIDGE_VALIDATION_ERROR_REASONS.length).toBe(Object.keys(seen).length);
   });
 });

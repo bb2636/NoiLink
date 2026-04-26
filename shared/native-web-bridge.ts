@@ -323,7 +323,7 @@ export type NativeToWebMessage =
 // -----------------------------------------------------------------------------
 
 /**
- * 가드/검증기가 메시지를 거부한 사유.
+ * 가드/검증기가 메시지를 거부한 사유. `BridgeValidationErrorReason` 의 단일 소스.
  *
  * - `not-object`: 입력이 객체가 아님 (null/배열/스칼라).
  * - `envelope-version`: `v` 가 `NATIVE_BRIDGE_VERSION` 과 다름.
@@ -338,19 +338,34 @@ export type NativeToWebMessage =
  * - `field-range`: 정수 범위 (예: pod 0..3, level 1..5, bpm 60..200,
  *   durationSec 0..MAX_SESSION_SEC) 밖. 펌웨어 byte 로 silently truncate
  *   되기 전에 브리지가 잡는다.
+ *
+ * 런타임 enumeration (예: `parseBridgeAckError` 가 알려진 reason 인지 확인할 때)
+ * 이 필요하므로 `as const` 배열로 두고 그로부터 타입을 derive 한다 — 한쪽만
+ * 늘리면 컴파일이 깨지도록.
  */
-export type BridgeValidationErrorReason =
-  | 'not-object'
-  | 'envelope-version'
-  | 'envelope-type'
-  | 'envelope-id'
-  | 'unknown-type'
-  | 'payload-missing'
-  | 'payload-shape'
-  | 'field-missing'
-  | 'field-type'
-  | 'field-enum'
-  | 'field-range';
+export const BRIDGE_VALIDATION_ERROR_REASONS = [
+  'not-object',
+  'envelope-version',
+  'envelope-type',
+  'envelope-id',
+  'unknown-type',
+  'payload-missing',
+  'payload-shape',
+  'field-missing',
+  'field-type',
+  'field-enum',
+  'field-range',
+] as const;
+
+export type BridgeValidationErrorReason = (typeof BRIDGE_VALIDATION_ERROR_REASONS)[number];
+
+const BRIDGE_VALIDATION_ERROR_REASON_SET: ReadonlySet<string> = new Set(
+  BRIDGE_VALIDATION_ERROR_REASONS,
+);
+
+function isBridgeValidationErrorReason(s: string): s is BridgeValidationErrorReason {
+  return BRIDGE_VALIDATION_ERROR_REASON_SET.has(s);
+}
 
 export type BridgeValidationError = {
   /** Bridge 메시지의 type (envelope 검증 실패 등으로 미상이면 생략). */
@@ -366,6 +381,85 @@ export type BridgeValidationError = {
 export type BridgeValidationResult<T> =
   | { ok: true; message: T }
   | { ok: false; error: BridgeValidationError };
+
+// -----------------------------------------------------------------------------
+// ack 거부 사유 직렬화 / 파싱 (단일 소스)
+// -----------------------------------------------------------------------------
+//
+// 모바일 디스패처가 잘못된 web→native 메시지를 거부할 때 `BridgeValidationError`
+// 를 `native.ack.payload.error` 에 실어 보낸다. WebView 의 `postMessage` 채널은
+// 평탄한 문자열만 안전하게 운반하므로, 양쪽이 합의한 포맷으로 직렬화/역직렬화
+// 한다:
+//
+//   `${type ?? 'envelope'}:${reason}${field ? '@'+field : ''}: ${message}`
+//
+// 두 함수는 한 파일에 두어 한쪽만 바뀌면 즉시 라운드트립 테스트가 깨지도록
+// 잠근다. (이전에는 모바일 디스패처와 웹 수신기가 각자 같은 포맷을 따로
+// 가정하고 있어, 구분자 변경/필드 누락 시 토스트가 조용히 깨질 수 있었다.)
+
+/** `parseBridgeAckError` 결과. reason 이 알려진 enum 일 때만 type/field/reason 이 채워진다. */
+export interface ParsedBridgeAckError {
+  /** 거부 메시지의 type (예: `ble.connect`, `envelope`). 자유 문자열 입력이면 `undefined`. */
+  type?: string;
+  /** 위반된 필드의 dotted path (예: `payload.deviceId`). */
+  field?: string;
+  /** 머신 친화적 분류 코드. 알려진 enum 일 때만 채워진다 (자유 문자열은 `undefined`). */
+  reason?: BridgeValidationErrorReason;
+  /** 사람-읽기 메시지. 구조화된 입력이면 `: ` 뒤 부분, 아니면 원문 trim. */
+  message: string;
+}
+
+/**
+ * `BridgeValidationError` → `native.ack.payload.error` 직렬화.
+ * `parseBridgeAckError` 와 라운드트립한다.
+ */
+export function formatBridgeValidationError(err: BridgeValidationError): string {
+  const typePart = err.type ?? 'envelope';
+  const fieldPart = err.field ? `@${err.field}` : '';
+  return `${typePart}:${err.reason}${fieldPart}: ${err.message}`;
+}
+
+/**
+ * `native.ack.payload.error` 문자열 → 구조화된 부분.
+ *
+ * 매칭 규칙:
+ *  - 첫 `': '` 이전이 prefix(`type:reason[@field]`), 이후가 사람-읽기 message.
+ *  - prefix 의 첫 `':'` 로 type / 나머지 분리.
+ *  - 나머지에 `'@'` 가 있으면 reason / field 분리.
+ *  - 분리된 reason 이 `BRIDGE_VALIDATION_ERROR_REASONS` 에 없으면 자유 문자열로
+ *    취급 (type/field/reason 비우고 message 에 원문 trim 보존). 이 정책 덕분에
+ *    짧은 디버그 코드(`version-mismatch`)나 `BleManagerError.message` 같은
+ *    임의 문자열이 들어와도 안전하게 통과한다.
+ */
+export function parseBridgeAckError(raw: string): ParsedBridgeAckError {
+  const trimmed = raw.trim();
+  const sepIdx = trimmed.indexOf(': ');
+  const prefix = sepIdx >= 0 ? trimmed.slice(0, sepIdx) : trimmed;
+  const message = sepIdx >= 0 ? trimmed.slice(sepIdx + 2) : trimmed;
+
+  const colonIdx = prefix.indexOf(':');
+  if (colonIdx < 0) {
+    return { message: trimmed };
+  }
+  const type = prefix.slice(0, colonIdx);
+  const tail = prefix.slice(colonIdx + 1);
+
+  const atIdx = tail.indexOf('@');
+  const reasonStr = atIdx >= 0 ? tail.slice(0, atIdx) : tail;
+  const field = atIdx >= 0 ? tail.slice(atIdx + 1) : undefined;
+
+  if (!isBridgeValidationErrorReason(reasonStr)) {
+    // type 처럼 보이지만 reason 이 알려진 enum 이 아니면 자유 문자열로 취급.
+    return { message: trimmed };
+  }
+
+  return {
+    type: type || undefined,
+    field,
+    reason: reasonStr,
+    message: message || trimmed,
+  };
+}
 
 // -----------------------------------------------------------------------------
 // 검증 헬퍼 (모듈 private)

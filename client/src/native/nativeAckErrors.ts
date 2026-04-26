@@ -15,21 +15,7 @@
  * 보여주되, QA/베타 사용자가 정확히 어떤 분기가 깨졌는지 확인할 수 있도록 디버그 키
  * (`type:reason@field`)도 함께 노출한다.
  */
-import type { BridgeValidationErrorReason } from '@noilink/shared';
-
-const KNOWN_REASONS = new Set<BridgeValidationErrorReason>([
-  'not-object',
-  'envelope-version',
-  'envelope-type',
-  'envelope-id',
-  'unknown-type',
-  'payload-missing',
-  'payload-shape',
-  'field-missing',
-  'field-type',
-  'field-enum',
-  'field-range',
-]);
+import { parseBridgeAckError, type BridgeValidationErrorReason } from '@noilink/shared';
 
 const REASON_KO: Record<BridgeValidationErrorReason, string> = {
   'not-object': '메시지 형식 오류',
@@ -61,42 +47,13 @@ export interface ParsedAckError {
 /**
  * `${type}:${reason}@${field}: ${message}` 형태의 ack 에러 문자열을 구조화한다.
  *
- * 매칭 규칙:
- *  - 첫 ': ' 이전이 prefix(`type:reason[@field]`), 이후가 사람-읽기 message.
- *  - prefix 의 첫 ':' 로 type / 나머지 분리.
- *  - 나머지에 '@' 가 있으면 reason / field 분리.
- *  - 분리된 reason 이 알려진 enum 이 아니면 reason/field 를 비우고 원문을 message 로 둔다.
- *    (예: `BleManagerError.message`, `version-mismatch` 같은 자유 문자열은 그대로 통과)
+ * 실제 파싱 로직은 `@noilink/shared` 의 `parseBridgeAckError` 한 곳에서 관리한다
+ * (모바일 디스패처가 사용하는 `formatBridgeValidationError` 와 라운드트립 보장).
+ * 본 wrapper 는 `raw` 원문 보존 필드만 추가한다 — UI 가 디버그 키 재구성 시 사용.
  */
 export function parseAckErrorString(raw: string): ParsedAckError {
-  const trimmed = raw.trim();
-  const sepIdx = trimmed.indexOf(': ');
-  const prefix = sepIdx >= 0 ? trimmed.slice(0, sepIdx) : trimmed;
-  const message = sepIdx >= 0 ? trimmed.slice(sepIdx + 2) : trimmed;
-
-  const colonIdx = prefix.indexOf(':');
-  if (colonIdx < 0) {
-    return { message: trimmed, raw };
-  }
-  const type = prefix.slice(0, colonIdx);
-  const tail = prefix.slice(colonIdx + 1);
-
-  const atIdx = tail.indexOf('@');
-  const reasonStr = atIdx >= 0 ? tail.slice(0, atIdx) : tail;
-  const field = atIdx >= 0 ? tail.slice(atIdx + 1) : undefined;
-
-  if (!KNOWN_REASONS.has(reasonStr as BridgeValidationErrorReason)) {
-    // type 처럼 보이지만 reason 이 알려진 enum 이 아니면 자유 문자열로 취급.
-    return { message: trimmed, raw };
-  }
-
-  return {
-    type: type || undefined,
-    field,
-    reason: reasonStr as BridgeValidationErrorReason,
-    message: message || trimmed,
-    raw,
-  };
+  const parsed = parseBridgeAckError(raw);
+  return { ...parsed, raw };
 }
 
 function shortField(field: string | undefined): string | undefined {

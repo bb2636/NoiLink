@@ -4,12 +4,12 @@ import {
   encodeControlFrame,
   encodeLedFrame,
   encodeSessionFrame,
+  formatBridgeValidationError,
   tryParseTouchBase64,
   validateWebToNativeMessage,
   type BleErrorAction,
   type BleErrorCode,
   type BleScanFilterPayload,
-  type BridgeValidationError,
   type NoiPodCharacteristicKey,
   type WebToNativeMessage,
 } from '@noilink/shared';
@@ -45,12 +45,6 @@ function bleError(
     type: 'ble.error',
     payload: { id, code, message, action, deviceId },
   });
-}
-
-function formatValidationError(err: BridgeValidationError): string {
-  const typePart = err.type ?? 'envelope';
-  const fieldPart = err.field ? `@${err.field}` : '';
-  return `${typePart}:${err.reason}${fieldPart}: ${err.message}`;
 }
 
 function toBleFilter(f?: BleScanFilterPayload): BleScanFilter | undefined {
@@ -205,7 +199,7 @@ export async function dispatchWebMessage(raw: string): Promise<void> {
   const validation = validateWebToNativeMessage(parsed);
   if (!validation.ok) {
     const err = validation.error;
-    const detail = formatValidationError(err);
+    const detail = formatBridgeValidationError(err);
     console.warn('[NoiLink bridge] reject', detail, { error: err, raw: parsed });
     bleError(envId, 'HANDLER_ERROR', detail);
     if (envId) ack(envId, false, detail);
