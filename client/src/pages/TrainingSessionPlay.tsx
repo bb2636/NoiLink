@@ -19,7 +19,7 @@ import { reportBleAbortFireAndForget } from '../utils/reportBleAbort';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
 import { bleReconnectNow, bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
-import { formatAckErrorForBanner, subscribeNativeAckErrors } from '../native/nativeAckErrors';
+import { subscribeAckErrorBanner } from '../native/nativeAckErrors';
 import { isBleUnstableForAbort, type TrainingAbortReason } from './trainingAbortReason';
 
 /**
@@ -172,10 +172,9 @@ export default function TrainingSessionPlay() {
 
   // ack(ok=false) 구독 — 트레이닝 도중 BLE write/connect 가 거부되어도 화면은
   // 조용히 보일 수 있으므로, 한국어 안내 + 디버그 키를 짧은 토스트로 노출한다 (Task #77).
+  // 같은 사유가 짧은 시간 안에 반복 거부되면 카운터만 올려 토스트 깜빡임을 막는다 (Task #106).
   useEffect(() => {
-    return subscribeNativeAckErrors((payload) => {
-      setAckErrorBanner(formatAckErrorForBanner(payload.error));
-    });
+    return subscribeAckErrorBanner(setAckErrorBanner);
   }, []);
 
   // ── 엔진 lifecycle ──

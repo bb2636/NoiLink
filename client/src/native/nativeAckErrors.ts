@@ -183,3 +183,83 @@ export function subscribeNativeAckErrors(
   window.addEventListener('noilink-native-ack', onAck as EventListener);
   return () => window.removeEventListener('noilink-native-ack', onAck as EventListener);
 }
+
+/**
+ * 같은 사유의 ack 거부가 짧은 시간 안에 연속으로 들어올 때 토스트가
+ * 깜빡이며 사용자가 정작 사유를 못 읽는 문제를 막기 위한 코얼레싱 윈도우 (Task #106).
+ *
+ * 예: 트레이닝 도중 잘못된 `ble.writeLed:field-enum@payload.colorCode` 가
+ * 50ms 간격으로 20번 거부되면, 토스트 메시지는 매번 새로 뜨지 않고 마지막
+ * 한 번만 `(20건)` 카운터를 올려 표시한다.
+ */
+export const ACK_ERROR_COALESCE_WINDOW_MS = 2000;
+
+export interface CoalescedAckBanner {
+  /** SuccessBanner.message 에 그대로 흘려보낼 1줄(또는 2줄) 문자열. */
+  banner: string;
+  /** 윈도우 안에서 같은 키가 누적된 횟수 (>=1). 1이면 카운터 표기는 생략. */
+  count: number;
+  /** 코얼레싱 그룹 키. 디버그 키가 있으면 그것, 없으면 사용자 메시지를 사용. */
+  key: string;
+}
+
+export interface AckErrorCoalescerOptions {
+  /** 같은 키가 이 시간 안에 다시 들어오면 카운터만 올리고 같은 토스트를 갱신 (기본 2000ms). */
+  windowMs?: number;
+  /** 테스트 주입용 시계. 기본 `Date.now`. */
+  now?: () => number;
+}
+
+/**
+ * ack 거부 스트림을 받아 같은 `debugKey` 가 윈도우 안에 반복되면 카운터를 누적해
+ * 한 토스트로 묶어 돌려주는 상태 머신을 만든다.
+ *
+ * - 디버그 키가 비어 있는 자유 문자열 에러(BleManagerError 등)도 사용자 메시지를
+ *   그룹 키로 삼아 같은 메시지가 쏟아지면 묶는다.
+ * - 다른 키가 들어오거나 윈도우가 만료되면 카운터를 1로 초기화한다.
+ * - 호출측은 매 호출마다 같은 `setBanner` 에 결과를 그대로 흘리면 된다 — UI 상에서는
+ *   같은 토스트가 그 자리에서 카운터만 올라가는 것처럼 보인다.
+ */
+export function createAckErrorCoalescer(opts: AckErrorCoalescerOptions = {}) {
+  const windowMs = opts.windowMs ?? ACK_ERROR_COALESCE_WINDOW_MS;
+  const now = opts.now ?? Date.now;
+
+  let lastKey: string | null = null;
+  let lastTs = 0;
+  let count = 0;
+
+  return function next(error: string | null | undefined): CoalescedAckBanner {
+    const { userMessage, debugKey } = describeAckError(error);
+    const key = debugKey || userMessage;
+    const t = now();
+    if (lastKey === key && t - lastTs <= windowMs) {
+      count += 1;
+    } else {
+      count = 1;
+    }
+    lastKey = key;
+    lastTs = t;
+
+    const suffix = count > 1 ? ` (${count}건)` : '';
+    const banner = debugKey
+      ? `${userMessage}${suffix}\n[${debugKey}]`
+      : `${userMessage}${suffix}`;
+    return { banner, count, key };
+  };
+}
+
+/**
+ * `subscribeNativeAckErrors` + `createAckErrorCoalescer` 조합 헬퍼.
+ *
+ * Device / DeviceAdd / TrainingSessionPlay 가 동일하게 사용하는 패턴 — 거부 사유를
+ * `setBanner` 로 흘리되 같은 키가 짧은 시간 안에 쏟아지면 카운터만 올린다.
+ */
+export function subscribeAckErrorBanner(
+  setBanner: (banner: string) => void,
+  opts?: AckErrorCoalescerOptions,
+): () => void {
+  const next = createAckErrorCoalescer(opts);
+  return subscribeNativeAckErrors((payload) => {
+    setBanner(next(payload.error).banner);
+  });
+}

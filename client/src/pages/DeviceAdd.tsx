@@ -24,7 +24,7 @@ import {
   bleConnect,
 } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
-import { formatAckErrorForBanner, subscribeNativeAckErrors } from '../native/nativeAckErrors';
+import { subscribeAckErrorBanner } from '../native/nativeAckErrors';
 import { NOIPOD_NAME_PREFIX, type BleDiscoverySnapshot, type NativeToWebMessage } from '@noilink/shared';
 
 interface RegisteredDevice {
@@ -136,10 +136,9 @@ export default function DeviceAdd() {
 
   // ack(ok=false) 구독 — 브릿지가 거부한 사유를 사용자/QA 가 모두 읽을 수 있는
   // 토스트로 노출 (Task #77). 디버그 키도 함께 보여 버그 리포트 단서를 남긴다.
+  // 같은 사유가 연속으로 쏟아지면 카운터로 묶어 보여 토스트 깜빡임을 막는다 (Task #106).
   useEffect(() => {
-    return subscribeNativeAckErrors((payload) => {
-      setAckErrorBanner(formatAckErrorForBanner(payload.error));
-    });
+    return subscribeAckErrorBanner(setAckErrorBanner);
   }, []);
 
   const handleStartScan = () => {

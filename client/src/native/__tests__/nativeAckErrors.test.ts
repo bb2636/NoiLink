@@ -10,9 +10,12 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  ACK_ERROR_COALESCE_WINDOW_MS,
+  createAckErrorCoalescer,
   describeAckError,
   formatAckErrorForBanner,
   parseAckErrorString,
+  subscribeAckErrorBanner,
   subscribeNativeAckErrors,
 } from '../nativeAckErrors';
 
@@ -156,5 +159,141 @@ describe('subscribeNativeAckErrors', () => {
       }),
     );
     expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Task #106 — 같은 사유의 ack 거부가 짧은 시간 안에 쏟아질 때 토스트가 깜빡이며
+ * 사용자가 정작 사유를 못 읽는 문제를 막기 위한 코얼레싱 로직 회귀.
+ *
+ * 보호 정책:
+ *  1. 같은 debugKey 가 윈도우 안에 5번 들어오면 banner 는 base 메시지에 `(5건)` 만 붙은 채
+ *     단 한 번 갱신된 것처럼 보인다 — base/디버그 키 본문은 변하지 않는다.
+ *  2. 다른 debugKey 가 들어오면 카운터는 1로 초기화된다.
+ *  3. 윈도우가 만료된 뒤 같은 키가 다시 들어오면 카운터는 1로 리셋된다.
+ *  4. 디버그 키가 없는 자유 문자열 에러도 사용자 메시지를 그룹 키로 묶는다.
+ *  5. `subscribeAckErrorBanner` 는 ok=false 이벤트만 흘리고, 같은 키가 반복되면
+ *     setBanner 에 카운터가 누적된 같은 banner 를 흘려준다.
+ */
+describe('createAckErrorCoalescer', () => {
+  const ERR = 'ble.writeLed:field-enum@payload.colorCode: bad enum';
+  const BASE = '내부 오류: ble.writeLed의 colorCode 허용되지 않은 값';
+  const DBG = '[ble.writeLed:field-enum@payload.colorCode]';
+
+  it('기본 윈도우는 ACK_ERROR_COALESCE_WINDOW_MS 와 일치한다', () => {
+    expect(ACK_ERROR_COALESCE_WINDOW_MS).toBeGreaterThan(0);
+  });
+
+  it('첫 번째 호출은 카운터 표기 없이 단일 banner 를 돌려준다', () => {
+    let now = 1000;
+    const next = createAckErrorCoalescer({ now: () => now });
+    const out = next(ERR);
+    expect(out.count).toBe(1);
+    expect(out.banner).toBe(`${BASE}\n${DBG}`);
+    expect(out.banner).not.toContain('건)');
+  });
+
+  it('같은 debugKey 가 윈도우 안에 5번 들어오면 카운터만 누적된다', () => {
+    let now = 1000;
+    const next = createAckErrorCoalescer({ windowMs: 2000, now: () => now });
+    const banners: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      banners.push(next(ERR).banner);
+      now += 50; // 50ms 간격으로 5번 — 모두 윈도우 안.
+    }
+    expect(banners[0]).toBe(`${BASE}\n${DBG}`);
+    expect(banners[1]).toBe(`${BASE} (2건)\n${DBG}`);
+    expect(banners[4]).toBe(`${BASE} (5건)\n${DBG}`);
+    // base 메시지/디버그 키 본문은 변하지 않고 카운터만 자란다 — 같은 자리 갱신.
+    for (const b of banners) {
+      expect(b).toContain(BASE);
+      expect(b).toContain(DBG);
+    }
+  });
+
+  it('다른 debugKey 가 들어오면 카운터를 1로 초기화한다', () => {
+    let now = 1000;
+    const next = createAckErrorCoalescer({ windowMs: 2000, now: () => now });
+    next(ERR);
+    next(ERR); // count=2
+    const other = next('ble.connect:field-missing@payload.deviceId: x');
+    expect(other.count).toBe(1);
+    expect(other.banner).not.toContain('건)');
+    // 다시 원래 키가 들어오면 또 1부터 시작.
+    const back = next(ERR);
+    expect(back.count).toBe(1);
+  });
+
+  it('윈도우가 만료되면 같은 키도 카운터를 1로 리셋한다', () => {
+    let now = 1000;
+    const next = createAckErrorCoalescer({ windowMs: 2000, now: () => now });
+    next(ERR);
+    next(ERR); // count=2 within window
+    now += 5000; // 윈도우 한참 지남
+    const out = next(ERR);
+    expect(out.count).toBe(1);
+    expect(out.banner).toBe(`${BASE}\n${DBG}`);
+  });
+
+  it('자유 문자열(디버그 키 없음)도 사용자 메시지로 묶는다', () => {
+    let now = 1000;
+    const next = createAckErrorCoalescer({ windowMs: 2000, now: () => now });
+    const a = next('Device is not connected');
+    const b = next('Device is not connected');
+    expect(a.count).toBe(1);
+    expect(b.count).toBe(2);
+    expect(b.banner).toBe('내부 오류: Device is not connected (2건)');
+    expect(b.banner).not.toContain('[');
+  });
+
+  it('빈/누락 입력도 폴백 메시지를 키로 묶는다', () => {
+    let now = 1000;
+    const next = createAckErrorCoalescer({ windowMs: 2000, now: () => now });
+    expect(next(undefined).count).toBe(1);
+    expect(next(null).count).toBe(2); // 같은 폴백 메시지 → 같은 키.
+    expect(next('   ').count).toBe(3);
+  });
+});
+
+describe('subscribeAckErrorBanner', () => {
+  let unsub: (() => void) | null = null;
+  afterEach(() => {
+    if (unsub) {
+      unsub();
+      unsub = null;
+    }
+  });
+
+  it('같은 키 5회 연속 거부는 같은 base 메시지의 카운터로 묶여 setBanner 에 흘러간다', () => {
+    const setBanner = vi.fn();
+    let now = 1000;
+    unsub = subscribeAckErrorBanner(setBanner, { windowMs: 2000, now: () => now });
+
+    for (let i = 0; i < 5; i += 1) {
+      window.dispatchEvent(
+        new CustomEvent('noilink-native-ack', {
+          detail: {
+            id: `req-${i}`,
+            ok: false,
+            error: 'ble.writeLed:field-enum@payload.colorCode: bad enum',
+          },
+        }),
+      );
+      now += 50;
+    }
+
+    expect(setBanner).toHaveBeenCalledTimes(5);
+    const calls = setBanner.mock.calls.map((c) => c[0] as string);
+    expect(calls[0]).toBe(
+      '내부 오류: ble.writeLed의 colorCode 허용되지 않은 값\n[ble.writeLed:field-enum@payload.colorCode]',
+    );
+    expect(calls[4]).toBe(
+      '내부 오류: ble.writeLed의 colorCode 허용되지 않은 값 (5건)\n[ble.writeLed:field-enum@payload.colorCode]',
+    );
+    // ok=true 는 절대 흘리지 않는다.
+    window.dispatchEvent(
+      new CustomEvent('noilink-native-ack', { detail: { id: 'ok', ok: true } }),
+    );
+    expect(setBanner).toHaveBeenCalledTimes(5);
   });
 });

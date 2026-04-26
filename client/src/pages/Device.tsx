@@ -10,7 +10,7 @@ import { STORAGE_KEYS } from '../utils/constants';
 import { ensureDemoDevicesSeeded } from '../utils/seedDemoDevices';
 import { bleConnect, bleDisconnect } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
-import { formatAckErrorForBanner, subscribeNativeAckErrors } from '../native/nativeAckErrors';
+import { subscribeAckErrorBanner } from '../native/nativeAckErrors';
 import type { NativeToWebMessage } from '@noilink/shared';
 
 export interface DeviceInfo {
@@ -107,10 +107,9 @@ export default function Device() {
 
   // ack(ok=false) 구독 — 브릿지가 거부한 사유를 사용자/QA 가 모두 읽을 수 있는
   // 토스트로 노출. 디버그 키(`type:reason@field`)도 함께 보여줘 버그 리포트 단서를 남긴다.
+  // 같은 사유가 연속으로 쏟아지면 카운터로 묶어 보여줘 토스트 깜빡임을 막는다 (Task #106).
   useEffect(() => {
-    return subscribeNativeAckErrors((payload) => {
-      setAckErrorBanner(formatAckErrorForBanner(payload.error));
-    });
+    return subscribeAckErrorBanner(setAckErrorBanner);
   }, []);
 
   const handleConnectAction = (device: DeviceInfo) => {
