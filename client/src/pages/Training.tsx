@@ -21,6 +21,10 @@ import {
   popOutcomeNotices,
   type PendingTrainingOutcome,
 } from '../utils/pendingTrainingRuns';
+import {
+  formatOutcomeNoticeMessage,
+  getOutcomeNoticeStyle,
+} from '../utils/outcomeNoticeDisplay';
 
 // 비정상 종료 안내 배너의 톤별 색상.
 // neutral: 일반 안내(검정 배경/흰 글자),
@@ -55,20 +59,6 @@ interface QueuedBanner {
   message: string;
   background: string;
   textColor: string;
-}
-
-function formatOutcomeMessage(o: PendingTrainingOutcome): string {
-  const what = o.title ? `'${o.title}'` : '이전';
-  if (o.outcome === 'success') {
-    return `${what} 트레이닝 결과를 백그라운드에서 안전하게 저장했어요.`;
-  }
-  return `${what} 트레이닝 결과를 끝내 저장하지 못했어요. 네트워크가 안정될 때 다시 시도해 주세요.`;
-}
-
-function outcomeStyle(o: PendingTrainingOutcome): { background: string; text: string } {
-  return o.outcome === 'success'
-    ? { background: '#1E2F1A', text: '#AAED10' }
-    : ABORT_BANNER_STYLE.warning;
 }
 
 export default function Training() {
@@ -130,10 +120,10 @@ export default function Training() {
     });
   }
   for (const o of outcomes) {
-    const s = outcomeStyle(o);
+    const s = getOutcomeNoticeStyle(o);
     banners.push({
       key: `outcome-${o.localId}`,
-      message: formatOutcomeMessage(o),
+      message: formatOutcomeNoticeMessage(o),
       background: s.background,
       textColor: s.text,
     });

@@ -24,25 +24,10 @@ import {
   subscribeOutcomeNotices,
   type PendingTrainingOutcome,
 } from '../../utils/pendingTrainingRuns';
-
-// Training.tsx 의 outcome 배너와 동일한 톤을 사용해 시각적으로 일관되게 한다.
-// success: 초록 톤(저장 성공), final-failure: 주황 톤(주의 — 사용자가 직접 다시
-// 시도해야 할 가능성).
-const OUTCOME_STYLE: Record<
-  PendingTrainingOutcome['outcome'],
-  { background: string; text: string }
-> = {
-  success: { background: '#1E2F1A', text: '#AAED10' },
-  'final-failure': { background: '#F59E0B', text: '#1A1A1A' },
-};
-
-function formatOutcomeMessage(o: PendingTrainingOutcome): string {
-  const what = o.title ? `'${o.title}'` : '이전';
-  if (o.outcome === 'success') {
-    return `${what} 트레이닝 결과를 백그라운드에서 안전하게 저장했어요.`;
-  }
-  return `${what} 트레이닝 결과를 끝내 저장하지 못했어요. 네트워크가 안정될 때 다시 시도해 주세요.`;
-}
+import {
+  formatOutcomeNoticeMessage,
+  getOutcomeNoticeStyle,
+} from '../../utils/outcomeNoticeDisplay';
 
 export default function OutcomeNoticeToast() {
   // 한 번에 하나만 노출하기 위한 in-memory 큐.
@@ -63,7 +48,7 @@ export default function OutcomeNoticeToast() {
   }, []);
 
   const active = queue[0];
-  const style = active ? OUTCOME_STYLE[active.outcome] : null;
+  const style = active ? getOutcomeNoticeStyle(active) : null;
 
   const dismissActive = () => {
     setQueue((prev) => prev.slice(1));
@@ -74,7 +59,7 @@ export default function OutcomeNoticeToast() {
       // key 변경으로 SuccessBanner 내부 setTimeout(autoClose) 가 새 토스트마다 재시작되도록 한다.
       key={active?.localId ?? 'none'}
       isOpen={!!active}
-      message={active ? formatOutcomeMessage(active) : ''}
+      message={active ? formatOutcomeNoticeMessage(active) : ''}
       onClose={dismissActive}
       autoClose
       duration={4000}
