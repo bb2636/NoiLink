@@ -1,13 +1,12 @@
 /**
- * 앱 부트 시점에 세 안전망 청소 함수가 모두 정확히 한 번씩 실제로 호출되는지를
- * 통합 테스트로 잠근다 (Task #137 / Task #140 / Task #142).
+ * 앱 부트 시점에 두 안전망 청소 함수가 모두 정확히 한 번씩 실제로 호출되는지를
+ * 통합 테스트로 잠근다 (Task #137 / Task #142).
  *
  * 보호 정책:
- *  - `AuthProvider` 가 마운트되면 다음 세 함수가 모두 정확히 한 번씩
+ *  - `AuthProvider` 가 마운트되면 다음 두 함수가 모두 정확히 한 번씩
  *    호출되어야 한다.
  *      1) `cleanupExpiredDismissals`         (회복 코칭 닫힘 기억 — Task #98)
  *      2) `cleanupExpiredReplayedHintSeen`   (결과 화면 안내 기억 — Task #134)
- *      3) `clearLegacyReplayedHintSeenKey`   (구버전 단일 키 청소 — Task #140)
  *  - 단위 테스트는 함수들의 동작(만료 경계, 손상된 값 처리 등)을 잠그지만,
  *    "부트 useEffect 에서 실제로 호출되는지" 는 통합 테스트로만 잠을 수 있다.
  *  - 어느 한쪽이 호출 누락되면 사용자는 "기억이 영원히 안 청소됨" 이라는
@@ -62,16 +61,12 @@ vi.mock('../../utils/replayedHintSeen', async (importOriginal) => {
   return {
     ...actual,
     cleanupExpiredReplayedHintSeen: vi.fn(actual.cleanupExpiredReplayedHintSeen),
-    clearLegacyReplayedHintSeenKey: vi.fn(actual.clearLegacyReplayedHintSeenKey),
   };
 });
 
 import api from '../../utils/api';
 import { cleanupExpiredDismissals } from '../../utils/recoveryCoachingDismissal';
-import {
-  cleanupExpiredReplayedHintSeen,
-  clearLegacyReplayedHintSeenKey,
-} from '../../utils/replayedHintSeen';
+import { cleanupExpiredReplayedHintSeen } from '../../utils/replayedHintSeen';
 import { AuthProvider } from '../useAuth';
 
 const mockedApi = api as unknown as {
@@ -84,8 +79,6 @@ const cleanupDismissalsSpy = cleanupExpiredDismissals as unknown as ReturnType<
 >;
 const cleanupReplayedHintSpy =
   cleanupExpiredReplayedHintSeen as unknown as ReturnType<typeof vi.fn>;
-const clearLegacyReplayedHintSpy =
-  clearLegacyReplayedHintSeenKey as unknown as ReturnType<typeof vi.fn>;
 
 const originalFetch = globalThis.fetch;
 
@@ -105,7 +98,6 @@ beforeEach(() => {
   mockedApi.getMe.mockReset();
   cleanupDismissalsSpy.mockClear();
   cleanupReplayedHintSpy.mockClear();
-  clearLegacyReplayedHintSpy.mockClear();
   // BLE 원격 설정 호출이 마운트 도중 일어나도 테스트가 깨지지 않도록 빈 200
   // 응답을 돌려준다. 이 테스트의 관심사는 부트 청소 호출 검증이므로 본문 무시.
   globalThis.fetch = vi.fn(async () =>
@@ -129,13 +121,13 @@ afterEach(async () => {
   globalThis.fetch = originalFetch;
 });
 
-describe('useAuth × 부트 청소 안전망 호출 (Task #137 / Task #140 / Task #142)', () => {
+describe('useAuth × 부트 청소 안전망 호출 (Task #137 / Task #142)', () => {
   // Task #142 — 부트 useEffect 는 마운트당 정확히 한 번만 돌아야 한다.
   // 과거에는 `checkAuth = useCallback(fn, [navigate])` 가 react-router 의
   // `useNavigate()` 새 참조에 따라 다시 만들어지면서 같은 마운트 안에서도
-  // effect 가 두 번 돌았고, 그 결과 세 청소 함수와 `api.getMe()` 가 두 번씩
+  // effect 가 두 번 돌았고, 그 결과 청소 함수들과 `api.getMe()` 가 두 번씩
   // 불렸다. 회귀를 막기 위해 호출 횟수를 정확히 1 로 잠근다.
-  it('비로그인 상태로 부트해도 세 청소 함수가 정확히 한 번씩만 호출된다', async () => {
+  it('비로그인 상태로 부트해도 두 청소 함수가 정확히 한 번씩만 호출된다', async () => {
     await act(async () => {
       root.render(
         <MemoryRouter initialEntries={['/login']}>
@@ -149,12 +141,11 @@ describe('useAuth × 부트 청소 안전망 호출 (Task #137 / Task #140 / Tas
 
     expect(cleanupDismissalsSpy).toHaveBeenCalledTimes(1);
     expect(cleanupReplayedHintSpy).toHaveBeenCalledTimes(1);
-    expect(clearLegacyReplayedHintSpy).toHaveBeenCalledTimes(1);
     // 비로그인 부트(토큰 없음)에서는 getMe 자체가 불리지 않는 게 맞다.
     expect(mockedApi.getMe).not.toHaveBeenCalled();
   });
 
-  it('세션 복원으로 로그인 상태로 부트해도 세 청소 함수와 getMe 가 정확히 한 번씩만 호출된다', async () => {
+  it('세션 복원으로 로그인 상태로 부트해도 두 청소 함수와 getMe 가 정확히 한 번씩만 호출된다', async () => {
     localStorage.setItem(STORAGE_KEYS.TOKEN, 'tok-restored');
     mockedApi.getMe.mockResolvedValueOnce({
       success: true,
@@ -174,42 +165,7 @@ describe('useAuth × 부트 청소 안전망 호출 (Task #137 / Task #140 / Tas
 
     expect(cleanupDismissalsSpy).toHaveBeenCalledTimes(1);
     expect(cleanupReplayedHintSpy).toHaveBeenCalledTimes(1);
-    expect(clearLegacyReplayedHintSpy).toHaveBeenCalledTimes(1);
     // Task #142 — 콜드 스타트의 getMe 도 정확히 1회만 흐른다.
     expect(mockedApi.getMe).toHaveBeenCalledTimes(1);
-  });
-
-  // Task #140 — 단일 키가 남아있던 기기 → 부트 후 그 키가 사라지고 새 prefix
-  // 키는 영향이 없다. 단위 테스트(replayedHintSeen.test.ts)가 함수 자체의
-  // 안전성을 잠그지만, 이 통합 테스트는 부트 useEffect 에서 그 동작이 실제로
-  // 일어나는지를 잠근다.
-  it('구버전 단일 키가 있던 기기는 부트 후 그 키가 사라지고 새 prefix 키는 영향 없음', async () => {
-    // 사전 상태: 구버전 단일 키 + 새 prefix 사용자 키가 공존.
-    localStorage.setItem(
-      'noilink:replayed-hint-seen',
-      JSON.stringify(['sess-old-1', 'sess-old-2']),
-    );
-    localStorage.setItem(
-      'noilink:replayed-hint-seen:u-boot',
-      JSON.stringify([{ id: 'sess-new', at: Date.now() }]),
-    );
-
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={['/login']}>
-          <AuthProvider>
-            <div data-testid="child">child</div>
-          </AuthProvider>
-        </MemoryRouter>,
-      );
-      await flushMicrotasks();
-    });
-
-    // 단일 키는 사라졌다.
-    expect(localStorage.getItem('noilink:replayed-hint-seen')).toBeNull();
-    // 새 prefix 사용자 키는 그대로 살아 있다.
-    expect(
-      localStorage.getItem('noilink:replayed-hint-seen:u-boot'),
-    ).not.toBeNull();
   });
 });
