@@ -257,6 +257,66 @@ describe('Record — 세션 카드 클릭 → /result 네비게이션 (Task #94)
     expect(options.state.displayScore).toBeUndefined();
   });
 
+  // Task #111 — 부분 결과 세션을 기록에서 다시 열어도 결과 화면이 부분 결과
+  // 배지를 그릴 수 있게, navigate state 에 `isPartial: true` 와
+  // `partialProgressPct` 가 함께 실려야 한다. 정상 완료 세션은 두 키 모두
+  // 빠져 있어야 Result 의 isPartial 분기가 켜지지 않는다(회귀 보호).
+  it('부분 결과 세션을 누르면 navigate state 에 isPartial=true · partialProgressPct 가 실린다 (Task #111)', async () => {
+    await renderRecord([
+      makeSession({
+        id: 'sess-partial',
+        mode: 'FOCUS',
+        score: 64,
+        meta: { partial: { progressPct: 73 } },
+      }),
+    ]);
+
+    const card = container?.querySelector(
+      '[aria-label="집중력 세션 결과 열기"]',
+    ) as HTMLElement | null;
+    expect(card).toBeTruthy();
+
+    act(() => {
+      card!.click();
+    });
+
+    expect(mockNavigate).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith('/result', {
+      state: expect.objectContaining({
+        sessionId: 'sess-partial',
+        isPartial: true,
+        partialProgressPct: 73,
+      }),
+    });
+  });
+
+  it('정상 완료 세션은 navigate state 에 isPartial / partialProgressPct 가 실리지 않는다 (Task #111 회귀 보호)', async () => {
+    await renderRecord([
+      makeSession({
+        id: 'sess-normal',
+        mode: 'FOCUS',
+        score: 81,
+      }),
+    ]);
+
+    const card = container?.querySelector(
+      '[aria-label="집중력 세션 결과 열기"]',
+    ) as HTMLElement | null;
+    expect(card).toBeTruthy();
+
+    act(() => {
+      card!.click();
+    });
+
+    expect(mockNavigate).toHaveBeenCalledTimes(1);
+    const [, options] = mockNavigate.mock.calls[0] as [
+      string,
+      { state: { isPartial?: boolean; partialProgressPct?: number } },
+    ];
+    expect(options.state.isPartial).toBeUndefined();
+    expect(options.state.partialProgressPct).toBeUndefined();
+  });
+
   it('Enter 키로도 카드를 열 수 있다(키보드 접근성)', async () => {
     await renderRecord([
       makeSession({

@@ -108,12 +108,19 @@ export default function Record() {
               // - displayScore: 저장된 점수가 있으면 그대로 보여줘 점수 원이 데모 폴백
               //   (DEMO_PROFILE.brainIndex)으로 떨어지지 않게 한다. score 가 없으면 생략.
               // - apiMode: ENDURANCE Late 표본 부족 안내(Task #54)에서 사용하므로 함께 넘긴다.
+              // - isPartial / partialProgressPct: 부분 결과 세션(Task #23)을 기록에서
+              //   다시 열 때도 결과 화면 점수 원 위에 "부분 결과 · X%" 배지가 보이게
+              //   하기 위함. 정상 완료 세션(partialPct === undefined)에는 키를 넣지
+              //   않아 Result 의 isPartial 분기가 그대로 false 로 유지된다.
               const resultState: TrainingResultState = {
                 sessionId: s.id,
                 title,
                 yieldsScore: s.mode !== 'FREE',
                 ...(typeof s.score === 'number' ? { displayScore: s.score } : {}),
                 apiMode: s.mode,
+                ...(partialPct !== undefined
+                  ? { isPartial: true, partialProgressPct: partialPct }
+                  : {}),
               };
               const openResult = () => navigate('/result', { state: resultState });
               return (
