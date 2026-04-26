@@ -6,12 +6,19 @@
  *  - 코칭 메시지
  *  - 완료 버튼
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { isEnduranceLateConfident, type TrainingMode } from '@noilink/shared';
+import {
+  isEnduranceLateConfident,
+  type MetricsScore,
+  type RawMetrics,
+  type RecoveryRawMetrics,
+  type TrainingMode,
+} from '@noilink/shared';
 import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
+import api from '../utils/api';
 import { DEMO_PROFILE } from '../utils/demoProfile';
 
 export type TrainingResultState = {
@@ -75,12 +82,45 @@ export default function Result() {
   const nextMilestone = Math.ceil((todayScore + 5) / 5) * 5;
   const nickname = user?.nickname || user?.name || '회원';
 
+  // 결과 화면 재진입(기록·홈에서 같은 세션) 대응 (Task #75):
+  // 트레이닝 직후엔 navigate state 로 회복 정보가 함께 넘어오지만, 사용자가
+  // 결과 화면을 떠났다 다시 들어오면 state 가 sessionId 만 남는다(또는 비어 있다).
+  // 그 경우 서버에 저장된 raw.recovery 를 한 번 받아와 카드를 동일하게 그린다.
+  // navigate state 가 회복 데이터를 이미 들고 있으면 호출하지 않는다 — 정상
+  // 완료 흐름의 추가 네트워크/지연 비용을 만들지 않기 위함.
+  const [serverRecovery, setServerRecovery] = useState<RecoveryRawMetrics | null>(null);
+  const sessionIdForFetch = state?.sessionId;
+  const stateProvidedRecovery = state?.recoverySegments !== undefined;
+  useEffect(() => {
+    if (!sessionIdForFetch) return;
+    if (stateProvidedRecovery) return;
+    let cancelled = false;
+    (async () => {
+      const res = await api
+        .get<{ raw: RawMetrics | null; score: MetricsScore | null }>(
+          `/metrics/session/${sessionIdForFetch}`,
+        )
+        .catch(() => null);
+      if (cancelled || !res || !res.success) return;
+      const recovery = res.data?.raw?.recovery;
+      // 응답에 recovery 가 없으면(과거 세션) 그대로 폴백한다 — 기존
+      // recoveryStats.hasSegments 폴백이 빈 카드를 자연스럽게 처리한다.
+      setServerRecovery(recovery ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionIdForFetch, stateProvidedRecovery]);
+
   // BLE 단절 회복 안내(Task #27, Task #36): 회복 구간이 1초 이상 누적된 세션에만 노출.
   // 1초 미만은 사용자가 인지하지도 못한 일시적 신호 흔들림이므로 굳이 알리지 않는다.
   // 표기 단위는 사용자 가독성을 위해 초 단위로 올림 처리.
-  const recoveryExcludedMs = state?.recoveryExcludedMs ?? 0;
-  const recoveryWindows = state?.recoveryWindows ?? 0;
-  const recoverySegments = state?.recoverySegments ?? [];
+  // 우선순위: navigate state(방금 끝낸 세션) → 서버 응답(재진입). 둘 다 없으면 0.
+  const recoveryExcludedMs =
+    state?.recoveryExcludedMs ?? serverRecovery?.excludedMs ?? 0;
+  const recoveryWindows = state?.recoveryWindows ?? serverRecovery?.windows ?? 0;
+  const recoverySegments =
+    state?.recoverySegments ?? serverRecovery?.segments ?? [];
   const showRecoveryBanner = recoveryExcludedMs >= 1000;
   const recoveryExcludedSec = Math.ceil(recoveryExcludedMs / 1000);
 

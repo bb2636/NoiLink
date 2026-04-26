@@ -26,7 +26,7 @@
  * `submitTrainingRun` 의 메타 동봉 로직은 각각 별도 단위 테스트가 보호한다.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -53,7 +53,18 @@ vi.mock('../components/Layout', () => ({
   ),
 }));
 
+// 결과 화면 재진입 시 서버에서 raw.recovery 를 받아오는 호출(Task #75) 을
+// 가로채기 위해 api 모듈을 모킹한다. 각 테스트에서 mockResolvedValue 로 응답을 지정.
+vi.mock('../utils/api', () => ({
+  __esModule: true,
+  default: { get: vi.fn() },
+  api: { get: vi.fn() },
+}));
+
+import api from '../utils/api';
 import Result, { type TrainingResultState } from './Result';
+
+const mockApiGet = api.get as ReturnType<typeof vi.fn>;
 
 // ───────────────────────────────────────────────────────────
 // 헬퍼 — Result 를 location.state 와 함께 렌더한다
@@ -133,6 +144,11 @@ function clickToggle() {
 // ───────────────────────────────────────────────────────────
 
 describe('Result — BLE 회복 안내 카드 (Task #36 / Task #60)', () => {
+  beforeEach(() => {
+    // 기본값: 서버 호출이 일어나도 빈 응답을 반환해 기존 테스트 동작에 영향이 없게 한다.
+    mockApiGet.mockResolvedValue({ success: true, data: { raw: null, score: null } });
+  });
+
   afterEach(() => {
     unmountResult();
     vi.clearAllMocks();
@@ -289,3 +305,129 @@ describe('Result — 부분 결과 배지 (Task #23 / Task #63)', () => {
     expect(text).toContain('부분 결과 · 100% 진행');
   });
 });
+
+// ───────────────────────────────────────────────────────────
+// Task #75 — 결과 화면 재진입 시 서버에서 끊김 타임라인 다시 불러오기
+// ───────────────────────────────────────────────────────────
+//
+// 정책 요약:
+//   1. navigate state 가 sessionId 만 들고 있으면(=재진입) 서버에서 raw.recovery
+//      를 받아와 회복 카드를 동일하게 그린다.
+//   2. 응답에 recovery 가 없으면(과거 세션) 카드를 띄우지 않고 자연스럽게 폴백한다.
+//   3. navigate state 에 이미 recoverySegments 가 들어 있으면(=정상 완료 흐름)
+//      서버 호출을 하지 않는다 — 추가 네트워크 비용을 만들지 않기 위함.
+
+describe('Result — 결과 재진입 시 서버에서 회복 타임라인 다시 불러오기 (Task #75)', () => {
+  beforeEach(() => {
+    mockApiGet.mockReset();
+  });
+
+  afterEach(() => {
+    unmountResult();
+    vi.clearAllMocks();
+  });
+
+  it('navigate state 가 sessionId 만 있으면 서버 응답의 segments 로 카드를 그린다', async () => {
+    mockApiGet.mockResolvedValue({
+      success: true,
+      data: {
+        raw: {
+          recovery: {
+            excludedMs: 4_000,
+            windows: 2,
+            segments: [
+              { startedAt: 5_000, durationMs: 1_500 },
+              { startedAt: 22_000, durationMs: 2_500 },
+            ],
+          },
+        },
+        score: null,
+      },
+    });
+
+    // recoverySegments / recoveryExcludedMs / recoveryWindows 가 전부 누락된 재진입 상태.
+    renderResult({
+      recoveryExcludedMs: undefined,
+      recoveryWindows: undefined,
+      recoverySegments: undefined,
+    });
+
+    // 마이크로태스크 큐가 흘러 setState 가 반영되도록 act 안에서 await 한다.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // 서버 호출이 정확한 엔드포인트로 한 번 일어났어야 한다.
+    expect(mockApiGet).toHaveBeenCalledTimes(1);
+    expect(mockApiGet).toHaveBeenCalledWith('/metrics/session/sess-test');
+
+    // 서버 응답 기반으로 카드와 요약이 렌더된다.
+    const card = recoveryCard();
+    expect(card).toBeTruthy();
+    expect(card?.textContent).toContain('기기 연결 회복 구간');
+    expect(card?.textContent).toContain('4초');
+
+    // 토글이 활성화돼 펼침이 가능해야 한다 (segments 가 있으니까).
+    const btn = toggleButton();
+    expect(btn?.disabled).toBe(false);
+    clickToggle();
+    expect(segmentList()?.querySelectorAll('li').length).toBe(2);
+  });
+
+  it('서버 응답에 recovery 가 없으면(과거 세션) 카드가 노출되지 않는다', async () => {
+    mockApiGet.mockResolvedValue({
+      success: true,
+      data: { raw: { /* recovery 필드 누락 */ }, score: null },
+    });
+
+    renderResult({
+      recoveryExcludedMs: undefined,
+      recoveryWindows: undefined,
+      recoverySegments: undefined,
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockApiGet).toHaveBeenCalledTimes(1);
+    // excludedMs 가 0 이므로 카드 자체가 DOM 에 그려지지 않는다.
+    expect(recoveryCard()).toBeNull();
+  });
+
+  it('navigate state 가 이미 recoverySegments 를 들고 있으면 서버 호출을 하지 않는다', async () => {
+    mockApiGet.mockResolvedValue({
+      success: true,
+      data: {
+        raw: {
+          recovery: {
+            excludedMs: 9_999,
+            windows: 9,
+            segments: [{ startedAt: 0, durationMs: 9_999 }],
+          },
+        },
+        score: null,
+      },
+    });
+
+    // 정상 완료 흐름 — 빈 segments 라도 navigate state 가 명시적으로 들고 있으므로
+    // 서버 호출은 일어나지 않아야 한다.
+    renderResult({
+      recoveryExcludedMs: 0,
+      recoveryWindows: 0,
+      recoverySegments: [],
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockApiGet).not.toHaveBeenCalled();
+    // 그리고 카드도 (excludedMs=0 이므로) 노출되지 않는다 — 서버 응답에 영향받지 않는다.
+    expect(recoveryCard()).toBeNull();
+  });
+});
+
