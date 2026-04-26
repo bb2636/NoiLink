@@ -366,7 +366,7 @@ function StandardHome({ variant, home, user }: StandardProps) {
 // - 최근 N개 세션의 세션당 평균 회복 시간이 30초 이상이면 "환경 점검" 카드를
 //   띄운다(트리거 = 카드 카피와 1:1 일치). 단발성 outlier 만으로는 띄우지 않는다.
 // 회복이 한 번도 없었던 경우엔 카드를 통째로 숨겨 잡음을 만들지 않는다.
-function RecoverySection({
+export function RecoverySection({
   stats,
   userId,
 }: {
