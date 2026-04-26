@@ -96,8 +96,11 @@ class ApiClient {
     }) as Promise<ApiResponse<User> & { token?: string }>;
   }
 
+  // Task #146 → Task #149 — 사용자 단건 조회도 같은 in-flight 가드.
+  // 키는 endpoint(userId 포함) 단위라 다른 사용자 조회는 분리된다.
   async getUser(userId: string) {
-    return this.request<User>(`/users/${userId}`);
+    const path = `/users/${userId}`;
+    return this.coalesceInflight<User>(`GET ${path}`, () => this.request<User>(path));
   }
 
   async updateUser(userId: string, userData: Partial<User>) {
@@ -107,8 +110,12 @@ class ApiClient {
     });
   }
 
+  // Task #146 → Task #149 — 사용자 통계 조회도 같은 in-flight 가드.
   async getUserStats(userId: string) {
-    return this.request<UserStats>(`/users/${userId}/stats`);
+    const path = `/users/${userId}/stats`;
+    return this.coalesceInflight<UserStats>(`GET ${path}`, () =>
+      this.request<UserStats>(path),
+    );
   }
 
   // Scores API
@@ -126,22 +133,33 @@ class ApiClient {
     });
   }
 
+  // Task #146 → Task #149 — 사용자 스코어 목록 조회도 같은 in-flight 가드.
   async getUserScores(userId: string) {
-    return this.request<any[]>(`/scores/user/${userId}`);
+    const path = `/scores/user/${userId}`;
+    return this.coalesceInflight<any[]>(`GET ${path}`, () => this.request<any[]>(path));
   }
 
+  // Task #146 → Task #149 — 게임 스코어 목록 조회도 같은 in-flight 가드.
+  // 키는 (gameId + limit) 가 query 로 직렬화된 endpoint 단위라 limit 가
+  // 다르면 분리된다.
   async getGameScores(gameId: string, limit?: number) {
     const params = limit ? `?limit=${limit}` : '';
-    return this.request<any[]>(`/scores/game/${gameId}${params}`);
+    const path = `/scores/game/${gameId}${params}`;
+    return this.coalesceInflight<any[]>(`GET ${path}`, () => this.request<any[]>(path));
   }
 
   // Training API
+  // Task #146 → Task #149 — 게임 목록/단건 조회도 같은 in-flight 가드.
+  // 라우팅 전환 + Strict Mode 이중 마운트로 거의 동시에 두 번 호출될 수
+  // 있는 경합 보호.
   async getGames() {
-    return this.request<Game[]>('/training/games');
+    const path = '/training/games';
+    return this.coalesceInflight<Game[]>(`GET ${path}`, () => this.request<Game[]>(path));
   }
 
   async getGame(gameId: string) {
-    return this.request<Game>(`/training/games/${gameId}`);
+    const path = `/training/games/${gameId}`;
+    return this.coalesceInflight<Game>(`GET ${path}`, () => this.request<Game>(path));
   }
   
   // Home API
@@ -289,18 +307,31 @@ class ApiClient {
   }
 
   // Terms API
+  // Task #146 → Task #149 — 약관 조회도 같은 in-flight 가드.
+  // 키는 (type query 포함) endpoint 단위라 type 이 다르면 분리된다.
   async getTerms(type?: TermsType): Promise<ApiResponse<Terms[]>> {
     const query = type ? `?type=${type}` : '';
-    return this.request<Terms[]>(`/terms${query}`);
+    const path = `/terms${query}`;
+    return this.coalesceInflight<Terms[]>(`GET ${path}`, () =>
+      this.request<Terms[]>(path),
+    );
   }
 
+  // Task #146 → Task #149 — 단일 type 약관 조회도 같은 in-flight 가드.
   async getTermByType(type: TermsType): Promise<ApiResponse<Terms>> {
-    return this.request<Terms>(`/terms/${type.toLowerCase()}`);
+    const path = `/terms/${type.toLowerCase()}`;
+    return this.coalesceInflight<Terms>(`GET ${path}`, () =>
+      this.request<Terms>(path),
+    );
   }
 
   // Admin Terms API
+  // Task #146 → Task #149 — 관리자 약관 목록 조회도 같은 in-flight 가드.
   async getAdminTerms(): Promise<ApiResponse<Terms[]>> {
-    return this.request<Terms[]>('/admin/terms');
+    const path = '/admin/terms';
+    return this.coalesceInflight<Terms[]>(`GET ${path}`, () =>
+      this.request<Terms[]>(path),
+    );
   }
 
   async createTerm(termData: {
@@ -514,13 +545,19 @@ class ApiClient {
   }
 
   // Admin API
+  // Task #146 → Task #149 — 관리자 회원/세션/문의/배너/리커버리 통계 조회도
+  // 같은 in-flight 가드. 키는 (params 가 query 로 직렬화된) endpoint 단위라
+  // 다른 페이지/필터 조합은 분리된다.
   async getAdminUsers(params?: { page?: number; limit?: number; userType?: string }): Promise<ApiResponse<User[]>> {
     const query = new URLSearchParams();
     if (params?.page) query.append('page', String(params.page));
     if (params?.limit) query.append('limit', String(params.limit));
     if (params?.userType) query.append('userType', params.userType);
     const queryString = query.toString() ? `?${query.toString()}` : '';
-    return this.request<User[]>(`/admin/users${queryString}`);
+    const path = `/admin/users${queryString}`;
+    return this.coalesceInflight<User[]>(`GET ${path}`, () =>
+      this.request<User[]>(path),
+    );
   }
 
   async getAdminRecoveryStats(params?: { period?: '7d' | '30d' }): Promise<ApiResponse<{
@@ -542,16 +579,19 @@ class ApiClient {
     const query = new URLSearchParams();
     if (params?.period) query.append('period', params.period);
     const queryString = query.toString() ? `?${query.toString()}` : '';
-    return this.request(`/admin/recovery-stats${queryString}`);
+    const path = `/admin/recovery-stats${queryString}`;
+    return this.coalesceInflight(`GET ${path}`, () => this.request(path));
   }
 
   async getAdminBanners(): Promise<ApiResponse<any[]>> {
-    return this.request<any[]>('/admin/banners');
+    const path = '/admin/banners';
+    return this.coalesceInflight<any[]>(`GET ${path}`, () => this.request<any[]>(path));
   }
 
   // Public Banners API (for home page)
   async getBanners(): Promise<ApiResponse<any[]>> {
-    return this.request<any[]>('/home/banners');
+    const path = '/home/banners';
+    return this.coalesceInflight<any[]>(`GET ${path}`, () => this.request<any[]>(path));
   }
 
   async getAdminSessions(params?: { page?: number; limit?: number; userId?: string }): Promise<ApiResponse<any[]>> {
@@ -560,11 +600,13 @@ class ApiClient {
     if (params?.limit) query.append('limit', String(params.limit));
     if (params?.userId) query.append('userId', params.userId);
     const queryStr = query.toString() ? `?${query.toString()}` : '';
-    return this.request<any[]>(`/admin/sessions${queryStr}`);
+    const path = `/admin/sessions${queryStr}`;
+    return this.coalesceInflight<any[]>(`GET ${path}`, () => this.request<any[]>(path));
   }
 
   async getAdminInquiries(): Promise<ApiResponse<any[]>> {
-    return this.request<any[]>('/admin/inquiries');
+    const path = '/admin/inquiries';
+    return this.coalesceInflight<any[]>(`GET ${path}`, () => this.request<any[]>(path));
   }
 
   async answerInquiry(inquiryId: string, answer: string): Promise<ApiResponse<any>> {
@@ -586,12 +628,16 @@ class ApiClient {
     });
   }
 
+  // Task #146 → Task #149 — 사용자 본인 문의 목록 조회도 같은 in-flight
+  // 가드. 키는 endpoint(userId 포함) 단위라 다른 사용자(예: 로그아웃 후
+  // 재로그인) 호출은 분리된다.
   async getUserInquiries(): Promise<ApiResponse<any[]>> {
     const userId = localStorage.getItem(STORAGE_KEYS.USER_ID);
     if (!userId) {
       return Promise.resolve({ success: false, error: 'User not logged in', data: [] });
     }
-    return this.request<any[]>(`/users/inquiries/${userId}`);
+    const path = `/users/inquiries/${userId}`;
+    return this.coalesceInflight<any[]>(`GET ${path}`, () => this.request<any[]>(path));
   }
 }
 
