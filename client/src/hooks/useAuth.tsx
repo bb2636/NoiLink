@@ -19,7 +19,10 @@ import {
   cleanupExpiredDismissals as cleanupRecoveryCoachingDismissals,
   clearAllDismissals as clearAllRecoveryCoachingDismissals,
 } from '../utils/recoveryCoachingDismissal';
-import { clearAllReplayedHintSeen } from '../utils/replayedHintSeen';
+import {
+  cleanupExpiredReplayedHintSeen,
+  clearAllReplayedHintSeen,
+} from '../utils/replayedHintSeen';
 
 /**
  * 인증 상태를 앱 전역에서 공유하기 위한 컨텍스트.
@@ -119,6 +122,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Task #98 — 앱 부트시 한 번 prefix 스캔으로 오래 방치된 회복 코칭 닫힘
     // 기억(기본 30일 초과)을 정리한다. 인증 흐름과 독립적이므로 실패해도 무시.
     cleanupRecoveryCoachingDismissals();
+    // Task #134 — 결과 화면 replayed 힌트의 sessionId 기억도 같은 결로 정리.
+    // LRU-by-write 만으로는 결과 화면을 자주 안 보는 사용자의 오래된 sessionId
+    // 가 자리를 차지할 수 있어, 너그러운 시간 만료(기본 30일) 안전망을 둔다.
+    cleanupExpiredReplayedHintSeen();
   }, [checkAuth]);
 
   useEffect(() => {

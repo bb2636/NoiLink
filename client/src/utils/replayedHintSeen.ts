@@ -13,12 +13,29 @@
  *    한 번 더 노출될 수 있으나 사용자 흐름은 막지 않는다).
  *  - sessionId 가 비어 있으면 추적을 비활성화한다 — 호출자는 현재 동작
  *    그대로(=항상 노출) 폴백한다.
+ *
+ * Task #134 — 오래된 sessionId 기억 자동 정리:
+ *  - LRU-by-write 상한(`REPLAYED_HINT_MAX_ENTRIES`)만으로는 결과 화면을 자주
+ *    안 보는 사용자의 오래된 sessionId 가 자리를 차지할 수 있다(쓰기가 없으면
+ *    LRU 가 동작하지 않음).
+ *  - 회복 코칭 닫힘 기억의 `cleanupExpiredDismissals` 와 동일한 결로,
+ *    `cleanupExpiredReplayedHintSeen` 가 너그러운 시간 만료(기본 30일)를
+ *    적용해 오래 방치된 엔트리만 한 번에 청소한다. 정상 사용자의 최근 기억은
+ *    절대 영향을 받지 않는다.
+ *  - 앱 부트시 한 번만 호출되도록 useAuth 의 첫 useEffect 에서 트리거된다.
  */
 
 const STORAGE_KEY = 'noilink:replayed-hint-seen';
 
 /** 저장하는 최근 엔트리 개수 상한. 너무 적으면 회귀, 너무 많으면 무의미한 누적. */
 export const REPLAYED_HINT_MAX_ENTRIES = 50;
+
+/**
+ * 오래 방치된 sessionId 기억의 보존 한도(기본 30일).
+ * LRU 상한(`REPLAYED_HINT_MAX_ENTRIES`)이 동작하지 않는 "쓰기 없는 장기 휴면"
+ * 구간에서도 안전망이 되도록 회복 코칭 닫힘 기억의 보존 한도와 같은 30일을 둔다.
+ */
+export const REPLAYED_HINT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 interface StoredEntry {
   id: string;
@@ -89,4 +106,52 @@ export function clearAllReplayedHintSeen(): void {
   } catch {
     // 무시.
   }
+}
+
+/**
+ * 너그러운 시간 만료(`retentionMs`, 기본 30일)를 넘긴 sessionId 엔트리와
+ * 미래 타임스탬프(시계 변경) 엔트리를 한 번에 정리한다. 손상된 JSON / 배열이
+ * 아닌 값 / 형식이 어긋난 항목은 `readEntries` 가 이미 무시하므로, 결과적으로
+ * 정규 직렬화로 덮어쓰면서 함께 청소된다.
+ *
+ * - 정상 사용자의 최근 기억은 건드리지 않는다 — 보존 한도(`retentionMs`) 안의
+ *   엔트리는 그대로 유지된다.
+ * - 어떤 단계에서도 throw 하지 않는다 — localStorage 가 막혀 있으면 0 반환.
+ * - 변화가 없으면 쓰기조차 하지 않는다(=정상 부트의 비용은 read 1회).
+ *
+ * @returns 만료/미래 타임스탬프 사유로 실제로 제거된 엔트리 개수. 손상된 raw
+ *   값이 정리된 경우는 0 으로 잡히지만, 저장소 상태는 정규화된다.
+ */
+export function cleanupExpiredReplayedHintSeen(
+  now: number = Date.now(),
+  retentionMs: number = REPLAYED_HINT_RETENTION_MS,
+): number {
+  let raw: string | null = null;
+  try {
+    raw = globalThis.localStorage?.getItem(STORAGE_KEY) ?? null;
+  } catch {
+    return 0;
+  }
+  if (raw == null) return 0;
+
+  const entries = readEntries();
+  const fresh = entries.filter(
+    (e) => now - e.at <= retentionMs && e.at <= now,
+  );
+
+  // 정규 직렬화와 raw 가 동일하면 변화 없음 — 쓰기를 생략해 부트 비용을 0 에 가깝게.
+  const canonical = JSON.stringify(fresh);
+  if (canonical === raw) return 0;
+
+  if (fresh.length === 0) {
+    try {
+      globalThis.localStorage?.removeItem(STORAGE_KEY);
+    } catch {
+      // 무시.
+    }
+  } else {
+    writeEntries(fresh);
+  }
+
+  return entries.length - fresh.length;
 }
