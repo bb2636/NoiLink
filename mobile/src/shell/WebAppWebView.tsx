@@ -5,6 +5,7 @@ import WebView from 'react-native-webview';
 import { getStoredToken, getStoredUserDisplay } from '../auth/storage';
 import { dispatchWebMessage, ensureAppLifecycleHandlerBound } from '../bridge/NativeBridgeDispatcher';
 import { postNativeToWeb, registerWebViewInjector } from '../bridge/injectToWeb';
+import { startNetworkRecoveryBridge } from '../network/networkRecoveryBridge';
 import { buildBootstrapBeforeContentScript } from './bootstrapBeforeContent';
 import { getWebClientOrigin } from './webUrls';
 
@@ -42,7 +43,14 @@ export default function WebAppWebView() {
     // 앱이 백그라운드로 들어가면 NoiPod에 즉시 STOP을 송신 (네이티브 측 안전망).
     // WebView 안의 visibilitychange 핸들러와 별개로, JS 정지 직전에 한 번 더 보낸다.
     ensureAppLifecycleHandlerBound();
-    return () => registerWebViewInjector(null);
+    // OS 단의 네트워크 복구 신호를 받아 WebView 에 `network.online` 을 보낸다.
+    // 짧은 시간 내 깜빡임은 네이티브 측에서 throttle/dedupe 한다 (브리지 트래픽
+    // 자체를 줄이는 목적; 웹 측에는 별도 throttle 이 최종 보호선).
+    const stopNetworkBridge = startNetworkRecoveryBridge();
+    return () => {
+      stopNetworkBridge();
+      registerWebViewInjector(null);
+    };
   }, []);
 
   const onMessage = useCallback((event: { nativeEvent: { data: string } }) => {
