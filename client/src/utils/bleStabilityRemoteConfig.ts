@@ -1,6 +1,6 @@
 /**
  * BLE 단절 안내 임계값 원격 설정 부트스트랩 (Task #48 / 캐시 보강 Task #69 /
- * 사용자 컨텍스트 재조회 Task #70 / 장기 세션 자동 갱신 Task #86)
+ * 사용자 컨텍스트 재조회 Task #70 / 장기 세션 자동 갱신 Task #86 / 캐시 만료 Task #87)
  *
  * 앱 시작 시 `GET /api/config/ble-stability` 를 호출해 받은 응답을
  * `makeBleStabilityResolverFromRemoteConfig()` 로 변환한 뒤
@@ -14,7 +14,7 @@
  *  - 즉, 서버가 죽어 있어도 클라이언트 동작에 영향이 없다.
  *
  * 오프라인 캐시 (Task #69):
- *  - 성공 응답은 `localStorage` 에 envelope `{ version, config }` 로 저장된다.
+ *  - 성공 응답은 `localStorage` 에 envelope `{ version, savedAt, config }` 로 저장된다.
  *  - 다음 실행에서 네트워크가 죽어 있으면(예: 지하철·기내) 캐시를 읽어 마지막으로
  *    검증된 설정을 그대로 적용한다 — 운영자가 푸시한 모델별 튜닝이 끊기지 않는다.
  *  - envelope 의 `version` 이 `BLE_STABILITY_REMOTE_CONFIG_SCHEMA_VERSION` 과
@@ -27,8 +27,18 @@
  *  - 같은 트리거가 폭주하지 않도록 `lastRefreshAt` 으로 throttle 한다 — 직전
  *    호출(부트스트랩, 로그인 시 재호출 모두 포함) 로부터 `minIntervalMs` 안쪽이면
  *    실제 fetch 를 건너뛴다.
+ *
+ * 캐시 만료 (Task #87):
+ *  - envelope 에 `savedAt` 타임스탬프가 함께 저장되며, 읽을 때 현재 시각과 비교해
+ *    `BLE_STABILITY_REMOTE_CONFIG_CACHE_MAX_AGE_MS` 를 넘은 캐시는 폐기된다.
+ *  - 이로써 며칠 전 잘못 푸시된 튜닝이 사용자가 오프라인인 동안 무기한 살아남는
+ *    위험이 사라진다 — 만료되면 기본값으로 돌아가, 다음 온라인 부트스트랩이
+ *    "현재 운영자가 의도한" 설정으로 자연스럽게 다시 채운다.
+ *  - `savedAt` 이 누락되었거나(과거 형식) 미래의 시각이거나 숫자가 아닌 envelope 도
+ *    안전을 위해 만료된 것으로 간주해 폐기한다.
  */
 import {
+  BLE_STABILITY_REMOTE_CONFIG_CACHE_MAX_AGE_MS,
   BLE_STABILITY_REMOTE_CONFIG_SCHEMA_VERSION,
   makeBleStabilityResolverFromRemoteConfig,
   setBleStabilityOverrideResolver,
@@ -60,6 +70,11 @@ interface RemoteConfigEnvelope {
 
 interface CachedConfigEnvelope {
   version: number;
+  /**
+   * 캐시가 저장된 시각 (Date.now() ms). Task #87 의 만료 검사에 쓰인다.
+   * 누락되었거나 숫자가 아닌 envelope 은 만료된 것으로 간주된다.
+   */
+  savedAt: number;
   config: BleStabilityRemoteConfig | null;
 }
 
@@ -80,10 +95,13 @@ export interface LoadBleStabilityRemoteConfigOptions {
    */
   isStale?: () => boolean;
   /**
-   * throttle 시각 측정용 시계 주입 (테스트 전용). 실서비스에서는 `Date.now` 가 쓰인다.
-   * `loadBleStabilityRemoteConfig` 는 호출 시점에 throttle 시계를 갱신해, 직접 호출
-   * (예: 로그인 직후 재호출) 직후의 포그라운드 복귀가 즉시 또 한 번 fetch 하지
-   * 않게 한다.
+   * 현재 시각을 돌려주는 시계 — 다음 두 곳 모두에서 쓰인다.
+   *  - throttle 기준점(Task #86): `loadBleStabilityRemoteConfig` 가 호출 시점에
+   *    `lastRefreshAt` 을 갱신해, 직접 호출(예: 로그인 직후 재호출) 직후의
+   *    포그라운드 복귀가 즉시 또 한 번 fetch 하지 않게 한다.
+   *  - 캐시 `savedAt` 기록과 만료 비교(Task #87): envelope 에 저장 시각을 박고,
+   *    읽을 때 보관 기간을 넘었는지 비교한다.
+   * 기본값은 `Date.now`. 테스트에서는 fake clock 을 주입해 동작을 검증한다.
    */
   now?: () => number;
 }
@@ -118,7 +136,7 @@ export async function loadBleStabilityRemoteConfig(
 
   if (typeof fetcher !== 'function') {
     // fetch 가 없는 환경(SSR/노드 일부)이라도 캐시는 적용해 준다.
-    applyCacheIfAny(storage);
+    applyCacheIfAny(storage, now);
     return;
   }
 
@@ -130,7 +148,7 @@ export async function loadBleStabilityRemoteConfig(
     });
     if (!res.ok) {
       console.warn(`[ble-stability] remote config fetch failed: HTTP ${res.status}`);
-      applyCacheIfAny(storage);
+      applyCacheIfAny(storage, now);
       return;
     }
     payload = (await res.json()) as RemoteConfigEnvelope;
@@ -139,7 +157,7 @@ export async function loadBleStabilityRemoteConfig(
       '[ble-stability] remote config fetch threw:',
       err instanceof Error ? err.message : err,
     );
-    applyCacheIfAny(storage);
+    applyCacheIfAny(storage, now);
     return;
   }
 
@@ -150,7 +168,7 @@ export async function loadBleStabilityRemoteConfig(
   const config = payload?.data ?? null;
   // 성공 응답은 비어 있더라도 캐시에 반영한다 — 운영자가 의도적으로 규칙을
   // 비웠다면, 다음 오프라인 실행에서도 그 의도가 유지되어야 한다.
-  writeCachedConfig(storage, config);
+  writeCachedConfig(storage, config, now);
 
   const resolver = makeBleStabilityResolverFromRemoteConfig(config);
   // resolver 가 null 이어도 명시적으로 호출해 이전 부트스트랩에서 남은 오버라이드를
@@ -289,8 +307,8 @@ export function __resetBleStabilityRefreshThrottleForTests(): void {
  * 캐시도 없는 상태에서 기본값을 깨끗이 유지하는 것이 옳고, 이미 떠 있는
  * 오버라이드를 덮어쓰는 책임은 "성공 응답이 들어왔을 때"만 진다.
  */
-function applyCacheIfAny(storage: Storage | null): void {
-  const cached = readCachedConfig(storage);
+function applyCacheIfAny(storage: Storage | null, now: () => number): void {
+  const cached = readCachedConfig(storage, now);
   if (!cached) return;
   const resolver = makeBleStabilityResolverFromRemoteConfig(cached);
   if (resolver) {
@@ -310,6 +328,7 @@ function getDefaultStorage(): Storage | null {
 
 function readCachedConfig(
   storage: Storage | null,
+  now: () => number,
 ): BleStabilityRemoteConfig | null {
   if (!storage) return null;
 
@@ -339,6 +358,23 @@ function readCachedConfig(
     discardCachedConfig(storage);
     return null;
   }
+
+  // Task #87: savedAt 만료 검사. 누락/숫자 아님/미래 시각/너무 오래된 envelope 은
+  // 안전하게 폐기한다. "미래 시각" 도 거르는 이유는 시계가 비정상적으로 흐른 뒤
+  // 정정된 경우(예: 단말 시각 동기화) 잘못 저장된 envelope 이 영원히 만료되지 않는
+  // 것을 막기 위함이다.
+  const savedAt = envelope.savedAt;
+  if (typeof savedAt !== 'number' || !Number.isFinite(savedAt)) {
+    discardCachedConfig(storage);
+    return null;
+  }
+  const currentTime = now();
+  const age = currentTime - savedAt;
+  if (age < 0 || age > BLE_STABILITY_REMOTE_CONFIG_CACHE_MAX_AGE_MS) {
+    discardCachedConfig(storage);
+    return null;
+  }
+
   const config = envelope.config;
   if (config === null || config === undefined) return null;
   if (typeof config !== 'object') {
@@ -351,10 +387,12 @@ function readCachedConfig(
 function writeCachedConfig(
   storage: Storage | null,
   config: BleStabilityRemoteConfig | null,
+  now: () => number,
 ): void {
   if (!storage) return;
   const envelope: CachedConfigEnvelope = {
     version: BLE_STABILITY_REMOTE_CONFIG_SCHEMA_VERSION,
+    savedAt: now(),
     config,
   };
   try {

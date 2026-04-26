@@ -1,5 +1,5 @@
 /**
- * 부트스트랩 어댑터 회귀 테스트 (Task #48 / 캐시 보강 Task #69)
+ * 부트스트랩 어댑터 회귀 테스트 (Task #48 / 캐시 보강 Task #69 / 만료 Task #87)
  *
  * 보호 정책:
  *  1. 응답이 비어 있거나(`{ rules: [] }`) 누락이면 오버라이드가 등록되지 않아
@@ -9,9 +9,11 @@
  *  3. 정상 응답이 오면 규칙대로 임계값이 바뀐다.
  *  4. 성공 응답은 캐시되어, 다음 실행에서 네트워크가 죽어 있어도 마지막 임계값이 적용된다.
  *  5. 캐시가 손상되었거나 스키마 버전이 다르면 안전하게 폐기한다.
+ *  6. 캐시 envelope 의 `savedAt` 이 최대 보관 기간을 넘기면 자동 폐기된다 (Task #87).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  BLE_STABILITY_REMOTE_CONFIG_CACHE_MAX_AGE_MS,
   BLE_STABILITY_REMOTE_CONFIG_SCHEMA_VERSION,
   DEFAULT_BLE_STABILITY_MS_THRESHOLD,
   DEFAULT_BLE_STABILITY_WINDOW_THRESHOLD,
@@ -221,10 +223,12 @@ describe('loadBleStabilityRemoteConfig', () => {
 
   it('HTTP 에러일 때도 캐시가 있으면 그것을 적용한다', async () => {
     const storage = makeMemoryStorage();
+    const baseTime = 1_700_000_000_000;
     storage.setItem(
       BLE_STABILITY_REMOTE_CONFIG_CACHE_KEY,
       JSON.stringify({
         version: BLE_STABILITY_REMOTE_CONFIG_SCHEMA_VERSION,
+        savedAt: baseTime,
         config: {
           rules: [
             {
@@ -239,7 +243,12 @@ describe('loadBleStabilityRemoteConfig', () => {
     const httpErrorFetcher = vi.fn(async () =>
       new Response('boom', { status: 503 }),
     ) as unknown as typeof fetch;
-    await loadBleStabilityRemoteConfig({ fetcher: httpErrorFetcher, storage });
+    await loadBleStabilityRemoteConfig({
+      fetcher: httpErrorFetcher,
+      storage,
+      // 캐시 직후 시각 — 만료되지 않은 신선한 캐시.
+      now: () => baseTime + 60_000,
+    });
 
     expect(resolveBleStabilityThresholds({ userId: 'u-7' })).toEqual({
       windowThreshold: 4,
@@ -357,6 +366,157 @@ describe('loadBleStabilityRemoteConfig', () => {
       windowThreshold: 8,
       msThreshold: 30_000,
     });
+  });
+
+  // ───────────────────────────────────────────────────────────
+  // Task #87: 캐시 자동 만료
+  // ───────────────────────────────────────────────────────────
+
+  it('보관 기간 안의 신선한 캐시는 그대로 적용된다 (Task #87)', async () => {
+    const storage = makeMemoryStorage();
+    const baseTime = 1_700_000_000_000;
+
+    // 1) baseTime 에 캐시를 저장.
+    await loadBleStabilityRemoteConfig({
+      fetcher: makeFetchOk({
+        success: true,
+        data: {
+          rules: [
+            {
+              match: { deviceModel: 'NoiPod-A1' },
+              thresholds: { windowThreshold: 5, msThreshold: 20_000 },
+            },
+          ],
+        },
+      }),
+      storage,
+      now: () => baseTime,
+    });
+
+    // 2) 보관 기간 직전(만료 1ms 전) 에 오프라인 부트스트랩 → 적용된다.
+    setBleStabilityOverrideResolver(null);
+    await loadBleStabilityRemoteConfig({
+      fetcher: vi.fn(async () => {
+        throw new Error('offline');
+      }) as unknown as typeof fetch,
+      storage,
+      now: () => baseTime + BLE_STABILITY_REMOTE_CONFIG_CACHE_MAX_AGE_MS - 1,
+    });
+
+    expect(resolveBleStabilityThresholds({ deviceModel: 'NoiPod-A1' })).toEqual({
+      windowThreshold: 5,
+      msThreshold: 20_000,
+    });
+    // 신선한 캐시는 폐기되지 않는다.
+    expect(storage.getItem(BLE_STABILITY_REMOTE_CONFIG_CACHE_KEY)).not.toBeNull();
+  });
+
+  it('보관 기간을 넘긴 캐시는 무시되고 폐기되어 기본값으로 폴백한다 (Task #87)', async () => {
+    const storage = makeMemoryStorage();
+    const baseTime = 1_700_000_000_000;
+
+    // 1) baseTime 에 캐시를 저장.
+    await loadBleStabilityRemoteConfig({
+      fetcher: makeFetchOk({
+        success: true,
+        data: {
+          rules: [
+            {
+              match: { deviceModel: 'NoiPod-A1' },
+              thresholds: { windowThreshold: 5, msThreshold: 20_000 },
+            },
+          ],
+        },
+      }),
+      storage,
+      now: () => baseTime,
+    });
+    expect(storage.getItem(BLE_STABILITY_REMOTE_CONFIG_CACHE_KEY)).not.toBeNull();
+
+    // 2) 보관 기간을 1ms 넘긴 시점에 오프라인 부트스트랩 → 만료된 캐시는 무시.
+    setBleStabilityOverrideResolver(null);
+    await loadBleStabilityRemoteConfig({
+      fetcher: vi.fn(async () => {
+        throw new Error('offline');
+      }) as unknown as typeof fetch,
+      storage,
+      now: () => baseTime + BLE_STABILITY_REMOTE_CONFIG_CACHE_MAX_AGE_MS + 1,
+    });
+
+    expect(resolveBleStabilityThresholds({ deviceModel: 'NoiPod-A1' })).toEqual({
+      windowThreshold: DEFAULT_BLE_STABILITY_WINDOW_THRESHOLD,
+      msThreshold: DEFAULT_BLE_STABILITY_MS_THRESHOLD,
+    });
+    // 만료된 캐시는 다음 실행을 위해 즉시 폐기된다 — 다시 읽기 시도가 일어나도
+    // 같은 만료 분기를 또 통과시키지 않게 한다.
+    expect(storage.getItem(BLE_STABILITY_REMOTE_CONFIG_CACHE_KEY)).toBeNull();
+  });
+
+  it('savedAt 이 누락된 과거 형식의 캐시는 만료된 것으로 간주되어 폐기된다 (Task #87)', async () => {
+    const storage = makeMemoryStorage();
+    storage.setItem(
+      BLE_STABILITY_REMOTE_CONFIG_CACHE_KEY,
+      JSON.stringify({
+        version: BLE_STABILITY_REMOTE_CONFIG_SCHEMA_VERSION,
+        // savedAt 가 없음 — Task #87 이전에 저장된 envelope 모양.
+        config: {
+          rules: [
+            {
+              match: { deviceModel: 'NoiPod-A1' },
+              thresholds: { windowThreshold: 9, msThreshold: 99_999 },
+            },
+          ],
+        },
+      }),
+    );
+    const offlineFetcher = vi.fn(async () => {
+      throw new Error('offline');
+    }) as unknown as typeof fetch;
+
+    await loadBleStabilityRemoteConfig({ fetcher: offlineFetcher, storage });
+
+    expect(resolveBleStabilityThresholds({ deviceModel: 'NoiPod-A1' })).toEqual({
+      windowThreshold: DEFAULT_BLE_STABILITY_WINDOW_THRESHOLD,
+      msThreshold: DEFAULT_BLE_STABILITY_MS_THRESHOLD,
+    });
+    expect(storage.getItem(BLE_STABILITY_REMOTE_CONFIG_CACHE_KEY)).toBeNull();
+  });
+
+  it('savedAt 이 미래 시각인 캐시는 안전을 위해 폐기된다 (Task #87)', async () => {
+    // 디바이스 시계가 어긋난 채 저장되었다가 이후 정정된 경우 — 영원히 만료되지
+    // 않는 envelope 이 살아남는 것을 막는다.
+    const storage = makeMemoryStorage();
+    const now = 1_700_000_000_000;
+    storage.setItem(
+      BLE_STABILITY_REMOTE_CONFIG_CACHE_KEY,
+      JSON.stringify({
+        version: BLE_STABILITY_REMOTE_CONFIG_SCHEMA_VERSION,
+        savedAt: now + 60 * 60 * 1000, // 1시간 미래
+        config: {
+          rules: [
+            {
+              match: { deviceModel: 'NoiPod-A1' },
+              thresholds: { windowThreshold: 9, msThreshold: 99_999 },
+            },
+          ],
+        },
+      }),
+    );
+    const offlineFetcher = vi.fn(async () => {
+      throw new Error('offline');
+    }) as unknown as typeof fetch;
+
+    await loadBleStabilityRemoteConfig({
+      fetcher: offlineFetcher,
+      storage,
+      now: () => now,
+    });
+
+    expect(resolveBleStabilityThresholds({ deviceModel: 'NoiPod-A1' })).toEqual({
+      windowThreshold: DEFAULT_BLE_STABILITY_WINDOW_THRESHOLD,
+      msThreshold: DEFAULT_BLE_STABILITY_MS_THRESHOLD,
+    });
+    expect(storage.getItem(BLE_STABILITY_REMOTE_CONFIG_CACHE_KEY)).toBeNull();
   });
 });
 

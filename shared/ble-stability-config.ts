@@ -154,6 +154,21 @@ export interface BleStabilityRemoteConfig {
 export const BLE_STABILITY_REMOTE_CONFIG_SCHEMA_VERSION = 1;
 
 /**
+ * 캐시된 원격 설정의 최대 보관 기간(ms) — 기본 30일 (Task #87).
+ *
+ * Task #69 의 오프라인 캐시는 운영자가 푸시한 마지막 튜닝을 무기한 살려두기
+ * 때문에, 며칠 전 잘못 푸시된 값이 한 번 검증된 적 있으면 사용자가 오랫동안
+ * 오프라인일 때 끝없이 따라다니는 위험이 있다. 캐시 envelope 의 `savedAt`
+ * 타임스탬프가 이 기간을 넘긴 경우 클라이언트는 캐시를 자동으로 폐기하고
+ * 기본값 폴백으로 돌아간다.
+ *
+ * 30일은 "기내·지하·해외 등 평소 흔한 오프라인 구간은 충분히 덮으면서,
+ * 잘못된 튜닝이 영원히 따라붙는 것은 막는다" 는 균형을 잡은 값이다.
+ */
+export const BLE_STABILITY_REMOTE_CONFIG_CACHE_MAX_AGE_MS =
+  30 * 24 * 60 * 60 * 1000;
+
+/**
  * 원격 설정 로딩 결과의 진단 메타 (Task #71).
  *
  * 잘못된 환경 변수가 푸시되어 빈 설정이 내려갈 때, 운영자가
