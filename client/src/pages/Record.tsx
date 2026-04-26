@@ -8,7 +8,7 @@ import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
 import type { Session, TrainingMode } from '@noilink/shared';
-import { TRAINING_CATALOG, getSessionPartialProgressPct } from '@noilink/shared';
+import { TRAINING_CATALOG, getSessionPartialProgressPct, KST_TIME_ZONE } from '@noilink/shared';
 import type { TrainingResultState } from './Result';
 
 function modeTitle(mode: TrainingMode): string {
@@ -16,9 +16,21 @@ function modeTitle(mode: TrainingMode): string {
   return hit?.title ?? mode;
 }
 
+/**
+ * 세션 카드의 "언제" 라벨 (Task #141).
+ *
+ *  - 결과 화면 비교 카드(Task #132) 와 같은 기준(KST, `Asia/Seoul`)으로 잠가
+ *    자정 근처에 끝낸 세션이 디바이스 시간대에 따라 다른 날짜로 보이는
+ *    어긋남을 막는다.
+ *  - 시·분도 같은 시간대에서 표기해 날짜와 시간이 서로 다른 시간대로 떨어지는
+ *    혼선(예: 날짜는 4/26 인데 시간은 새벽 1시) 을 함께 방지한다.
+ *  - 파싱 실패 시에는 원본 ISO 를 그대로 돌려준다 — 라벨을 가짜 시각으로
+ *    조작하지 않는다.
+ */
 function formatWhen(iso: string): string {
   try {
     return new Date(iso).toLocaleString('ko-KR', {
+      timeZone: KST_TIME_ZONE,
       month: 'short',
       day: 'numeric',
       hour: '2-digit',

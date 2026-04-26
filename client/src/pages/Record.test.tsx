@@ -317,6 +317,27 @@ describe('Record — 세션 카드 클릭 → /result 네비게이션 (Task #94)
     expect(options.state.partialProgressPct).toBeUndefined();
   });
 
+  // Task #141 — 결과 화면 비교 카드(Task #132) 와 같은 KST 기준으로 잠가
+  // 자정 근처에 끝낸 세션이 디바이스 시간대(예: UTC) 와 무관하게 같은 날짜로
+  // 보이는지 확인한다. UTC 기준 23:30(=KST 익일 08:30)인 세션은 KST 기준
+  // 다음 날로 표기되어야 한다.
+  it('자정 근처 세션 카드 라벨은 디바이스 시간대와 무관하게 KST 기준 날짜로 보인다 (Task #141)', async () => {
+    // UTC 23:30, 4/26 → KST 08:30, 4/27. 디바이스가 UTC 라도 4월 27일로 떨어져야 한다.
+    const utcLateNight = '2026-04-26T23:30:00.000Z';
+    await renderRecord([
+      makeSession({
+        id: 'sess-midnight',
+        createdAt: utcLateNight,
+      }),
+    ]);
+
+    const text = container?.textContent ?? '';
+    // ko-KR 의 month: 'short' 는 "4월", day: 'numeric' 은 "27일" 로 떨어진다.
+    expect(text).toContain('4월 27일');
+    // 회귀 보호: 디바이스 로컬(UTC) 기준이었다면 4월 26일로 보였을 것이다.
+    expect(text).not.toContain('4월 26일');
+  });
+
   it('Enter 키로도 카드를 열 수 있다(키보드 접근성)', async () => {
     await renderRecord([
       makeSession({
