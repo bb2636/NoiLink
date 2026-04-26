@@ -9,6 +9,11 @@
  *    안내되지 않는다(중복 노출 방지).
  *  - 짧은 시간에 여러 push 가 들어오면 한 번에 하나씩 노출되고, dismiss 후 다음
  *    항목으로 넘어간다.
+ *  - (Task #120) drain → pushOutcomeNotice → 토스트 노출까지의 통합 경로:
+ *    오프라인 큐가 비워질 때 서버 idempotency 캐시 hit 으로 흡수된 success 는
+ *    `replayed: true` 가 outcome 에 동봉되어 토스트 톤이 "이미 저장되어 있었어요"
+ *    로 바뀌어 사용자에게 도달한다. 큐는 정상적으로 비워지고 영속 outcome 큐도
+ *    비어 있어 다음 진입 시 중복 노출이 없다.
  *
  * SuccessBanner 의 framer-motion / setTimeout 부수효과는 단언과 무관하므로 가벼운
  * 더미로 대체한다(Training.test.tsx 와 같은 패턴).
@@ -19,6 +24,16 @@ import { createRoot, type Root } from 'react-dom/client';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
+
+// drain 통합 시나리오에서 실제 네트워크는 부르지 않는다 — createSession/calculateMetrics
+// 만 모킹해 "이번 응답이 캐시 hit (replayed) 인 success" 를 흉내낸다.
+vi.mock('../../../utils/api', () => {
+  const createSession = vi.fn();
+  const calculateMetrics = vi.fn();
+  return {
+    default: { createSession, calculateMetrics },
+  };
+});
 
 vi.mock('../../SuccessBanner/SuccessBanner', () => ({
   default: ({
@@ -57,9 +72,35 @@ vi.mock('../../SuccessBanner/SuccessBanner', () => ({
 import OutcomeNoticeToast from '../OutcomeNoticeToast';
 import {
   __resetPendingTrainingRunsForTest,
+  enqueuePendingRun,
+  getPendingRuns,
   popOutcomeNotices,
   pushOutcomeNotice,
+  type PendingTrainingRunInput,
 } from '../../../utils/pendingTrainingRuns';
+import { drainPendingRuns } from '../../../hooks/useDrainPendingTrainingRuns';
+import api from '../../../utils/api';
+
+const mockedApi = api as unknown as {
+  createSession: ReturnType<typeof vi.fn>;
+  calculateMetrics: ReturnType<typeof vi.fn>;
+};
+
+const noSleep = () => Promise.resolve();
+
+const baseInput = (
+  overrides: Partial<PendingTrainingRunInput> = {},
+): PendingTrainingRunInput => ({
+  userId: 'u-replay',
+  mode: 'FOCUS',
+  bpm: 60,
+  level: 1,
+  totalDurationSec: 30,
+  yieldsScore: true,
+  isComposite: false,
+  tapCount: 12,
+  ...overrides,
+});
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -103,6 +144,8 @@ function dismissToast() {
 
 beforeEach(() => {
   __resetPendingTrainingRunsForTest();
+  mockedApi.createSession.mockReset();
+  mockedApi.calculateMetrics.mockReset();
 });
 
 afterEach(() => {
@@ -261,5 +304,99 @@ describe('OutcomeNoticeToast — 포그라운드 drain 결과 즉시 안내 (Tas
     const popped = popOutcomeNotices();
     expect(popped).toHaveLength(1);
     expect(popped[0].localId).toBe('after-unmount');
+  });
+});
+
+describe('OutcomeNoticeToast — 오프라인 큐 drain 통합: replayed 안내가 사용자에게 도달 (Task #120)', () => {
+  // 이 블록은 useDrainPendingTrainingRuns + outcomeNoticeDisplay + OutcomeNoticeToast
+  // 를 한 흐름으로 묶어, "오프라인 재시도가 캐시 hit 으로 흡수되었을 때 사용자가
+  // 실제로 '이미 저장되어 있었어요' 토스트를 본다" 는 사용자 경험을 회귀로부터
+  // 보호한다. 두 모듈 중 어느 한 쪽이 바뀌어도(예: replayed 전달 누락, 토스트
+  // 톤 분기 변경) 이 테스트가 깨지면서 안내가 사용자에게 도달하지 못하는 회귀를
+  // 잡는다.
+  it('drain 이 캐시 hit 으로 흡수된 success 항목은 replayed 톤 토스트로 사용자에게 도달한다', async () => {
+    enqueuePendingRun({
+      input: baseInput(),
+      title: '집중력',
+      localId: 'pending-replay-1',
+    });
+    // 첫 단계(createSession) 가 캐시 hit 으로 흡수된 success — 이미 이전 시도에서
+    // 서버까지 도달해 저장되었던 결과가 같은 idempotency 키로 다시 반환된 케이스.
+    mockedApi.createSession.mockResolvedValueOnce({
+      success: true,
+      data: { id: 's-replay' },
+      replayed: true,
+    });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({
+      success: true,
+      data: { focus: 70 },
+    });
+
+    mount();
+    // 토스트 마운트 시점엔 표시할 게 없어야 한다(이전 push 잔여 X).
+    expect(getToast()).toBeNull();
+
+    await act(async () => {
+      await drainPendingRuns('u-replay', { sleep: noSleep });
+    });
+
+    // (1) 토스트가 사용자 화면에 떴고, 톤은 success 색상(초록)이다.
+    const toast = getToast();
+    expect(toast).not.toBeNull();
+    expect(toast!.dataset.background).toBe('#1E2F1A');
+    expect(toast!.dataset.textColor).toBe('#AAED10');
+
+    // (2) 메시지는 일반 "안전하게 저장" 톤이 아니라 "이미 저장되어 있었어요" 톤이다.
+    //     → drain 이 outcome 에 replayed: true 를 동봉했고, outcomeNoticeDisplay
+    //       가 이를 토스트 문구에 반영했다는 두 모듈의 결합이 살아있음을 보장한다.
+    const msg = getToastMessage();
+    expect(msg).toContain("'집중력'");
+    expect(msg).toContain('이미 저장되어 있었어요');
+    expect(msg).toContain('다시 확인했어요');
+    expect(msg).not.toContain('안전하게 저장');
+
+    // (3) 큐는 정상적으로 비워졌다 — drain 이 success 로 정리하면서 항목을 제거.
+    expect(getPendingRuns()).toEqual([]);
+
+    // (4) 영속 outcome 큐도 비어 있다 — 토스트가 노출되는 순간 removeOutcomeNotice
+    //     가 호출되었기 때문. 다음에 트레이닝 목록 화면이 마운트되어도 같은 결과가
+    //     한 번 더 안내되지 않는다(중복 노출 방지).
+    expect(popOutcomeNotices()).toEqual([]);
+  });
+
+  it('drain 응답에 replayed 가 없는 일반 success 는 기존 "안전하게 저장" 톤으로 도달한다 (회귀 가드)', async () => {
+    // replayed 분기가 잘못되어 모든 success 가 replayed 톤으로 노출되는 회귀를
+    // 막기 위한 대조 케이스. 같은 통합 경로를 타지만 createSession 응답에
+    // replayed 가 없으면 기존 안내 문구가 유지되어야 한다.
+    enqueuePendingRun({
+      input: baseInput({ userId: 'u-normal' }),
+      title: '판단력',
+      localId: 'pending-normal-1',
+    });
+    mockedApi.createSession.mockResolvedValueOnce({
+      success: true,
+      data: { id: 's-normal' },
+    });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({
+      success: true,
+      data: { judgment: 80 },
+    });
+
+    mount();
+
+    await act(async () => {
+      await drainPendingRuns('u-normal', { sleep: noSleep });
+    });
+
+    const toast = getToast();
+    expect(toast).not.toBeNull();
+    expect(toast!.dataset.background).toBe('#1E2F1A');
+    const msg = getToastMessage();
+    expect(msg).toContain("'판단력'");
+    expect(msg).toContain('안전하게 저장');
+    expect(msg).not.toContain('이미 저장되어 있었어요');
+
+    expect(getPendingRuns()).toEqual([]);
+    expect(popOutcomeNotices()).toEqual([]);
   });
 });
