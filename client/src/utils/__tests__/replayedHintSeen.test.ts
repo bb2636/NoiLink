@@ -14,10 +14,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  LEGACY_REPLAYED_HINT_SEEN_KEY,
   REPLAYED_HINT_MAX_ENTRIES,
   REPLAYED_HINT_RETENTION_MS,
   cleanupExpiredReplayedHintSeen,
   clearAllReplayedHintSeen,
+  clearLegacyReplayedHintSeenKey,
   hasSeenReplayedHint,
   markReplayedHintSeen,
   replayedHintSeenKey,
@@ -382,6 +384,99 @@ describe('replayedHintSeen', () => {
       expect(localStorage.getItem(KEY_U1)).not.toBeNull();
       // u-2 의 모든 엔트리가 만료되었으므로 키 자체가 사라진다.
       expect(localStorage.getItem(KEY_U2)).toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task #140 — 구버전(Task #118/#130) 단일 키 한 번 청소
+  // ---------------------------------------------------------------------------
+
+  describe('clearLegacyReplayedHintSeenKey (구버전 단일 키 청소)', () => {
+    it('단일 키 상수가 새 prefix 와 콜론 유무로 구분된다', () => {
+      // 두 키가 startsWith 로는 겹치지만 prefix 의 콜론이 결정적 차이가 된다.
+      expect(LEGACY_REPLAYED_HINT_SEEN_KEY).toBe('noilink:replayed-hint-seen');
+      expect(LEGACY_REPLAYED_HINT_SEEN_KEY).not.toBe(
+        replayedHintSeenKey('u-1'),
+      );
+    });
+
+    it('단일 키가 있으면 한 번에 제거되고 true 를 반환한다', () => {
+      // 구버전이 남긴 sessionId 배열을 그대로 흉내낸다.
+      localStorage.setItem(
+        LEGACY_REPLAYED_HINT_SEEN_KEY,
+        JSON.stringify(['sess-old-1', 'sess-old-2']),
+      );
+
+      expect(clearLegacyReplayedHintSeenKey()).toBe(true);
+      expect(localStorage.getItem(LEGACY_REPLAYED_HINT_SEEN_KEY)).toBeNull();
+    });
+
+    it('단일 키가 없으면 no-op 으로 false 를 반환한다', () => {
+      expect(localStorage.getItem(LEGACY_REPLAYED_HINT_SEEN_KEY)).toBeNull();
+      expect(clearLegacyReplayedHintSeenKey()).toBe(false);
+    });
+
+    it('새 prefix 사용자 키는 절대 건드리지 않는다 (회귀 잠금)', () => {
+      // 구버전 단일 키와 새 prefix 사용자 키가 공존하는 상태.
+      localStorage.setItem(
+        LEGACY_REPLAYED_HINT_SEEN_KEY,
+        JSON.stringify(['sess-old']),
+      );
+      markReplayedHintSeen('u-1', 'sess-new');
+      markReplayedHintSeen('u-2', 'sess-new');
+
+      const removed = clearLegacyReplayedHintSeenKey();
+
+      expect(removed).toBe(true);
+      // 단일 키는 사라졌다.
+      expect(localStorage.getItem(LEGACY_REPLAYED_HINT_SEEN_KEY)).toBeNull();
+      // 새 prefix 사용자 키는 그대로 살아 있고 효과도 유지된다.
+      expect(localStorage.getItem(KEY_U1)).not.toBeNull();
+      expect(localStorage.getItem(KEY_U2)).not.toBeNull();
+      expect(hasSeenReplayedHint('u-1', 'sess-new')).toBe(true);
+      expect(hasSeenReplayedHint('u-2', 'sess-new')).toBe(true);
+    });
+
+    it('다른 프로젝트 키도 절대 건드리지 않는다', () => {
+      localStorage.setItem(LEGACY_REPLAYED_HINT_SEEN_KEY, '["sess-old"]');
+      localStorage.setItem('noilink:other-feature', 'keep-me');
+      localStorage.setItem('totally-unrelated', 'keep-me-too');
+
+      clearLegacyReplayedHintSeenKey();
+
+      expect(localStorage.getItem('noilink:other-feature')).toBe('keep-me');
+      expect(localStorage.getItem('totally-unrelated')).toBe('keep-me-too');
+    });
+
+    it('localStorage.getItem 가 throw 해도 안전하게 false 를 반환한다', () => {
+      const getSpy = vi
+        .spyOn(Storage.prototype, 'getItem')
+        .mockImplementation(() => {
+          throw new Error('blocked');
+        });
+      expect(() => clearLegacyReplayedHintSeenKey()).not.toThrow();
+      expect(clearLegacyReplayedHintSeenKey()).toBe(false);
+      getSpy.mockRestore();
+    });
+
+    it('localStorage.removeItem 이 throw 해도 안전하게 false 를 반환한다', () => {
+      localStorage.setItem(LEGACY_REPLAYED_HINT_SEEN_KEY, '["sess-old"]');
+      const removeSpy = vi
+        .spyOn(Storage.prototype, 'removeItem')
+        .mockImplementation(() => {
+          throw new Error('blocked');
+        });
+      expect(() => clearLegacyReplayedHintSeenKey()).not.toThrow();
+      expect(clearLegacyReplayedHintSeenKey()).toBe(false);
+      removeSpy.mockRestore();
+    });
+
+    it('값이 빈 문자열이어도 키가 존재하면 제거된다 (no-op 가 아니다)', () => {
+      // localStorage 는 빈 문자열도 유효한 값으로 저장한다 — getItem 이
+      // null 이 아닌 '' 를 반환하므로 제거 대상에 포함된다.
+      localStorage.setItem(LEGACY_REPLAYED_HINT_SEEN_KEY, '');
+      expect(clearLegacyReplayedHintSeenKey()).toBe(true);
+      expect(localStorage.getItem(LEGACY_REPLAYED_HINT_SEEN_KEY)).toBeNull();
     });
   });
 });

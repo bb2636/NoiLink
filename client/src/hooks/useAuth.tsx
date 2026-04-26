@@ -19,7 +19,10 @@ import {
   cleanupExpiredDismissals as cleanupRecoveryCoachingDismissals,
   clearAllDismissals as clearAllRecoveryCoachingDismissals,
 } from '../utils/recoveryCoachingDismissal';
-import { cleanupExpiredReplayedHintSeen } from '../utils/replayedHintSeen';
+import {
+  cleanupExpiredReplayedHintSeen,
+  clearLegacyReplayedHintSeenKey,
+} from '../utils/replayedHintSeen';
 
 /**
  * 인증 상태를 앱 전역에서 공유하기 위한 컨텍스트.
@@ -120,8 +123,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 구간이 있어 같은 마운트 안에서도 `checkAuth` 가 다시 만들어져 effect 가
   // 한 번 더 돌았다. 결과적으로:
   //   - `api.getMe()` 가 콜드 스타트마다 두 번 불려 서버 트래픽이 낭비되고,
-  //   - `cleanupExpiredDismissals` / `cleanupExpiredReplayedHintSeen` 의
-  //     localStorage 스캔도 두 번 도는(기능 영향은 없으나) 비용이 발생했다.
+  //   - `cleanupExpiredDismissals` / `cleanupExpiredReplayedHintSeen` /
+  //     `clearLegacyReplayedHintSeenKey` 의 localStorage 스캔/제거도 두 번
+  //     도는(기능 영향은 없으나) 비용이 발생했다.
   // 호출은 ref 로 우회해 항상 최신 `checkAuth` 를 부르되, 트리거는 마운트 1회로
   // 잠근다(다른 화면에서 인증 재확인이 필요하면 별도 트리거가 이미 존재한다).
   useEffect(() => {
@@ -133,6 +137,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // LRU-by-write 만으로는 결과 화면을 자주 안 보는 사용자의 오래된 sessionId
     // 가 자리를 차지할 수 있어, 너그러운 시간 만료(기본 30일) 안전망을 둔다.
     cleanupExpiredReplayedHintSeen();
+    // Task #140 — 구버전(Task #118/#130)에서 쓰던 단일 키
+    // (`noilink:replayed-hint-seen`)는 새 코드가 더 이상 읽지 않지만 그 시절을
+    // 거친 사용자 기기에는 죽은 데이터로 남는다. 부트 시 한 번 안전하게 제거.
+    clearLegacyReplayedHintSeenKey();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

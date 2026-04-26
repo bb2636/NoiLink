@@ -45,6 +45,18 @@
 
 const STORAGE_KEY_PREFIX = 'noilink:replayed-hint-seen:';
 
+/**
+ * Task #118/#130 시절의 단일 키. 그 시점 사용자의 localStorage 에는
+ * 이 키 하나에 모든 sessionId 가 모여 저장돼 있었다. Task #133 에서 사용자별
+ * prefix 키(`noilink:replayed-hint-seen:<userId>`)로 옮겨 가면서 새 코드는
+ * 이 단일 키를 더 이상 읽지 않는다 — 즉 기능 동작에는 영향이 없으나 죽은
+ * 데이터로 사용자 기기에 영구히 남는다. 부트 시 한 번 안전하게 제거한다.
+ *
+ * 주의: prefix(위) 와 콜론 유무로 구분되므로, prefix 의 사용자 키
+ * (`noilink:replayed-hint-seen:<userId>`) 와는 절대 충돌하지 않는다.
+ */
+export const LEGACY_REPLAYED_HINT_SEEN_KEY = 'noilink:replayed-hint-seen';
+
 /** 저장하는 최근 엔트리 개수 상한. 너무 적으면 회귀, 너무 많으면 무의미한 누적. */
 export const REPLAYED_HINT_MAX_ENTRIES = 50;
 
@@ -240,4 +252,31 @@ export function cleanupExpiredReplayedHintSeen(
     removed += entries.length - fresh.length;
   }
   return removed;
+}
+
+/**
+ * Task #140 — 구버전(Task #118/#130)에서 쓰던 단일 키
+ * (`noilink:replayed-hint-seen`)를 한 번에 제거한다.
+ *
+ * 새 코드(Task #133 이후)는 이 키를 더 이상 읽지 않으므로 기능에는 영향이
+ * 없지만, 그 시절을 거친 사용자 기기에는 죽은 데이터가 영구히 남는다.
+ * 앱 부트 시 한 번 안전하게 `removeItem` 해 둔다.
+ *
+ * - 키가 없으면 no-op (false 반환).
+ * - localStorage 미지원/접근 거부 등의 환경에서도 throw 하지 않는다.
+ * - prefix 의 사용자 키(`noilink:replayed-hint-seen:<userId>`) 는 콜론 유무로
+ *   구분되므로 영향을 받지 않는다.
+ *
+ * @returns 실제로 키를 제거했는지 여부.
+ */
+export function clearLegacyReplayedHintSeenKey(): boolean {
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) return false;
+    if (storage.getItem(LEGACY_REPLAYED_HINT_SEEN_KEY) == null) return false;
+    storage.removeItem(LEGACY_REPLAYED_HINT_SEEN_KEY);
+    return true;
+  } catch {
+    return false;
+  }
 }
