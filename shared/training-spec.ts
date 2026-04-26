@@ -365,9 +365,24 @@ export interface EnduranceScoreInput {
   omissionIncrease01: number;
   lateStability01: number;
   lateSpeed01: number;
+  /**
+   * Late 구간(200~300s) 표본 개수. 부분 저장 등으로 표본이 임계
+   * (`ENDURANCE_LATE_MIN_SAMPLES`) 미만이면 Late 의존 항을 점수에서 제외하고
+   * 남은 항의 가중치를 100점으로 재정규화해 과대/과소 평가를 줄인다.
+   *
+   * undefined 면 기존(전체 항 적용) 동작을 유지한다 — 기존 호출자는 영향 없음.
+   */
+  lateSampleCount?: number;
 }
 
 export function scoreEndurance(i: EnduranceScoreInput): number {
+  if (i.lateSampleCount !== undefined && !isEnduranceLateConfident(i.lateSampleCount)) {
+    // Late 의존 항(maintainRatio:40, lateStability01:15, lateSpeed01:10) 제외 →
+    // 남은 항(drift01:20 + omissionIncrease01:15 = 35)을 100점 만점으로 재정규화.
+    const earlyOnly =
+      20 * (1 - clamp01(i.drift01)) + 15 * (1 - clamp01(i.omissionIncrease01));
+    return earlyOnly * (100 / 35);
+  }
   return (
     40 * i.maintainRatio +
     20 * (1 - clamp01(i.drift01)) +
@@ -375,6 +390,24 @@ export function scoreEndurance(i: EnduranceScoreInput): number {
     15 * i.lateStability01 +
     10 * i.lateSpeed01
   );
+}
+
+/**
+ * Late 구간 표본 신뢰 임계값.
+ * Late 구간(200~300s)에서 자극 응답 표본이 이 값 미만이면 점수의 Late 의존 항이
+ * 1~2개 표본의 우연성에 좌우될 수 있어 신뢰도가 낮다고 본다.
+ *
+ * 일반적인 ENDURANCE 자극 주기(약 1초)에서 5초 이상의 Late 구간을 확보해야
+ * 평균/유지비율이 안정된다는 가정에 따라 기본값은 5.
+ *
+ * 부분 저장은 ENDURANCE 의 경우 진행률 90% 이상에서만 제안되므로(Task #24),
+ * 부분 저장 케이스 중 일부(90~91% 부근)에서 이 값 미만으로 떨어진다.
+ */
+export const ENDURANCE_LATE_MIN_SAMPLES = 5;
+
+/** Late 구간 표본 수가 신뢰 임계 이상인지 — false 면 점수의 Late 의존 항을 신뢰하기 어렵다. */
+export function isEnduranceLateConfident(lateSampleCount: number): boolean {
+  return lateSampleCount >= ENDURANCE_LATE_MIN_SAMPLES;
 }
 
 export interface AgilityScoreInput {

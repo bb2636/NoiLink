@@ -283,6 +283,16 @@ export interface EnduranceRawMetrics {
   earlyReactionTime: number;            // 초반 평균 반응 시간 (ms)
   lateReactionTime: number;             // 후반 평균 반응 시간 (ms)
   omissionIncrease: number;             // 놓침 증가분
+  /**
+   * Late 구간(200~300s)에서 수집된 응답 표본 수.
+   * 부분 저장(특히 90~91% 부근)에서 이 값이 `ENDURANCE_LATE_MIN_SAMPLES` 미만이면
+   * UI 는 "Late 구간 표본 부족" 안내를, 점수 산식은 Late 의존 항 제외 후
+   * 재정규화를 적용한다(자세한 내용은 shared/training-spec.ts 의
+   * `scoreEndurance` / `isEnduranceLateConfident` 참고).
+   *
+   * 옵셔널: 구버전 페이로드와의 하위 호환을 위해 미존재 시 "정보 없음"으로 취급.
+   */
+  lateSampleCount?: number;
 }
 
 /**

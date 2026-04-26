@@ -9,6 +9,7 @@
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { isEnduranceLateConfident, type TrainingMode } from '@noilink/shared';
 import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
 import { DEMO_PROFILE } from '../utils/demoProfile';
@@ -36,6 +37,17 @@ export type TrainingResultState = {
   isPartial?: boolean;
   /** 백그라운드로 끊긴 시점의 진행률(정수 %, 0~100). isPartial 일 때만 사용. */
   partialProgressPct?: number;
+  /**
+   * 트레이닝 API 모드. ENDURANCE 부분 저장 신뢰도 안내(Task #54)에서 ENDURANCE
+   * 결과에만 Late 표본 부족 배너를 노출하기 위해 사용.
+   */
+  apiMode?: TrainingMode;
+  /**
+   * Late 구간(200~300s) 표본 수. ENDURANCE 모드에서 임계
+   * (`isEnduranceLateConfident`) 미만이면 결과 화면이 신뢰도 안내를 띄운다.
+   * 미존재(undefined) 면 정보 없음으로 간주해 배너를 띄우지 않는다.
+   */
+  enduranceLateSampleCount?: number;
 };
 
 /** 회복이 N회 이상 발생하면 환경 점검 안내를 추가로 노출 (Task #36). */
@@ -96,6 +108,16 @@ export default function Result() {
     isPartial && typeof rawPartialPct === 'number' && Number.isFinite(rawPartialPct)
       ? Math.max(0, Math.min(100, Math.round(rawPartialPct)))
       : undefined;
+
+  // ENDURANCE 부분 저장 Late 신뢰도 안내(Task #54).
+  // 부분 저장 임계가 90% 인 ENDURANCE 에서 90~91% 부근에 멈추면 Late 구간(200~300s)
+  // 표본이 1~2개에 그쳐 Late 의존 점수 항(maintainRatio/lateStability/lateSpeed)이
+  // 우연성에 좌우될 수 있다. 표본 수를 알 수 없는 구버전 페이로드(undefined)는
+  // 안내를 띄우지 않는다 — 잘못된 신뢰도 인상은 오히려 혼란을 키운다.
+  const showEnduranceLowSampleBanner =
+    state?.apiMode === 'ENDURANCE' &&
+    typeof state?.enduranceLateSampleCount === 'number' &&
+    !isEnduranceLateConfident(state.enduranceLateSampleCount);
 
   // 반짝이 입자 (랜덤 시드 안정화)
   const particles = useMemo(
@@ -373,6 +395,28 @@ export default function Result() {
                   디바이스와의 거리가 끊김의 원인일 수 있어요.
                 </div>
               )}
+            </motion.div>
+          )}
+
+          {/* ENDURANCE 부분 저장 Late 신뢰도 안내(Task #54) — Late 구간 표본이
+              임계 미만이면 점수 해석에 주의하라는 신호를 솔직히 보여준다.
+              점수 산식은 Late 의존 항을 제외하고 재정규화하지만, 사용자에게도
+              왜 Late 점수가 그렇게 보이는지 설명이 필요하다. */}
+          {showEnduranceLowSampleBanner && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.27 }}
+              role="status"
+              data-testid="endurance-late-low-sample-banner"
+              className="rounded-xl px-3 py-2 mb-3 text-xs text-center"
+              style={{
+                backgroundColor: '#2A2230',
+                color: '#D7B8FF',
+                border: '1px solid #4A3A5C',
+              }}
+            >
+              Late 구간 표본 부족 — 후반부 데이터가 적어 Late 의존 점수의 신뢰도가 낮아요
             </motion.div>
           )}
 

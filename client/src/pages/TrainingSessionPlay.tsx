@@ -523,6 +523,10 @@ export default function TrainingSessionPlay() {
         // 있게 진행률을 함께 넘긴다. 정상 완료 흐름에서는 undefined 로 남는다.
         isPartial: typeof partialPct === 'number',
         partialProgressPct: partialPct,
+        // ENDURANCE 부분 저장 신뢰도 안내(Task #54): 결과 화면이 "Late 구간 표본
+        // 부족" 배너를 ENDURANCE 모드에서만 띄울 수 있게 모드와 표본 수를 전달.
+        apiMode: state.apiMode,
+        enduranceLateSampleCount: metrics?.endurance?.lateSampleCount,
       },
     });
   }, [state, totalSec, tapCount, navigate]);

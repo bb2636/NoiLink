@@ -23,6 +23,8 @@ import {
   scoreFocus,
   scoreJudgment,
   scoreEndurance,
+  ENDURANCE_LATE_MIN_SAMPLES,
+  isEnduranceLateConfident,
   scoreAgilityMultitasking,
   partialThresholdForMode,
   MODE_PARTIAL_RESULT_THRESHOLDS,
@@ -522,6 +524,108 @@ describe('scoreEndurance — 40·20·15·15·10 가중 + drift/omission clamp', 
         lateSpeed01: 0,
       }),
     ).toBe(35);
+  });
+
+  // Task #54: Late 표본이 임계 이상이면 lateSampleCount 가 있어도 기존 산식과 같다.
+  it('Late 표본 충분(임계 이상) → 기존 산식과 동일 결과', () => {
+    const baseInput = {
+      maintainRatio: 1,
+      drift01: 0,
+      omissionIncrease01: 0,
+      lateStability01: 1,
+      lateSpeed01: 1,
+    };
+    expect(scoreEndurance(baseInput)).toBe(100);
+    expect(
+      scoreEndurance({ ...baseInput, lateSampleCount: ENDURANCE_LATE_MIN_SAMPLES }),
+    ).toBe(100);
+    expect(
+      scoreEndurance({ ...baseInput, lateSampleCount: ENDURANCE_LATE_MIN_SAMPLES + 100 }),
+    ).toBe(100);
+  });
+
+  // Task #54: Late 표본이 임계 미만이면 Late 의존 항(maintainRatio/lateStability/lateSpeed)
+  // 을 점수에서 제외하고, drift/omissionIncrease 의 35점 만점을 100점으로 재정규화한다.
+  it('Late 표본 부족 → Late 의존 항 제외 + drift/omission 재정규화', () => {
+    // drift01=0, omissionIncrease01=0 → 남은 35점 만점 → 100점으로 스케일.
+    expect(
+      scoreEndurance({
+        maintainRatio: 1,
+        drift01: 0,
+        omissionIncrease01: 0,
+        lateStability01: 1,
+        lateSpeed01: 1,
+        lateSampleCount: 1,
+      }),
+    ).toBeCloseTo(100, 10);
+
+    // 같은 신뢰 부족 케이스에서 maintainRatio/lateStability/lateSpeed 값이 무엇이어도
+    // 점수가 변하지 않아야 한다 — 진짜로 Late 의존 항이 제외됐다는 회귀 보호.
+    expect(
+      scoreEndurance({
+        maintainRatio: 0,
+        drift01: 0,
+        omissionIncrease01: 0,
+        lateStability01: 0,
+        lateSpeed01: 0,
+        lateSampleCount: 0,
+      }),
+    ).toBeCloseTo(100, 10);
+
+    // drift01=1 → 20*(1-1)=0 / omissionIncrease01=1 → 15*(1-1)=0 → 0점.
+    expect(
+      scoreEndurance({
+        maintainRatio: 1,
+        drift01: 1,
+        omissionIncrease01: 1,
+        lateStability01: 1,
+        lateSpeed01: 1,
+        lateSampleCount: 0,
+      }),
+    ).toBeCloseTo(0, 10);
+
+    // drift01=0.5 → 20*0.5=10, omissionIncrease01=0 → 15 → 25점 만점 35 → 100/35*25
+    expect(
+      scoreEndurance({
+        maintainRatio: 1,
+        drift01: 0.5,
+        omissionIncrease01: 0,
+        lateStability01: 1,
+        lateSpeed01: 1,
+        lateSampleCount: 2,
+      }),
+    ).toBeCloseTo((100 / 35) * 25, 10);
+  });
+
+  // Task #54: lateSampleCount 미존재(undefined) 면 기존 동작과 동일해 하위호환을 유지한다.
+  it('lateSampleCount 미존재 → 기존 5항 가중 그대로 적용 (하위 호환)', () => {
+    expect(
+      scoreEndurance({
+        maintainRatio: 1,
+        drift01: 0,
+        omissionIncrease01: 0,
+        lateStability01: 1,
+        lateSpeed01: 1,
+        // lateSampleCount 의도적으로 생략
+      }),
+    ).toBe(100);
+  });
+});
+
+// Task #54: Late 표본 신뢰도 임계 헬퍼
+describe('isEnduranceLateConfident — Late 구간 표본 신뢰 임계', () => {
+  it('임계값(ENDURANCE_LATE_MIN_SAMPLES) 이상이면 true', () => {
+    expect(isEnduranceLateConfident(ENDURANCE_LATE_MIN_SAMPLES)).toBe(true);
+    expect(isEnduranceLateConfident(ENDURANCE_LATE_MIN_SAMPLES + 1)).toBe(true);
+    expect(isEnduranceLateConfident(1000)).toBe(true);
+  });
+  it('임계값 미만이면 false', () => {
+    expect(isEnduranceLateConfident(0)).toBe(false);
+    expect(isEnduranceLateConfident(1)).toBe(false);
+    expect(isEnduranceLateConfident(ENDURANCE_LATE_MIN_SAMPLES - 1)).toBe(false);
+  });
+  it('임계값은 1보다 커야 의미 있다 (1~2 표본도 부족 판정 대상)', () => {
+    expect(ENDURANCE_LATE_MIN_SAMPLES).toBeGreaterThan(2);
   });
 });
 

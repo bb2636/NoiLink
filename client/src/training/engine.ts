@@ -1106,6 +1106,10 @@ export class TrainingEngine {
         earlyReactionTime: Math.round(earlyRTm),
         lateReactionTime: Math.round(lateRTm),
         omissionIncrease: Math.max(0, a.lateOmissions - a.earlyOmissions),
+        // 부분 저장 시 Late 구간(200~300s) 표본이 1~2개에 그칠 수 있어
+        // 결과 화면이 신뢰도 안내를 띄우고, 점수 산식이 Late 의존 항을 제외할 수 있게
+        // 표본 수를 함께 노출한다 (Task #54).
+        lateSampleCount: a.lateRTs.length,
       },
       recovery: {
         excludedMs: Math.max(0, Math.round(a.recoveryMs)),
