@@ -280,6 +280,104 @@ describe('submitCompletedTrainingWithRetry', () => {
     expect(res.replayed).toBeUndefined();
   });
 
+  it('createSession 단계가 캐시 hit 이면 stage=createSession 로그가 한 줄 남는다 (Task #119 — 단계별 디버깅)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({
+      success: true,
+      data: { id: 'sess-replay-c' },
+      replayed: true,
+    });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 60 } });
+
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      await submitCompletedTrainingWithRetry(baseInput(), {
+        backoffsMs: [0, 0],
+        sleep: () => Promise.resolve(),
+      });
+
+      const replayCalls = infoSpy.mock.calls.filter(
+        (call) => call[0] === '[submit] idempotency replay',
+      );
+      expect(replayCalls).toHaveLength(1);
+      expect(replayCalls[0][1]).toEqual({ stage: 'createSession' });
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  it('calculateMetrics 단계만 캐시 hit 이면 stage=calculateMetrics 로그가 한 줄 남는다 (Task #119)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-replay-m' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({
+      success: true,
+      data: { focus: 70 },
+      replayed: true,
+    });
+
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      await submitCompletedTrainingWithRetry(baseInput(), {
+        backoffsMs: [0, 0],
+        sleep: () => Promise.resolve(),
+      });
+
+      const replayCalls = infoSpy.mock.calls.filter(
+        (call) => call[0] === '[submit] idempotency replay',
+      );
+      expect(replayCalls).toHaveLength(1);
+      expect(replayCalls[0][1]).toEqual({ stage: 'calculateMetrics' });
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  it('두 단계가 모두 캐시 hit 이면 단계별로 한 줄씩 두 줄이 남는다 (어느 쪽이 흡수됐는지 잃지 않도록)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({
+      success: true,
+      data: { id: 'sess-replay-both' },
+      replayed: true,
+    });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({
+      success: true,
+      data: { focus: 80 },
+      replayed: true,
+    });
+
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      await submitCompletedTrainingWithRetry(baseInput(), {
+        backoffsMs: [0, 0],
+        sleep: () => Promise.resolve(),
+      });
+
+      const stages = infoSpy.mock.calls
+        .filter((call) => call[0] === '[submit] idempotency replay')
+        .map((call) => (call[1] as { stage: string }).stage);
+      expect(stages).toEqual(['createSession', 'calculateMetrics']);
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  it('두 단계 모두 첫 응답이면 단계 로그가 남지 않는다 (정상 흐름 회귀 보호)', async () => {
+    mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-no-replay' } });
+    mockedApi.calculateMetrics.mockResolvedValueOnce({ success: true, data: { focus: 50 } });
+
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      await submitCompletedTrainingWithRetry(baseInput(), {
+        backoffsMs: [0, 0],
+        sleep: () => Promise.resolve(),
+      });
+
+      const replayCalls = infoSpy.mock.calls.filter(
+        (call) => call[0] === '[submit] idempotency replay',
+      );
+      expect(replayCalls).toHaveLength(0);
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
   it('onAttempt 가 매 시도 결과와 함께 호출된다 (부분 진행분 외부 동기화 통로)', async () => {
     mockedApi.createSession.mockResolvedValueOnce({ success: true, data: { id: 'sess-on' } });
     mockedApi.calculateMetrics

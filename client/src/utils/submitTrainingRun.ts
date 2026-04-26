@@ -142,7 +142,14 @@ export async function submitCompletedTraining(
 
     sessionId = sessionRes.data.id as string;
     sessionCreated = true;
-    if (sessionRes.replayed) replayed = true;
+    if (sessionRes.replayed) {
+      replayed = true;
+      // 사용자에게 노출되는 안내(replayed 힌트)는 결과 객체로만 흐르고,
+      // 운영 디버깅용으로 어느 단계에서 캐시 hit 이 났는지만 콘솔에 남긴다.
+      // "왜 replayed 가 떴지?" 진단 시 createSession / calculateMetrics
+      // 둘 중 어느 쪽이 흡수된 건지 즉시 보이도록 단계 라벨을 함께 적는다.
+      console.info('[submit] idempotency replay', { stage: 'createSession' });
+    }
   }
 
   if (!input.yieldsScore || input.mode === 'FREE') {
@@ -164,7 +171,12 @@ export async function submitCompletedTraining(
       ...(replayed ? { replayed: true } : {}),
     };
   }
-  if (calcRes.replayed) replayed = true;
+  if (calcRes.replayed) {
+    replayed = true;
+    // createSession 쪽과 동일한 형식으로 단계 라벨을 남겨, 두 단계 중
+    // 어느 쪽(또는 둘 다)이 흡수됐는지 로그만 봐도 즉시 구분 가능하게 한다.
+    console.info('[submit] idempotency replay', { stage: 'calculateMetrics' });
+  }
 
   return {
     sessionId,
