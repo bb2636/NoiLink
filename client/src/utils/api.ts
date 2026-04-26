@@ -175,13 +175,18 @@ class ApiClient {
     });
   }
   
+  // Task #146 → Task #148 — 사용자 세션 조회도 같은 in-flight 가드를 통해
+  // 동시 호출(부트 + 라우팅 전환 + 포커스 복귀가 거의 동시에 트리거되는
+  // 경합)을 1회 fetch 로 합친다. 키는 (userId + 옵션) 까지 포함된 endpoint
+  // 단위라 다른 사용자/다른 limit/mode/isComposite 조회는 분리된다.
   async getUserSessions(userId: string, options?: { limit?: number; mode?: string; isComposite?: boolean }) {
     const params = new URLSearchParams();
     if (options?.limit) params.append('limit', String(options.limit));
     if (options?.mode) params.append('mode', options.mode);
     if (options?.isComposite !== undefined) params.append('isComposite', String(options.isComposite));
     const query = params.toString() ? `?${params.toString()}` : '';
-    return this.request<any[]>(`/sessions/user/${userId}${query}`);
+    const path = `/sessions/user/${userId}${query}`;
+    return this.coalesceInflight<any[]>(`GET ${path}`, () => this.request<any[]>(path));
   }
   
   // Metrics API
@@ -213,13 +218,19 @@ class ApiClient {
     });
   }
   
+  // Task #146 → Task #148 — 사용자 리포트 목록 조회도 같은 in-flight 가드.
+  // 키는 (userId + limit) 가 들어간 endpoint 단위라 limit 가 다르면 분리된다.
   async getUserReports(userId: string, limit?: number) {
     const params = limit ? `?limit=${limit}` : '';
-    return this.request<any[]>(`/reports/user/${userId}${params}`);
+    const path = `/reports/user/${userId}${params}`;
+    return this.coalesceInflight<any[]>(`GET ${path}`, () => this.request<any[]>(path));
   }
 
+  // Task #146 → Task #148 — 기관 인사이트 리포트 조회도 같은 in-flight 가드.
+  // 키는 organizationId 가 들어간 endpoint 단위라 다른 기관 조회는 분리된다.
   async getOrganizationInsightReport(organizationId: string) {
-    return this.request<any>(`/reports/organization/${organizationId}`);
+    const path = `/reports/organization/${organizationId}`;
+    return this.coalesceInflight<any>(`GET ${path}`, () => this.request<any>(path));
   }
 
   async generateOrganizationInsightReport(organizationId: string) {
@@ -229,18 +240,26 @@ class ApiClient {
     });
   }
 
+  // Task #146 → Task #148 — 기관 세션 트렌드 조회도 같은 in-flight 가드.
   async getOrganizationSessionsForTrend(organizationId: string) {
-    return this.request<any[]>(`/sessions/organization/${organizationId}/trend`);
+    const path = `/sessions/organization/${organizationId}/trend`;
+    return this.coalesceInflight<any[]>(`GET ${path}`, () => this.request<any[]>(path));
   }
   
   // Rankings API
+  // Task #146 → Task #148 — 랭킹 조회도 같은 in-flight 가드.
+  // 키는 (type + limit + organizationId) 가 query 로 직렬화된 endpoint 단위라
+  // 옵션 조합이 다르면 분리된다.
   async getRankings(type?: string, limit?: number, organizationId?: string) {
     const params = new URLSearchParams();
     if (type) params.append('type', type);
     if (limit) params.append('limit', String(limit));
     if (organizationId) params.append('organizationId', organizationId);
     const query = params.toString() ? `?${params.toString()}` : '';
-    return this.request<Record<string, RankingEntry[]>>(`/rankings${query}`);
+    const path = `/rankings${query}`;
+    return this.coalesceInflight<Record<string, RankingEntry[]>>(`GET ${path}`, () =>
+      this.request<Record<string, RankingEntry[]>>(path),
+    );
   }
   
   // Generic GET method
@@ -392,11 +411,16 @@ class ApiClient {
   }
 
   /** 가입 가능한 기업 목록 */
+  // Task #146 → Task #148 — 가입 화면 부트에서 같은 endpoint 가 거의 동시에
+  // 두 번 트리거될 수 있으므로(라우팅 전환 + Strict Mode 이중 마운트 등)
+  // 같은 in-flight 가드를 통과시킨다.
   async listOrganizations(): Promise<
     ApiResponse<Array<{ id: string; name: string; memberCount: number }>>
   > {
-    return this.request<Array<{ id: string; name: string; memberCount: number }>>(
-      '/users/organizations',
+    const path = '/users/organizations';
+    return this.coalesceInflight<Array<{ id: string; name: string; memberCount: number }>>(
+      `GET ${path}`,
+      () => this.request<Array<{ id: string; name: string; memberCount: number }>>(path),
     );
   }
 
