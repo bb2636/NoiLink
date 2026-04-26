@@ -27,7 +27,13 @@ import { createRoot, type Root } from 'react-dom/client';
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { NATIVE_BRIDGE_VERSION, type NativeToWebMessage } from '@noilink/shared';
+import {
+  DEFAULT_BLE_STABILITY_MS_THRESHOLD,
+  DEFAULT_BLE_STABILITY_WINDOW_THRESHOLD,
+  NATIVE_BRIDGE_VERSION,
+  setBleStabilityOverrideResolver,
+  type NativeToWebMessage,
+} from '@noilink/shared';
 import type { TrainingRunState } from './TrainingSessionPlay';
 
 // ───────────────────────────────────────────────────────────
@@ -421,26 +427,42 @@ describe('TrainingSessionPlay — BLE 단절 빈도 안내 토스트 (Task #38)'
   const stabilityNoticeVisible = () =>
     Boolean(container?.textContent?.includes(STABILITY_NOTICE));
 
-  it('회복이 1회뿐이면 임계 미달이라 토스트가 뜨지 않는다', () => {
+  // 임계값은 shared에서 가져와 사용한다 (Task #44). 기본값이 바뀌거나
+  // 오버라이드 훅으로 디바이스/사용자별로 조정돼도 회귀 테스트가 그대로 통과해야 한다.
+  const W = DEFAULT_BLE_STABILITY_WINDOW_THRESHOLD;
+  const MS = DEFAULT_BLE_STABILITY_MS_THRESHOLD;
+
+  it('회복 횟수·시간이 임계 미달이면 토스트가 뜨지 않는다', () => {
     renderApp();
-    // 1회·5초만 누적된 상태로 회복 종료를 통보.
-    getFakeEngine().setRecoveryStats({ windows: 1, totalMs: 5_000 });
+    // 두 임계 모두 미만으로 누적된 상태로 회복 종료를 통보.
+    getFakeEngine().setRecoveryStats({
+      windows: Math.max(0, W - 1),
+      totalMs: Math.max(0, MS - 1_000),
+    });
     dispatchBridge(bleConnectionMessage({ connected: false, reason: 'unexpected' }));
     dispatchBridge(bleConnectionMessage({ connected: true }));
     expect(stabilityNoticeVisible()).toBe(false);
   });
 
-  it('회복 횟수가 임계(3회)에 도달하면 토스트가 노출된다', () => {
+  it('회복 횟수가 임계에 도달하면 토스트가 노출된다', () => {
     renderApp();
-    getFakeEngine().setRecoveryStats({ windows: 3, totalMs: 4_000 });
+    // 누적 시간은 임계 미만으로 두고 횟수 조건만 만족시킨다.
+    getFakeEngine().setRecoveryStats({
+      windows: W,
+      totalMs: Math.max(0, MS - 1_000),
+    });
     dispatchBridge(bleConnectionMessage({ connected: false, reason: 'unexpected' }));
     dispatchBridge(bleConnectionMessage({ connected: true }));
     expect(stabilityNoticeVisible()).toBe(true);
   });
 
-  it('회복 누적 시간이 임계(15초)에 도달하면 토스트가 노출된다', () => {
+  it('회복 누적 시간이 임계에 도달하면 토스트가 노출된다', () => {
     renderApp();
-    getFakeEngine().setRecoveryStats({ windows: 2, totalMs: 15_000 });
+    // 횟수는 임계 미만으로 두고 시간 조건만 만족시킨다.
+    getFakeEngine().setRecoveryStats({
+      windows: Math.max(0, W - 1),
+      totalMs: MS,
+    });
     dispatchBridge(bleConnectionMessage({ connected: false, reason: 'unexpected' }));
     dispatchBridge(bleConnectionMessage({ connected: true }));
     expect(stabilityNoticeVisible()).toBe(true);
@@ -449,7 +471,10 @@ describe('TrainingSessionPlay — BLE 단절 빈도 안내 토스트 (Task #38)'
   it('한 세션에 한 번만 노출된다 — 토스트 자동 닫힘 후 추가 회복에도 다시 뜨지 않음', () => {
     renderApp();
     // 첫 노출.
-    getFakeEngine().setRecoveryStats({ windows: 3, totalMs: 4_000 });
+    getFakeEngine().setRecoveryStats({
+      windows: W,
+      totalMs: Math.max(0, MS - 1_000),
+    });
     dispatchBridge(bleConnectionMessage({ connected: false, reason: 'unexpected' }));
     dispatchBridge(bleConnectionMessage({ connected: true }));
     expect(stabilityNoticeVisible()).toBe(true);
@@ -461,10 +486,34 @@ describe('TrainingSessionPlay — BLE 단절 빈도 안내 토스트 (Task #38)'
     expect(stabilityNoticeVisible()).toBe(false);
 
     // 더 많은 회복이 누적되며 추가 재연결이 와도 다시 뜨지 않아야 한다.
-    getFakeEngine().setRecoveryStats({ windows: 5, totalMs: 30_000 });
+    getFakeEngine().setRecoveryStats({ windows: W + 2, totalMs: MS * 2 });
     dispatchBridge(bleConnectionMessage({ connected: false, reason: 'unexpected' }));
     dispatchBridge(bleConnectionMessage({ connected: true }));
     expect(stabilityNoticeVisible()).toBe(false);
+  });
+
+  it('오버라이드 훅이 임계를 올리면 토스트 노출 기준도 함께 올라간다 (Task #44)', () => {
+    // 기본값보다 훨씬 큰 임계로 오버라이드.
+    setBleStabilityOverrideResolver(() => ({
+      windowThreshold: W + 10,
+      msThreshold: MS * 4,
+    }));
+    try {
+      renderApp();
+      // 기본 임계는 넘지만 새 임계는 한참 못 미친다.
+      getFakeEngine().setRecoveryStats({ windows: W, totalMs: MS });
+      dispatchBridge(bleConnectionMessage({ connected: false, reason: 'unexpected' }));
+      dispatchBridge(bleConnectionMessage({ connected: true }));
+      expect(stabilityNoticeVisible()).toBe(false);
+
+      // 새 임계(횟수)에 도달하면 노출된다.
+      getFakeEngine().setRecoveryStats({ windows: W + 10, totalMs: MS });
+      dispatchBridge(bleConnectionMessage({ connected: false, reason: 'unexpected' }));
+      dispatchBridge(bleConnectionMessage({ connected: true }));
+      expect(stabilityNoticeVisible()).toBe(true);
+    } finally {
+      setBleStabilityOverrideResolver(null);
+    }
   });
 });
 

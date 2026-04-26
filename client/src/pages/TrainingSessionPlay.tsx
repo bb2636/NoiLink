@@ -12,7 +12,7 @@ import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import PodGrid from '../components/PodGrid/PodGrid';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noilink/shared';
-import { SESSION_MAX_MS } from '@noilink/shared';
+import { resolveBleStabilityThresholds, SESSION_MAX_MS } from '@noilink/shared';
 import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
 import { enqueuePendingRun } from '../utils/pendingTrainingRuns';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
@@ -38,13 +38,12 @@ const PARTIAL_RESULT_THRESHOLD = 0.8;
  * 회복 구간이 시작/종료되는 흐름은 이미 채점에서 제외되지만, 사용자에게는 별도
  * 안내가 없어 "기기가 이상하다"는 인상만 남는다. 다음 두 임계 중 하나만 충족해도
  * 한 세션에 한 번 토스트를 띄운다:
- *  - 회복 구간 누적 횟수 ≥ 3회
- *  - 회복 구간 누적 시간 ≥ 15초
- * 결과 화면 회복 배너와 동일한 노란 톤(#3A2A00 / #FFD66B) + 동일한 어휘
- * ("기기 연결" / "거리·간섭")을 사용해 일관된 경험을 준다.
+ *  - 회복 구간 누적 횟수 ≥ windowThreshold
+ *  - 회복 구간 누적 시간 ≥ msThreshold
+ * 임계값은 `@noilink/shared`의 `resolveBleStabilityThresholds()` 가 사용자/디바이스
+ * 컨텍스트로 결정하며 (Task #44), 결과 화면 회복 배너와 동일한 노란 톤
+ * (#3A2A00 / #FFD66B) + 동일한 어휘("기기 연결" / "거리·간섭")로 일관된 경험을 준다.
  */
-const BLE_STABILITY_WINDOW_THRESHOLD = 3;
-const BLE_STABILITY_MS_THRESHOLD = 15_000;
 
 /**
  * 재연결 진행 상황 스냅샷 — 네이티브의 ble.reconnect 페이로드 + 수신 시각.
@@ -306,13 +305,16 @@ export default function TrainingSessionPlay() {
           // endRecoveryWindow() 직후이므로 직전 구간의 시간/횟수까지 모두 누적된 상태.
           if (!bleStabilityNoticeShownRef.current) {
             const stats = engineRef.current?.getRecoveryStats();
-            if (
-              stats &&
-              (stats.windows >= BLE_STABILITY_WINDOW_THRESHOLD ||
-                stats.totalMs >= BLE_STABILITY_MS_THRESHOLD)
-            ) {
-              bleStabilityNoticeShownRef.current = true;
-              setBleStabilityNoticeOpen(true);
+            if (stats) {
+              // 사용자/디바이스 컨텍스트로 임계값 조회 (Task #44).
+              // 오버라이드 훅이 등록돼 있지 않으면 shared의 기본값을 그대로 쓴다.
+              const { windowThreshold, msThreshold } = resolveBleStabilityThresholds({
+                userId: state.userId,
+              });
+              if (stats.windows >= windowThreshold || stats.totalMs >= msThreshold) {
+                bleStabilityNoticeShownRef.current = true;
+                setBleStabilityNoticeOpen(true);
+              }
             }
           }
           return;
