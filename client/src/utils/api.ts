@@ -1,5 +1,6 @@
 import type { ApiResponse, User, Game, UserStats, RankingEntry, Terms, TermsType } from '@noilink/shared';
 import { STORAGE_KEYS } from './constants';
+import { clearAllDismissals as clearAllRecoveryCoachingDismissals } from './recoveryCoachingDismissal';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -38,7 +39,11 @@ class ApiClient {
           localStorage.removeItem(STORAGE_KEYS.TOKEN);
           localStorage.removeItem(STORAGE_KEYS.USER_ID);
           localStorage.removeItem(STORAGE_KEYS.USERNAME);
-          
+          // Task #98 — 명시적 logout() 과 동일하게 회복 코칭 닫힘 기억도 비운다.
+          // 같은 기기에서 다른 계정으로 다시 로그인했을 때 이전 사용자의 닫힘
+          // 상태가 카드 노출을 막지 않도록.
+          clearAllRecoveryCoachingDismissals();
+
           // 현재 페이지가 로그인 페이지가 아닐 때만 리다이렉트
           if (window.location.pathname !== '/login') {
             window.location.href = '/login';

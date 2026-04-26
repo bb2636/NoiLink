@@ -12,7 +12,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  DISMISSAL_RETENTION_MS,
   DISMISSAL_TTL_MS,
+  cleanupExpiredDismissals,
+  clearAllDismissals,
   clearDismissed,
   readDismissed,
   recoveryCoachingDismissalKey,
@@ -122,5 +125,152 @@ describe('recoveryCoachingDismissal', () => {
     expect(readDismissed('user-a')).toBe(false);
     localStorage.setItem(key, JSON.stringify({ at: 'bad' }));
     expect(readDismissed('user-a')).toBe(false);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task #98 — 오래된 회복 안내 닫힘 기억 자동 정리
+  // ---------------------------------------------------------------------------
+
+  describe('cleanupExpiredDismissals (prefix scan)', () => {
+    it('보존 한도(기본 30일) 안의 키는 그대로 둔다', () => {
+      const now = 100_000_000;
+      writeDismissed('user-a', now - 1_000); // 갓 닫음
+      writeDismissed('user-b', now - DISMISSAL_RETENTION_MS + 1_000); // 한도 직전
+      const removed = cleanupExpiredDismissals(now);
+      expect(removed).toBe(0);
+      expect(localStorage.getItem(recoveryCoachingDismissalKey('user-a')!)).not.toBeNull();
+      expect(localStorage.getItem(recoveryCoachingDismissalKey('user-b')!)).not.toBeNull();
+    });
+
+    it('보존 한도를 초과한 키는 제거한다', () => {
+      const now = 100_000_000;
+      writeDismissed('forgotten-user', now - DISMISSAL_RETENTION_MS - 1_000);
+      writeDismissed('active-user', now - 1_000);
+      const removed = cleanupExpiredDismissals(now);
+      expect(removed).toBe(1);
+      expect(localStorage.getItem(recoveryCoachingDismissalKey('forgotten-user')!)).toBeNull();
+      expect(localStorage.getItem(recoveryCoachingDismissalKey('active-user')!)).not.toBeNull();
+    });
+
+    it('미래 타임스탬프(시계 변경)와 손상된 JSON 도 제거한다', () => {
+      const now = 100_000_000;
+      const futureKey = recoveryCoachingDismissalKey('future-user')!;
+      const brokenKey = recoveryCoachingDismissalKey('broken-user')!;
+      const goodKey = recoveryCoachingDismissalKey('good-user')!;
+      localStorage.setItem(futureKey, JSON.stringify({ at: now + 60_000 }));
+      localStorage.setItem(brokenKey, 'not-json');
+      writeDismissed('good-user', now - 1_000);
+
+      const removed = cleanupExpiredDismissals(now);
+      expect(removed).toBe(2);
+      expect(localStorage.getItem(futureKey)).toBeNull();
+      expect(localStorage.getItem(brokenKey)).toBeNull();
+      expect(localStorage.getItem(goodKey)).not.toBeNull();
+    });
+
+    it('prefix 가 다른 키는 절대 건드리지 않는다', () => {
+      const now = 100_000_000;
+      localStorage.setItem('noilink:other-feature', 'keep-me');
+      localStorage.setItem('totally-unrelated', 'keep-me-too');
+      writeDismissed('forgotten-user', now - DISMISSAL_RETENTION_MS - 1_000);
+
+      cleanupExpiredDismissals(now);
+
+      expect(localStorage.getItem('noilink:other-feature')).toBe('keep-me');
+      expect(localStorage.getItem('totally-unrelated')).toBe('keep-me-too');
+    });
+
+    it('retentionMs 인자로 보존 한도를 조정할 수 있다', () => {
+      const now = 100_000_000;
+      writeDismissed('user-a', now - 5_000);
+      // 1초 보존 한도 → user-a 의 5초 묵은 기억도 만료.
+      const removed = cleanupExpiredDismissals(now, 1_000);
+      expect(removed).toBe(1);
+      expect(localStorage.getItem(recoveryCoachingDismissalKey('user-a')!)).toBeNull();
+    });
+
+    it('빈 localStorage 또는 매칭 키 없음 → 0 반환, throw 없음', () => {
+      expect(cleanupExpiredDismissals()).toBe(0);
+      localStorage.setItem('noilink:other', 'x');
+      expect(cleanupExpiredDismissals()).toBe(0);
+    });
+
+    it('localStorage 가 throw 해도 0 반환하고 앱이 죽지 않는다', () => {
+      const lengthSpy = vi
+        .spyOn(Storage.prototype, 'length', 'get')
+        .mockImplementation(() => {
+          throw new Error('blocked');
+        });
+      expect(() => cleanupExpiredDismissals()).not.toThrow();
+      expect(cleanupExpiredDismissals()).toBe(0);
+      lengthSpy.mockRestore();
+    });
+
+    it('removeItem 이 throw 하는 키는 건너뛰지만 다른 키 정리는 계속된다', () => {
+      const now = 100_000_000;
+      writeDismissed('user-a', now - DISMISSAL_RETENTION_MS - 1_000);
+      writeDismissed('user-b', now - DISMISSAL_RETENTION_MS - 1_000);
+      const keyA = recoveryCoachingDismissalKey('user-a')!;
+
+      const removeSpy = vi
+        .spyOn(Storage.prototype, 'removeItem')
+        .mockImplementation(function (this: Storage, key: string) {
+          if (key === keyA) throw new Error('blocked');
+          // 원래 동작 위임 (Storage.prototype 의 'native' removeItem 호출).
+          delete (this as unknown as Record<string, unknown>)[key];
+        });
+
+      const removed = cleanupExpiredDismissals(now);
+      // user-a 는 실패, user-b 는 성공 → 1 반환.
+      expect(removed).toBe(1);
+
+      removeSpy.mockRestore();
+    });
+  });
+
+  describe('clearAllDismissals (logout cleanup)', () => {
+    it('prefix 의 모든 키를 한 번에 비운다', () => {
+      writeDismissed('user-a');
+      writeDismissed('user-b');
+      writeDismissed('user-c');
+      localStorage.setItem('noilink:unrelated', 'keep-me');
+
+      const removed = clearAllDismissals();
+
+      expect(removed).toBe(3);
+      expect(localStorage.getItem(recoveryCoachingDismissalKey('user-a')!)).toBeNull();
+      expect(localStorage.getItem(recoveryCoachingDismissalKey('user-b')!)).toBeNull();
+      expect(localStorage.getItem(recoveryCoachingDismissalKey('user-c')!)).toBeNull();
+      // 비-회복코칭 키는 그대로 유지.
+      expect(localStorage.getItem('noilink:unrelated')).toBe('keep-me');
+    });
+
+    it('비어 있어도 0 반환, throw 없음', () => {
+      expect(clearAllDismissals()).toBe(0);
+    });
+
+    it('localStorage 가 throw 해도 앱이 죽지 않는다', () => {
+      writeDismissed('user-a');
+      const removeSpy = vi
+        .spyOn(Storage.prototype, 'removeItem')
+        .mockImplementation(() => {
+          throw new Error('blocked');
+        });
+      expect(() => clearAllDismissals()).not.toThrow();
+      removeSpy.mockRestore();
+    });
+
+    it('정리 후 같은 사용자가 다시 로그인하면 미닫힘 상태로 돌아간다', () => {
+      writeDismissed('user-a');
+      expect(readDismissed('user-a')).toBe(true);
+      clearAllDismissals();
+      expect(readDismissed('user-a')).toBe(false);
+    });
+
+    // TTL 상수가 정상적으로 export 됨을 회귀 보호 (다른 모듈 임포트가 깨지지 않게).
+    it('export 한 상수가 여전히 양수 ms 값', () => {
+      expect(DISMISSAL_TTL_MS).toBeGreaterThan(0);
+      expect(DISMISSAL_RETENTION_MS).toBeGreaterThan(DISMISSAL_TTL_MS);
+    });
   });
 });

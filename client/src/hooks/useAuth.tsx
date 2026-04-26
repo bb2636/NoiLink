@@ -15,6 +15,10 @@ import { setBleStabilityOverrideResolver } from '@noilink/shared';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { notifyNativeClearSession, notifyNativePersistSession } from '../native/nativeBridgeClient';
 import { loadBleStabilityRemoteConfig } from '../utils/bleStabilityRemoteConfig';
+import {
+  cleanupExpiredDismissals as cleanupRecoveryCoachingDismissals,
+  clearAllDismissals as clearAllRecoveryCoachingDismissals,
+} from '../utils/recoveryCoachingDismissal';
 
 /**
  * 인증 상태를 앱 전역에서 공유하기 위한 컨텍스트.
@@ -111,6 +115,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void checkAuth();
+    // Task #98 — 앱 부트시 한 번 prefix 스캔으로 오래 방치된 회복 코칭 닫힘
+    // 기억(기본 30일 초과)을 정리한다. 인증 흐름과 독립적이므로 실패해도 무시.
+    cleanupRecoveryCoachingDismissals();
   }, [checkAuth]);
 
   useEffect(() => {
@@ -210,6 +217,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(STORAGE_KEYS.USER_ID);
     localStorage.removeItem(STORAGE_KEYS.USERNAME);
     localStorage.removeItem(STORAGE_KEYS.TOKEN);
+    // Task #98 — 다음에 같은 기기에서 다른 계정으로 로그인해도 이전 사용자의
+    // 회복 코칭 닫힘 기억이 남지 않도록 prefix 의 모든 키를 비운다.
+    clearAllRecoveryCoachingDismissals();
     if (isNoiLinkNativeShell()) {
       notifyNativeClearSession();
     }
