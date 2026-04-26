@@ -148,19 +148,25 @@ vi.mock('../components/PodGrid/PodGrid', () => ({
 // 토스트 1회 노출 보장을 검증하기 위해 가벼운 더미로 대체한다 — isOpen 이 false
 // 인 동안에는 아무 것도 렌더하지 않으며, onClose 는 SuccessBanner 자체의
 // duration 타이머가 호출하도록 그대로 두면 된다 (실 컴포넌트와 동일한 시그니처).
+// `showCloseButton` 이 켜진 호출(거부 토스트 — Task #129)에서는 X 닫기 버튼을 노출해
+// 사용자 닫힘 → `onUserClose` (없으면 `onClose`) 라우팅을 실 컴포넌트와 동일하게 흉내낸다.
 vi.mock('../components/SuccessBanner/SuccessBanner', () => ({
   default: ({
     isOpen,
     message,
     onClose,
+    onUserClose,
     duration = 3000,
     autoClose = true,
+    showCloseButton,
   }: {
     isOpen: boolean;
     message: string;
     onClose?: () => void;
+    onUserClose?: () => void;
     duration?: number;
     autoClose?: boolean;
+    showCloseButton?: boolean;
   }) => {
     React.useEffect(() => {
       if (isOpen && autoClose && onClose) {
@@ -168,8 +174,28 @@ vi.mock('../components/SuccessBanner/SuccessBanner', () => ({
         return () => clearTimeout(id);
       }
     }, [isOpen, autoClose, duration, onClose]);
-    return isOpen ? <div data-testid="success-banner">{message}</div> : null;
+    return isOpen ? (
+      <div data-testid="success-banner">
+        {message}
+        {showCloseButton ? (
+          <button
+            type="button"
+            data-testid="success-banner-close"
+            onClick={() => (onUserClose ? onUserClose() : onClose?.())}
+          >
+            ×
+          </button>
+        ) : null}
+      </div>
+    ) : null;
   },
+}));
+
+// 텔레메트리 보고는 fire-and-forget 네트워크 호출 — 단위 테스트에서는 호출 횟수만
+// 검증할 수 있도록 모듈 단위로 spy 로 대체한다 (`subscribeAckErrorBanner` 의 기본
+// `onTelemetry` 가 이 함수이므로 페이지가 별도 주입 없이도 본 spy 를 거친다).
+vi.mock('../utils/reportAckBannerEvent', () => ({
+  reportAckBannerEventFireAndForget: vi.fn(),
 }));
 
 vi.mock('../components/ConfirmModal/ConfirmModal', () => ({
@@ -204,6 +230,7 @@ vi.mock('../components/ConfirmModal/ConfirmModal', () => ({
 }));
 
 import TrainingSessionPlay from './TrainingSessionPlay';
+import { reportAckBannerEventFireAndForget } from '../utils/reportAckBannerEvent';
 
 // ───────────────────────────────────────────────────────────
 // 헬퍼
@@ -1039,7 +1066,8 @@ describe('TrainingSessionPlay — 브릿지 거부 토스트 (Task #77 / #104)',
 
     const text = ackBannerText();
     expect(text).not.toBeNull();
-    expect(text!).toBe('내부 오류: Device is not connected');
+    // X 닫기 버튼(`×`) 도 banner DOM 안에 있으므로 부분 일치로 검증한다.
+    expect(text!).toContain('내부 오류: Device is not connected');
     // 디버그 키 대괄호가 붙지 않아야 한다.
     expect(text!).not.toContain('[');
   });
@@ -1047,6 +1075,54 @@ describe('TrainingSessionPlay — 브릿지 거부 토스트 (Task #77 / #104)',
   it('ok=true ack 는 토스트를 띄우지 않는다', () => {
     renderApp();
     dispatchAck({ id: 'req-3', ok: true });
+    expect(ackBannerText()).toBeNull();
+  });
+
+  // Task #138 — X 버튼이 빠르게 두 번 눌려도 운영 텔레메트리는 한 건만 흘러야 한다.
+  // burst 가 첫 `notifyDismissed()` 로 마감된 뒤 도착한 두 번째 호출은 활성 burst 가
+  // 없어 무시된다는 단위 테스트(`nativeAckErrors.test.ts`) 의 통합 회귀 보호 —
+  // 트레이닝 화면이 X 클릭 → `notifyDismissed()` 를 한 번씩만 흘리는지, 그리고 모듈
+  // 기본 텔레메트리 sink (`reportAckBannerEventFireAndForget`) 가 정확히 한 번만
+  // 호출되는지 화면 레이어에서 보장한다.
+  it('X 버튼을 두 번 눌러도 user-dismiss 텔레메트리는 한 건만 흐른다', () => {
+    renderApp();
+    dispatchAck({
+      id: 'req-4',
+      ok: false,
+      error: 'ble.writeLed:field-enum@payload.colorCode: ble.writeLed: payload.colorCode invalid enum',
+    });
+
+    const reportSpy = vi.mocked(reportAckBannerEventFireAndForget);
+    expect(reportSpy).not.toHaveBeenCalled();
+
+    // ack 토스트 SuccessBanner 만 골라낸다 — BLE 안정성 토스트와 구분하기 위해
+    // 부모 banner 의 텍스트가 "내부 오류:" 로 시작하는 쪽만 채택.
+    const banners = container?.querySelectorAll('[data-testid="success-banner"]') ?? [];
+    let ackBanner: Element | null = null;
+    for (const b of Array.from(banners)) {
+      if ((b.textContent ?? '').startsWith('내부 오류:')) {
+        ackBanner = b;
+        break;
+      }
+    }
+    expect(ackBanner).not.toBeNull();
+    const closeBtn = ackBanner!.querySelector(
+      '[data-testid="success-banner-close"]',
+    ) as HTMLButtonElement | null;
+    expect(closeBtn).not.toBeNull();
+
+    // 같은 act 안에서 두 번 클릭해 — 첫 클릭으로 setBanner(null) 이 예약되어도
+    // React 렌더 flush 전이므로 같은 DOM 노드를 한 번 더 누른 것과 동치다.
+    // 실제 사용자가 토스트 닫힘 애니메이션 직전에 X 를 한 번 더 누른 케이스를 흉내낸다.
+    act(() => {
+      closeBtn!.click();
+      closeBtn!.click();
+    });
+
+    expect(reportSpy).toHaveBeenCalledTimes(1);
+    expect(reportSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'user-dismiss' }),
+    );
     expect(ackBannerText()).toBeNull();
   });
 });
