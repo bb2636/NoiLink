@@ -112,11 +112,14 @@ export default function MultiTrendChart({ data, height = 220, headerLeft }: Mult
 
     const range = Y_MAX - Y_MIN;
 
-    // 라인 + 그라데이션 영역
+    // 영역(층) — 뒤(기억력=파랑) → 앞(순발력=라임) 순으로 그려서 색 띠가 쌓이도록.
+    // 그라데이션 페이드(=뒤 레이어를 잡아먹는 원인) 대신 솔리드 반투명 채움 사용.
+    // 각 지표는 0~chartBottom 까지 자기 영역을 칠해서, 위로 갈수록 더 큰 값을 가진
+    // 뒤 레이어가 띠처럼 노출된다 (이미지 2 스택 영역 차트 외관과 동일).
+    const FILL_ALPHA = 0.55;
     METRIC_ORDER.forEach(({ key, color }) => {
       if (!selected.has(key)) return;
 
-      // 좌표 수집
       const pts: { x: number; y: number }[] = [];
       recent.forEach((point, index) => {
         const v = point[key];
@@ -127,19 +130,29 @@ export default function MultiTrendChart({ data, height = 220, headerLeft }: Mult
       });
       if (pts.length === 0) return;
 
-      // 라인 아래 그라데이션 영역
-      const grad = ctx.createLinearGradient(0, padding, 0, padding + chartH);
-      grad.addColorStop(0, hexToRgba(color, 0.28));
-      grad.addColorStop(1, hexToRgba(color, 0));
-      ctx.fillStyle = grad;
+      ctx.fillStyle = hexToRgba(color, FILL_ALPHA);
       ctx.beginPath();
       ctx.moveTo(pts[0].x, padding + chartH);
       pts.forEach((p) => ctx.lineTo(p.x, p.y));
       ctx.lineTo(pts[pts.length - 1].x, padding + chartH);
       ctx.closePath();
       ctx.fill();
+    });
 
-      // 라인
+    // 라인 — 영역 위에 한 번 더 그려서 각 지표 경계를 또렷하게 (위와 동일한 뒤→앞 순서)
+    METRIC_ORDER.forEach(({ key, color }) => {
+      if (!selected.has(key)) return;
+
+      const pts: { x: number; y: number }[] = [];
+      recent.forEach((point, index) => {
+        const v = point[key];
+        if (typeof v !== 'number') return;
+        const x = padding + (chartW * index) / Math.max(recent.length - 1, 1);
+        const y = padding + chartH - (chartH * (v - Y_MIN)) / range;
+        pts.push({ x, y });
+      });
+      if (pts.length === 0) return;
+
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
@@ -148,6 +161,13 @@ export default function MultiTrendChart({ data, height = 220, headerLeft }: Mult
         else ctx.lineTo(p.x, p.y);
       });
       ctx.stroke();
+
+      // 마지막 점에 색상 도트(이미지 2와 동일하게 우측 끝 강조)
+      const last = pts[pts.length - 1];
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(last.x, last.y, 3, 0, Math.PI * 2);
+      ctx.fill();
     });
 
     // x축: 시도 횟수 ("1" ~ "n")
