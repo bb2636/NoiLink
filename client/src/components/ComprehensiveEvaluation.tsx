@@ -39,17 +39,42 @@ export interface FeedbackItem {
   title: string;
 }
 
+export interface EvidenceDetail {
+  title: string;
+  description?: string;
+}
+
 export interface ComprehensiveEvaluationProps {
   metricsScore: MetricsScore;
   evidenceTitles?: string[]; // 상세 분석 — 외부에서 주입(없으면 기본 문구)
+  evidenceDetails?: EvidenceDetail[]; // 상세 분석(설명 포함). 지정 시 evidenceTitles 무시
   feedbackItems?: FeedbackItem[]; // 생활 밀착 피드백
   collapsible?: boolean;
   defaultOpen?: boolean;
 }
 
+const DEFAULT_EVIDENCE: EvidenceDetail[] = [
+  {
+    title: '쉽게 포기하지 않는 꾸준형',
+    description:
+      '작은 어려움이 와도 멈추지 않고 일정한 페이스로 계속 나아갑니다. 짧은 시간의 폭발적 성과보다 오랜 시간 누적되는 변화를 만들어내는 데 강점이 있어요.',
+  },
+  {
+    title: '화려한 말뿐보다는 행동으로 보여주는 신뢰형',
+    description:
+      '말로 약속하기보다 직접 움직여 결과로 증명하는 편이에요. 주변에서 “말한 건 반드시 지키는 사람”으로 기억되며, 그래서 더 큰 책임도 자연스럽게 맡게 됩니다.',
+  },
+  {
+    title: '한번 시작한 일은 끝을 보고야 마는 완주형',
+    description:
+      '중간에 흥미가 떨어지거나 변수가 생겨도 마무리까지 책임지는 성향입니다. 결과의 완성도를 중요하게 여겨, 시간이 걸리더라도 끝맺음의 품질이 높습니다.',
+  },
+];
+
 export default function ComprehensiveEvaluation({
   metricsScore,
   evidenceTitles,
+  evidenceDetails,
   feedbackItems,
   collapsible = true,
   defaultOpen = true,
@@ -67,14 +92,13 @@ export default function ComprehensiveEvaluation({
   const strengths = ranked.slice(0, 3);
   const weaknesses = ranked.slice(-2).reverse();
 
-  const titles =
-    evidenceTitles && evidenceTitles.length > 0
-      ? evidenceTitles.slice(0, 3)
-      : [
-          '쉽게 포기하지 않는 꾸준형',
-          '화려한 말뿐보다는 행동으로 보여주는 신뢰형',
-          '한번 시작한 일은 끝을 보고야 마는 완주형',
-        ];
+  // 상세 분석: evidenceDetails(설명 포함) → evidenceTitles(제목만) → 기본 문구
+  const evidence: EvidenceDetail[] =
+    evidenceDetails && evidenceDetails.length > 0
+      ? evidenceDetails.slice(0, 3)
+      : evidenceTitles && evidenceTitles.length > 0
+        ? evidenceTitles.slice(0, 3).map((t) => ({ title: t }))
+        : DEFAULT_EVIDENCE;
 
   const items: FeedbackItem[] =
     feedbackItems && feedbackItems.length > 0
@@ -96,8 +120,14 @@ export default function ComprehensiveEvaluation({
           className="rounded-2xl p-3 space-y-2"
           style={{ backgroundColor: '#202024', border: '1px solid #2A2A2A' }}
         >
-          {titles.map((t, i) => (
-            <EvalRow key={i} iconType={ICON_TYPES[i % 3]} iconColor={ICON_COLORS[i % 3]} title={t} />
+          {evidence.map((e, i) => (
+            <EvalRow
+              key={i}
+              iconType={ICON_TYPES[i % 3]}
+              iconColor={ICON_COLORS[i % 3]}
+              title={e.title}
+              description={e.description}
+            />
           ))}
         </div>
       </div>
@@ -180,10 +210,12 @@ export function EvalRow({
   iconType,
   iconColor,
   title,
+  description,
 }: {
   iconType: 'trend' | 'shield' | 'flag';
   iconColor: string;
   title: string;
+  description?: string;
 }) {
   const renderIcon = () => {
     switch (iconType) {
@@ -211,16 +243,26 @@ export function EvalRow({
   };
   return (
     <div
-      className="rounded-2xl px-3 py-3 flex items-center gap-3"
+      className="rounded-2xl px-3 py-3 flex items-start gap-3"
       style={{ backgroundColor: '#2D2D33', border: '1px solid #3A3A40' }}
     >
       <span
-        className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+        className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5"
         style={{ backgroundColor: '#1A1A1A', border: `1.5px solid ${iconColor}40` }}
       >
         {renderIcon()}
       </span>
-      <p className="text-[13px] text-white">{title}</p>
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-semibold text-white">{title}</p>
+        {description && (
+          <p
+            className="text-[12px] mt-1 leading-relaxed"
+            style={{ color: '#B6B6B9' }}
+          >
+            {description}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

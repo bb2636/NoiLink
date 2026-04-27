@@ -659,7 +659,10 @@ export default function Report() {
       {/* 뇌지컬 종합 평가 — 기업 리포트와 동일 UI */}
       <ComprehensiveEvaluation
         metricsScore={effectiveReport.metricsScore}
-        evidenceTitles={evidenceCards.slice(0, 3).map((c) => c.label)}
+        evidenceDetails={evidenceCards.slice(0, 3).map((c) => ({
+          title: c.label,
+          description: c.body,
+        }))}
       />
 
       {/* 추천 롤모델 — 기업 리포트와 동일 UI */}
