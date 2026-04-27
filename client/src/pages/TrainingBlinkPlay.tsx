@@ -51,10 +51,19 @@ export default function TrainingBlinkPlay() {
   const [completed, setCompleted] = useState(false);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const [bleReconnecting, setBleReconnecting] = useState(false);
+  // 진단용 카운터 — 본체 LED 가 박자에 맞춰 안 바뀐다는 사용자 보고를 추적하기 위해
+  // 화면에 송신/점등 횟수를 노출한다. 두 카운터의 동작:
+  //   - stateUpdates: 엔진의 onPodStates 콜백이 호출된 총 횟수 (점등/소등/회복 모두 포함).
+  //   - lightCount: OFF→ON 전이 횟수. 박자에 맞춰 1, 2, 3 ... 으로 증가하면 BLE 송신 단계까지
+  //                 정상이라는 의미이며 본체가 안 바뀌면 펌웨어/네이티브 단계 문제로 좁혀진다.
+  //                 카운터가 0 에서 멈추면 엔진의 fireTick 자체가 돌지 않는다는 의미.
+  const [stateUpdates, setStateUpdates] = useState(0);
+  const [lightCount, setLightCount] = useState(0);
 
   const engineRef = useRef<TrainingEngine | null>(null);
   const completedRef = useRef(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevLitRef = useRef(false);
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -80,8 +89,16 @@ export default function TrainingBlinkPlay() {
       totalDurationMs: totalMs,
       podCount: 4,
       isComposite: state.isComposite || state.apiMode === 'COMPOSITE',
-      // 점등-전용 모드는 화면에 PodGrid 를 노출하지 않으므로 onPodStates 는 수신만 하고 무시한다.
-      onPodStates: () => {},
+      // 점등-전용 모드는 PodGrid 를 노출하지 않으므로 화면 표시는 안 하지만, 진단용으로
+      // 호출 횟수와 OFF→ON 전이 횟수를 누적해 화면 하단에 노출한다.
+      onPodStates: (s) => {
+        setStateUpdates((c) => c + 1);
+        const isLit = s.some((p) => p.fill !== 'OFF');
+        if (isLit && !prevLitRef.current) {
+          setLightCount((c) => c + 1);
+        }
+        prevLitRef.current = isLit;
+      },
       onElapsedMs: (ms) => setElapsedMs(ms),
       onPhaseChange: (info) => setPhaseInfo(info),
       onComplete: () => {
@@ -307,6 +324,15 @@ export default function TrainingBlinkPlay() {
               : isPaused
                 ? '일시정지됨'
                 : '점등 신호 송신 중'}
+          </div>
+
+          {/* 진단 카운터 — 본체 LED 가 안 바뀌는 문제를 좁히기 위한 임시 표시 */}
+          <div
+            className="mt-2 text-xs"
+            style={{ color: '#6B7280' }}
+            data-testid="blink-diag-counter"
+          >
+            진단 · 송신 {stateUpdates}회 / 점등 {lightCount}회
           </div>
         </div>
 
