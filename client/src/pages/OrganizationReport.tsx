@@ -9,8 +9,8 @@
  *  - 뇌지컬 종합 평가: 본인의 브레이니멀 + Fact/Life/Hint/강점/보완점
  *  - 소속 인원 현황: 이름 / 뇌지컬 점수 / 브레이니멀 / 생년월일(추정) / 최근 검사일
  */
-import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import RadarChart from '../components/RadarChart';
 import MultiTrendChart, { type TrendPoint } from '../components/MultiTrendChart/MultiTrendChart';
@@ -116,7 +116,32 @@ export default function OrganizationReport() {
   );
   const trendPoints: TrendPoint[] = MOCK_TREND;
   const members: User[] = MOCK_MEMBERS;
-  const [tab, setTab] = useState<TabKey>('all');
+
+  // 탭 상태를 URL 쿼리(?tab=...)에 영속화 — 멤버 리포트로 이동했다가 뒤로가기 시
+  // 같은 탭(특히 '소속 인원 현황')으로 자연스럽게 복귀하도록 한다.
+  // (URL 변경은 history 를 추가로 쌓지 않도록 replace 모드 사용 — 뒤로가기 1회 = 이전 화면으로)
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = (searchParams.get('tab') as TabKey | null);
+  const initialTab: TabKey =
+    tabFromUrl && TABS.some((t) => t.key === tabFromUrl) ? tabFromUrl : 'all';
+  const [tab, setTabState] = useState<TabKey>(initialTab);
+  // URL ↔ 상태 양방향 동기화 (뒤로가기로 URL이 바뀌면 상태도 따라옴)
+  useEffect(() => {
+    const next = searchParams.get('tab');
+    if (next && TABS.some((t) => t.key === next) && next !== tab) {
+      setTabState(next as TabKey);
+    } else if (!next && tab !== 'all') {
+      setTabState('all');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+  const setTab = (key: TabKey) => {
+    setTabState(key);
+    const next = new URLSearchParams(searchParams);
+    if (key === 'all') next.delete('tab');
+    else next.set('tab', key);
+    setSearchParams(next, { replace: true });
+  };
   const [orgInfoOpen, setOrgInfoOpen] = useState(true);
 
   if (!user) return null;
