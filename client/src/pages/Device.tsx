@@ -8,7 +8,8 @@ import { MobileLayout } from '../components/Layout';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import { STORAGE_KEYS } from '../utils/constants';
 import { ensureDemoDevicesSeeded } from '../utils/seedDemoDevices';
-import { bleConnect, bleDisconnect } from '../native/bleBridge';
+import { bleConnect, bleDisconnect, bleWriteLed, bleWriteControl } from '../native/bleBridge';
+import { COLOR_CODE, CTRL_START, CTRL_STOP } from '@noilink/shared';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { subscribeAckErrorBanner, type AckBannerSubscription } from '../native/nativeAckErrors';
 import { getLegacyBleMode, setLegacyBleMode, subscribeLegacyBleMode } from '../native/legacyBleMode';
@@ -67,6 +68,35 @@ export default function Device() {
   // 레거시 BLE 모드 토글 (NoiPod 정식 펌웨어 미탑재 NINA-B1 모듈용)
   const [legacyMode, setLegacyModeState] = useState<boolean>(getLegacyBleMode);
   useEffect(() => subscribeLegacyBleMode(setLegacyModeState), []);
+  // 테스트 점등 진행 중 표시
+  const [testBlinkRunning, setTestBlinkRunning] = useState(false);
+
+  /**
+   * 테스트 점등: 트레이닝 화면에 들어가지 않고도 점등 신호가 기기에 도달하는지
+   * 즉시 검증하기 위한 진단 도구. START → Pod 1~4 순차 점등 → STOP 순으로
+   * 보낸다. 레거시 모드 ON 이면 4eXX0d/aa55/ff 형식으로, OFF 이면 NoiPod
+   * 정식 12바이트 프레임으로 전송된다 (`bleWriteLed`/`bleWriteControl` 분기 그대로).
+   */
+  const handleTestBlink = async () => {
+    if (testBlinkRunning) return;
+    setTestBlinkRunning(true);
+    try {
+      bleWriteControl(CTRL_START);
+      await new Promise((r) => setTimeout(r, 200));
+      for (let pod = 0; pod < 4; pod++) {
+        bleWriteLed({
+          tickId: pod,
+          pod,
+          colorCode: COLOR_CODE.RED,
+          onMs: 500,
+        });
+        await new Promise((r) => setTimeout(r, 700));
+      }
+      bleWriteControl(CTRL_STOP);
+    } finally {
+      setTestBlinkRunning(false);
+    }
+  };
 
   const devicesWithConnection: DeviceInfo[] = registered.map((d) => ({
     id: d.id,
@@ -302,6 +332,28 @@ export default function Device() {
               ON: 점등 신호를 짧은 명령으로 보냅니다. 입력은 화면 탭으로 받습니다.
             </div>
           )}
+          {/* 테스트 점등 — 트레이닝에 들어가지 않고도 점등 신호가
+              실제로 기기에 도달해 LED 가 켜지는지 즉시 확인할 수 있다.
+              연결된 기기가 없으면 native 셸이 NOT_CONNECTED ack 를 던져
+              화면 하단 빨간 토스트로 사유가 표시된다. */}
+          <button
+            type="button"
+            onClick={handleTestBlink}
+            disabled={testBlinkRunning || !connectedId}
+            className="mt-3 w-full py-2 rounded-xl text-sm font-semibold transition-opacity"
+            style={{
+              backgroundColor: '#0A0A0A',
+              border: '1px solid #AAED10',
+              color: '#AAED10',
+              opacity: testBlinkRunning || !connectedId ? 0.4 : 1,
+            }}
+          >
+            {testBlinkRunning
+              ? '테스트 점등 중…'
+              : connectedId
+              ? '테스트 점등 보내기 (Pod 1→4)'
+              : '연결된 기기가 없어요'}
+          </button>
         </div>
       </div>
 

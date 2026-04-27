@@ -411,6 +411,7 @@ export default function Result() {
           minHeight: '100vh',
           background: 'radial-gradient(ellipse at top, #1a3a1a 0%, #0A0A0A 60%)',
           paddingTop: 'env(safe-area-inset-top)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
         }}
       >
         {/* 반짝이 입자 */}
