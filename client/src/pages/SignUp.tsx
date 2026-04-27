@@ -45,9 +45,13 @@ export default function SignUp() {
   const { signup } = useAuth();
   const navigate = useNavigate();
   
-  // 모든 상태 초기화 함수
-  const resetAllStates = () => {
-    setStep('select');
+  // 입력 / 검증 / 동의 상태만 초기화한다.
+  // - preserveUserType 가 주어지면 userType 만 해당 값으로 유지 (탭 전환 시 사용)
+  // - 아니면 userType 도 함께 초기화 (뒤로가기 / 언마운트 시 사용)
+  // step / loading 은 이 함수에서 건드리지 않는다.
+  const resetFormInputs = (
+    preserveUserType: 'PERSONAL' | 'ORGANIZATION' | null = null
+  ) => {
     setFormData({
       email: '',
       password: '',
@@ -56,10 +60,9 @@ export default function SignUp() {
       nickname: '',
       phone: '',
       verificationCode: '',
-      userType: null,
+      userType: preserveUserType,
     });
     setErrors({});
-    setLoading(false);
     setShowPasswordConfirm(false);
     setShowTooltip(false);
     setAgreements({
@@ -71,6 +74,13 @@ export default function SignUp() {
     setVerificationCodeSent(false);
     setDevVerificationCode('');
     setIsVerified(false);
+  };
+
+  // 모든 상태 초기화 함수 (브라우저 뒤로가기 / 컴포넌트 언마운트 용)
+  const resetAllStates = () => {
+    setStep('select');
+    setLoading(false);
+    resetFormInputs(null);
   };
 
   // 로그인 페이지에서 회원가입 클릭 시 첫 번째 탭으로 이동
@@ -284,7 +294,12 @@ export default function SignUp() {
   };
 
   const handleUserTypeSelect = (userType: 'PERSONAL' | 'ORGANIZATION') => {
-    setFormData({ ...formData, userType });
+    // 같은 탭을 다시 누르면 상태 변화 없음
+    if (formData.userType === userType) return;
+    // 탭이 바뀌는 경우(예: 개인 → 기업), 기존에 폼에 입력해 둔
+    // 이메일/비밀번호/이름/닉네임/휴대폰/인증/약관 동의/증빙자료 등을
+    // 모두 초기화한다. (다른 회원 유형으로 새로 가입하는 흐름)
+    resetFormInputs(userType);
   };
 
   const handleNext = () => {
@@ -422,6 +437,10 @@ export default function SignUp() {
           <button
             onClick={() => {
               if (step === 'form') {
+                // 폼 단계에서 뒤로가면, 이전 단계로 돌아가기 전에
+                // 입력값/약관 동의/휴대폰 인증 등을 모두 초기화한다.
+                // userType 도 비워서 1단계에서 다시 선택하도록 한다.
+                resetFormInputs(null);
                 setStep('select');
               } else {
                 navigate('/login');
