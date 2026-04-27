@@ -212,6 +212,35 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
     시뮬레이션(`process.env.TZ='UTC'`) 하에서 `checkedDays` 가 KST 요일 칸에 떨어지는지
     (Task #144).
 
+## BLE 펌웨어 모드 — 현행 NINA-B1 vs 차세대 NoiPod
+
+사용자 기기(NINA-B1-FB55CE)는 단순 펌웨어를 사용한다. 차세대 NoiPod 정식
+사양(0xA5 12B SYNC 프레임)과 별개이므로 **`legacyBleMode` 토글**로 분기한다.
+
+- **현행(레거시) 모드 — 기본값 ON**
+  - 송신: 점등 `4E XX 0D` (3B, XX = 1<<pod), START `AA 55`, STOP `FF`
+  - 수신: 5B IR 패킷 `[hi][lo][touchCount][0D][0A]` (200ms 간격) 또는
+    NFC NDEF Text Record `D1 01 ?? 54 [status] [lang...] [text...]`
+  - 인코더: `encodeLegacyLedFrame` / `encodeLegacyControlStartFrame` /
+    `encodeLegacyControlStopFrame` (`shared/ble-protocol.ts`)
+  - 디코더: `tryParseLegacyIrBytes` / `tryParseLegacyNdefTextBytes` /
+    `tryParseAnyNotifyBytes` (TOUCH→IR→NDEF 분류기). base64 entry point 도 동일.
+- **차세대 NoiPod 모드 — 토글 OFF 시**
+  - 송신: 0xA5 12B LED/SESSION/CONTROL 프레임 (`encodeLedFrame` 등)
+  - 수신: 11B TOUCH 프레임 (`tryParseTouchBytes`)
+- **토글 위치**: Device 화면 카드. 변경 즉시 `bleWriteLed/bleWriteControl`
+  분기와 진단 로그가 모드 전환된다.
+- **마이그레이션 (m1.cleanForcedOff)**: 어제 빌드의 강제 OFF useEffect 가
+  storage 에 `'0'` 을 박아둔 사용자가 있다. `getLegacyBleMode()` 첫 호출 시
+  마이그레이션 키가 없으면 잔여 `'0'` 을 1회 청소해서 기본값(ON)으로 복귀시킨다.
+  사용자가 그 후 OFF 를 명시적으로 누른 결과(`'0'`)는 마이그레이션 키 존재로
+  보호된다 (`client/src/native/legacyBleMode.ts`,
+  `client/src/native/__tests__/legacyBleMode.test.ts`).
+- **Device 진단 notify 구독**: 화면에 머무는 동안 `device-diag-*` subId 로
+  notify 구독 → 분류기로 디코드 → 진단 로그에 표시. 다른 구독 스트림 오염
+  방지를 위해 `payload.subscriptionId === subId && payload.key === 'notify'`
+  로 필터. IR 패킷은 throttle (count 변화 즉시 / distance 1.5초당 1회).
+
 ## Deployment
 
 - Target: autoscale

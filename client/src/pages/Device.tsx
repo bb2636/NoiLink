@@ -8,11 +8,23 @@ import { MobileLayout } from '../components/Layout';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import { STORAGE_KEYS } from '../utils/constants';
 import { ensureDemoDevicesSeeded } from '../utils/seedDemoDevices';
-import { bleConnect, bleDisconnect, bleWriteLed, bleWriteControl } from '../native/bleBridge';
-import { COLOR_CODE, CTRL_START, CTRL_STOP } from '@noilink/shared';
+import {
+  bleConnect,
+  bleDisconnect,
+  bleWriteLed,
+  bleWriteControl,
+  bleSubscribeCharacteristic,
+  bleUnsubscribeCharacteristic,
+} from '../native/bleBridge';
+import {
+  COLOR_CODE,
+  CTRL_START,
+  CTRL_STOP,
+  tryParseAnyNotifyBase64,
+} from '@noilink/shared';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { subscribeAckErrorBanner, type AckBannerSubscription } from '../native/nativeAckErrors';
-import { setLegacyBleMode } from '../native/legacyBleMode';
+import { getLegacyBleMode, setLegacyBleMode, subscribeLegacyBleMode } from '../native/legacyBleMode';
 import type { NativeToWebMessage } from '@noilink/shared';
 
 export interface DeviceInfo {
@@ -65,13 +77,11 @@ export default function Device() {
   // 브릿지가 web→native 메시지를 거부할 때 (`native.ack.ok=false`) 화면에 띄울 안내.
   // 핵심 흐름(연결/해제) 도중 조용히 실패하지 않도록 짧은 토스트로 사유를 노출한다 (Task #77).
   const [ackErrorBanner, setAckErrorBanner] = useState<string | null>(null);
-  // 사용자가 알려준 펌웨어 명세가 사실 우리 NoiPod 정식 12바이트 프레임과
-  // 동일했다(SYNC=0xa5, OP_LED=0x01, ...). 따라서 레거시 4eXX0d 분기는
-  // 영원히 OFF 로 강제하고 토글 UI 도 제거한다. 이전에 ON 으로 두었던
-  // 사용자도 자동 정리.
-  useEffect(() => {
-    setLegacyBleMode(false);
-  }, []);
+  // 사용자 기기(NINA-B1-FB55CE) 펌웨어 사양은 3바이트 `4E XX 0D` (LED) /
+  // `aa 55` (START) / `ff` (STOP) 이다. 차세대 NoiPod 0xa5 12바이트 사양은
+  // 별도 펌웨어이며 기본값은 현행(레거시) 사양 ON 이다.
+  const [legacyMode, setLegacyModeState] = useState<boolean>(getLegacyBleMode);
+  useEffect(() => subscribeLegacyBleMode(setLegacyModeState), []);
   // 테스트 점등 진행 중 표시
   const [testBlinkRunning, setTestBlinkRunning] = useState(false);
   // 진단 로그 — 송신/ack 결과를 화면에 직접 노출 (토스트가 짧아 놓쳤을 때 대비)
@@ -100,6 +110,62 @@ export default function Device() {
   }, []);
 
   /**
+   * 진단용 notify 구독 — Device 화면에 머무는 동안 기기가 200ms 마다 보내는
+   * 5바이트 IR 패킷, NFC NDEF Text Record, 차세대 TOUCH 프레임을 분류해서
+   * 진단 로그에 표시한다. IR 패킷은 너무 자주 들어오므로 throttle:
+   *   - touchCount 변화는 즉시 표시 (사용자 입력 검증용)
+   *   - distanceMm 변화 표시는 1.5초당 최대 1회 (스팸 방지)
+   * NFC/TOUCH 는 빈도 낮으므로 매번 표시.
+   */
+  const lastIrCountRef = useRef<number | null>(null);
+  const lastIrDistanceLogTsRef = useRef<number>(0);
+  useEffect(() => {
+    if (!isNative) return;
+    if (!connectedId) return;
+    const subId = `device-diag-${Math.random().toString(36).slice(2, 10)}`;
+    bleSubscribeCharacteristic(subId, 'notify');
+    pushDiag('← notify 구독 시작 (진단)');
+    const onBridge = (e: Event) => {
+      const msg = (e as CustomEvent<NativeToWebMessage>).detail;
+      if (!msg || msg.type !== 'ble.notify') return;
+      // 트레이닝 화면 등 다른 곳의 구독 스트림이 진단 로그에 섞이지 않도록
+      // 우리가 만든 subId / notify 채널만 통과시킨다.
+      if (msg.payload?.subscriptionId !== subId) return;
+      if (msg.payload?.key !== 'notify') return;
+      const b64 = msg.payload?.base64Value;
+      if (!b64) return;
+      const ev = tryParseAnyNotifyBase64(b64);
+      if (!ev) return;
+      if (ev.type === 'IR') {
+        const prevCount = lastIrCountRef.current;
+        lastIrCountRef.current = ev.touchCount;
+        // 카운트 변화 = 사용자 입력 발생 → 즉시 표시
+        if (prevCount !== null && ev.touchCount !== prevCount) {
+          pushDiag(`← 터치! count ${prevCount} → ${ev.touchCount} (IR ${ev.distanceMm}mm)`);
+          return;
+        }
+        // distance 만 보고할 땐 throttle
+        const now = Date.now();
+        if (now - lastIrDistanceLogTsRef.current >= 1500) {
+          lastIrDistanceLogTsRef.current = now;
+          pushDiag(`← IR ${ev.distanceMm}mm count=${ev.touchCount}`);
+        }
+      } else if (ev.type === 'NFC_TEXT') {
+        pushDiag(`← NFC "${ev.text}" (${ev.language || '?'})`);
+      } else if (ev.type === 'TOUCH') {
+        pushDiag(`← TOUCH pod=${ev.pod} ch=${ev.channel} Δ=${ev.deltaMs}ms`);
+      }
+    };
+    window.addEventListener('noilink-native-bridge', onBridge as EventListener);
+    return () => {
+      window.removeEventListener('noilink-native-bridge', onBridge as EventListener);
+      bleUnsubscribeCharacteristic(subId);
+      lastIrCountRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNative, connectedId]);
+
+  /**
    * 테스트 점등: 트레이닝 화면에 들어가지 않고도 점등 신호가 기기에 도달하는지
    * 즉시 검증하기 위한 진단 도구. START → Pod 1~4 순차 점등 → STOP 순으로
    * 보낸다. 레거시 모드 ON 이면 4eXX0d/aa55/ff 형식으로, OFF 이면 NoiPod
@@ -115,14 +181,20 @@ export default function Device() {
         pushDiag('환경: 일반 웹 (네이티브 셸 아님 — BLE 메시지 보낼 수 없음)');
         return;
       }
-      pushDiag('환경: 네이티브 셸 / 정식 12바이트 프레임');
-      pushDiag('→ START 송신 (a5 03 00 …)');
+      const modeLabel = legacyMode
+        ? '현행 펌웨어 (4E XX 0D / aa55 / ff)'
+        : '차세대 NoiPod (0xA5 12바이트)';
+      pushDiag(`환경: 네이티브 셸 / 모드: ${modeLabel}`);
+      pushDiag(legacyMode ? '→ START 송신 (aa 55)' : '→ START 송신 (a5 03 00 …)');
       bleWriteControl(CTRL_START);
       // BLE GATT 큐가 이전 write 를 끝낼 시간을 충분히 준다. 너무 빠른 연속
       // write 는 react-native-ble-plx 에서 'operation was cancelled' 로 떨어진다.
       await new Promise((r) => setTimeout(r, 500));
       for (let pod = 0; pod < 4; pod++) {
-        pushDiag(`→ LED Pod${pod + 1} RED 송신 (a5 01 …)`);
+        const hexHint = legacyMode
+          ? `(4E ${(pod + 1).toString(16).padStart(2, '0')} 0D)`
+          : '(a5 01 …)';
+        pushDiag(`→ LED Pod${pod + 1} RED 송신 ${hexHint}`);
         bleWriteLed({
           tickId: pod + 1,
           pod,
@@ -131,7 +203,7 @@ export default function Device() {
         });
         await new Promise((r) => setTimeout(r, 1000));
       }
-      pushDiag('→ STOP 송신 (a5 03 01 …)');
+      pushDiag(legacyMode ? '→ STOP 송신 (ff)' : '→ STOP 송신 (a5 03 01 …)');
       bleWriteControl(CTRL_STOP);
     } finally {
       setTestBlinkRunning(false);
@@ -331,21 +403,40 @@ export default function Device() {
           <span className="font-semibold">기기 추가</span>
         </button>
 
-        {/* BLE 점등 진단 카드 — 트레이닝에 들어가지 않고도 점등 신호가
-            기기까지 도달해 LED 가 켜지는지 즉시 확인하기 위한 도구.
-            정식 NoiPod 12바이트 프레임(SYNC=0xa5)을 그대로 송신한다 —
-            펌웨어 명세(constants.js, encoders.js)와 100% 동일. */}
+        {/* BLE 점등 진단 + 펌웨어 모드 토글
+            - 현행 펌웨어 (NINA-B1-FB55CE 등): 3바이트 `4E XX 0D` 송신
+            - 차세대 펌웨어 (NoiPod 0xA5): 12바이트 NoiPod 프레임 송신
+            기본값은 현행 펌웨어(레거시 모드 ON). 차세대 펌웨어를 시험할
+            때만 토글을 OFF 로 둔다. */}
         <div
           className="mt-6 rounded-2xl p-4"
           style={{ backgroundColor: '#1A1A1A' }}
         >
-          <div className="font-semibold mb-1" style={{ color: '#FFFFFF' }}>
-            BLE 점등 진단
-          </div>
-          <div className="text-xs mb-3" style={{ color: '#999999' }}>
-            연결된 기기로 START → Pod 1~4 RED → STOP 순으로 정식
-            12바이트 프레임을 송신합니다. LED 가 빨갛게 1→4번 순으로
-            깜빡이면 펌웨어까지 신호가 정상 도달한 상태입니다.
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="flex-1">
+              <div className="font-semibold" style={{ color: '#FFFFFF' }}>
+                BLE 점등 진단
+              </div>
+              <div className="text-xs mt-1" style={{ color: '#999999' }}>
+                {legacyMode
+                  ? '현행 펌웨어 모드 — 3바이트 4E XX 0D 로 송신합니다.'
+                  : '차세대 NoiPod 모드 — 0xA5 12바이트 프레임으로 송신합니다.'}
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={legacyMode}
+              onClick={() => setLegacyBleMode(!legacyMode)}
+              className="relative w-12 h-7 rounded-full transition-colors flex-shrink-0"
+              style={{ backgroundColor: legacyMode ? '#AAED10' : '#333333' }}
+              title="ON: 현행 펌웨어 / OFF: 차세대 NoiPod"
+            >
+              <span
+                className="absolute top-0.5 w-6 h-6 rounded-full bg-white transition-transform"
+                style={{ transform: legacyMode ? 'translateX(22px)' : 'translateX(2px)' }}
+              />
+            </button>
           </div>
           <button
             type="button"

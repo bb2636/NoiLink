@@ -596,3 +596,122 @@ describe('encodeLegacyControlStartFrame / encodeLegacyControlStopFrame', () => {
     expect(Array.from(encodeLegacyControlStopFrame())).toEqual([0xff]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 레거시 모드 디코더 (5바이트 IR 패킷 + NFC NDEF Text Record)
+// ---------------------------------------------------------------------------
+
+import {
+  tryParseLegacyIrBytes,
+  tryParseLegacyIrBase64,
+  tryParseLegacyNdefTextBytes,
+  tryParseLegacyNdefTextBase64,
+  tryParseAnyNotifyBytes,
+  tryParseAnyNotifyBase64,
+} from './ble-protocol.js';
+
+describe('tryParseLegacyIrBytes — 5바이트 IR/터치 패킷', () => {
+  it('샘플 06 9C 00 0D 0A → distanceMm=1692, touchCount=0', () => {
+    const ev = tryParseLegacyIrBytes(new Uint8Array([0x06, 0x9c, 0x00, 0x0d, 0x0a]));
+    expect(ev).toEqual({ type: 'IR', distanceMm: 0x069c, touchCount: 0 });
+    expect(ev?.distanceMm).toBe(1692);
+  });
+  it('샘플 06 B7 00 0D 0A → distanceMm=1719', () => {
+    const ev = tryParseLegacyIrBytes(new Uint8Array([0x06, 0xb7, 0x00, 0x0d, 0x0a]));
+    expect(ev?.distanceMm).toBe(0x06b7);
+    expect(ev?.distanceMm).toBe(1719);
+  });
+  it('터치 카운트 증가도 그대로 노출 (예: 03)', () => {
+    const ev = tryParseLegacyIrBytes(new Uint8Array([0x06, 0x9c, 0x03, 0x0d, 0x0a]));
+    expect(ev?.touchCount).toBe(3);
+  });
+  it('종료자 0x0D 0x0A 가 아니면 null', () => {
+    expect(tryParseLegacyIrBytes(new Uint8Array([0x06, 0x9c, 0x00, 0xff, 0x0a]))).toBeNull();
+    expect(tryParseLegacyIrBytes(new Uint8Array([0x06, 0x9c, 0x00, 0x0d, 0xff]))).toBeNull();
+  });
+  it('길이가 5 미만이면 null', () => {
+    expect(tryParseLegacyIrBytes(new Uint8Array([0x06, 0x9c, 0x00, 0x0d]))).toBeNull();
+  });
+  it('base64 entry point도 동일하게 동작', () => {
+    // [0x06, 0x9c, 0x00, 0x0d, 0x0a] = base64
+    const b64 = bytesToBase64(new Uint8Array([0x06, 0x9c, 0x00, 0x0d, 0x0a]));
+    expect(tryParseLegacyIrBase64(b64)?.distanceMm).toBe(1692);
+  });
+});
+
+describe('tryParseLegacyNdefTextBytes — NFC NDEF Text Record', () => {
+  it('샘플 D1 01 07 54 02 65 6E 6C 65 66 74 → text="left", language="en"', () => {
+    const ev = tryParseLegacyNdefTextBytes(
+      new Uint8Array([0xd1, 0x01, 0x07, 0x54, 0x02, 0x65, 0x6e, 0x6c, 0x65, 0x66, 0x74]),
+    );
+    expect(ev).toEqual({ type: 'NFC_TEXT', text: 'left', language: 'en' });
+  });
+  it('말미 0x0A 종료자도 잘려서 노출됨', () => {
+    const ev = tryParseLegacyNdefTextBytes(
+      new Uint8Array([0xd1, 0x01, 0x08, 0x54, 0x02, 0x65, 0x6e, 0x6c, 0x65, 0x66, 0x74, 0x0a]),
+    );
+    // payloadLen 8 = 1(status)+2(en)+5(text "left\n"); endsWith \n 면 잘림
+    expect(ev?.text).toBe('left');
+    expect(ev?.language).toBe('en');
+  });
+  it('단일 문자 "1" 도 디코드 ("1:left, 2:right" 매핑용)', () => {
+    const ev = tryParseLegacyNdefTextBytes(
+      new Uint8Array([0xd1, 0x01, 0x04, 0x54, 0x02, 0x65, 0x6e, 0x31]),
+    );
+    expect(ev?.text).toBe('1');
+  });
+  it('헤더 0xD1 가 아니면 null', () => {
+    expect(
+      tryParseLegacyNdefTextBytes(new Uint8Array([0xd0, 0x01, 0x07, 0x54, 0x02, 0x65, 0x6e, 0x6c, 0x65, 0x66, 0x74])),
+    ).toBeNull();
+  });
+  it('Text RTD 가 아니면 null (예: U=URI)', () => {
+    expect(
+      tryParseLegacyNdefTextBytes(new Uint8Array([0xd1, 0x01, 0x07, 0x55, 0x02, 0x65, 0x6e, 0x6c, 0x65, 0x66, 0x74])),
+    ).toBeNull();
+  });
+  it('UTF-16 인코딩(status bit7=1) 은 null', () => {
+    expect(
+      tryParseLegacyNdefTextBytes(new Uint8Array([0xd1, 0x01, 0x07, 0x54, 0x82, 0x65, 0x6e, 0x6c, 0x65, 0x66, 0x74])),
+    ).toBeNull();
+  });
+  it('payload 길이 모자라면 null', () => {
+    expect(
+      tryParseLegacyNdefTextBytes(new Uint8Array([0xd1, 0x01, 0x07, 0x54, 0x02, 0x65, 0x6e])),
+    ).toBeNull();
+  });
+  it('base64 entry point도 동일하게 동작', () => {
+    const b64 = bytesToBase64(
+      new Uint8Array([0xd1, 0x01, 0x07, 0x54, 0x02, 0x65, 0x6e, 0x6c, 0x65, 0x66, 0x74]),
+    );
+    expect(tryParseLegacyNdefTextBase64(b64)?.text).toBe('left');
+  });
+});
+
+describe('tryParseAnyNotifyBytes — 분류기 (TOUCH → IR → NDEF)', () => {
+  it('IR 5바이트 패킷 → IR 이벤트', () => {
+    const ev = tryParseAnyNotifyBytes(new Uint8Array([0x06, 0x9c, 0x00, 0x0d, 0x0a]));
+    expect(ev?.type).toBe('IR');
+  });
+  it('NFC NDEF → NFC_TEXT 이벤트', () => {
+    const ev = tryParseAnyNotifyBytes(
+      new Uint8Array([0xd1, 0x01, 0x07, 0x54, 0x02, 0x65, 0x6e, 0x6c, 0x65, 0x66, 0x74]),
+    );
+    expect(ev?.type).toBe('NFC_TEXT');
+  });
+  it('차세대 TOUCH 11바이트 (a5 81 …) → TOUCH 이벤트', () => {
+    const touch = new Uint8Array(11);
+    touch[0] = 0xa5;
+    touch[1] = 0x81;
+    // tickId=0, pod=0, channel=0, deltaMs=0, flags=0
+    const ev = tryParseAnyNotifyBytes(touch);
+    expect(ev?.type).toBe('TOUCH');
+  });
+  it('어떤 패턴에도 안 맞으면 null', () => {
+    expect(tryParseAnyNotifyBytes(new Uint8Array([0x00, 0x01, 0x02]))).toBeNull();
+  });
+  it('base64 분류기도 동일하게 동작', () => {
+    const b64 = bytesToBase64(new Uint8Array([0x06, 0x9c, 0x00, 0x0d, 0x0a]));
+    expect(tryParseAnyNotifyBase64(b64)?.type).toBe('IR');
+  });
+});
