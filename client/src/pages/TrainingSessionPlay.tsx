@@ -18,6 +18,7 @@ import { createPendingLocalId, enqueuePendingRun } from '../utils/pendingTrainin
 import { reportBleAbortFireAndForget } from '../utils/reportBleAbort';
 import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
 import { bleReconnectNow, bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
+import { getBleFirmwareReady } from '../native/bleFirmwareReady';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { subscribeAckErrorBanner, type AckBannerSubscription } from '../native/nativeAckErrors';
 import { isBleUnstableForAbort, type TrainingAbortReason } from './trainingAbortReason';
@@ -353,6 +354,10 @@ export default function TrainingSessionPlay() {
       const detail = (e as CustomEvent<NativeToWebMessage>).detail;
       if (!detail) return;
       if (detail.type === 'ble.connection') {
+        // 펌웨어 미탑재 기기(예: NINA-B1 디폴트)는 idle 단절이 빈번하고
+        // 트레이닝 흐름과 무관하게 화면 PodGrid + 화면 탭만으로 완주되어야 한다.
+        // 따라서 단절 알림 자체를 무시하고 트레이닝을 그대로 진행시킨다.
+        if (getBleFirmwareReady() === false) return;
         if (detail.payload.connected !== null) {
           // 재연결 성공 — 그레이스 중이면 배너/타이머/진행정보를 정리하고 트레이닝을 계속 진행한다.
           clearReconnectTimer();

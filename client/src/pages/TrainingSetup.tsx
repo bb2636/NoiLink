@@ -23,7 +23,7 @@ import { TRAINING_BY_ID } from '../utils/trainingConfig';
 import { ensureDemoDevicesSeeded } from '../utils/seedDemoDevices';
 import MemberSelectModal from '../components/MemberSelectModal/MemberSelectModal';
 import type { User, Level, TrainingMode } from '@noilink/shared';
-import { SESSION_MAX_MS } from '@noilink/shared';
+import { SESSION_MAX_MS, BPM_MIN, BPM_MAX } from '@noilink/shared';
 import type { TrainingRunState } from './TrainingSessionPlay';
 
 const MAX_PODS_PER_USER = 4;
@@ -115,9 +115,14 @@ export default function TrainingSetup() {
   }, [isComposite]);
 
   // ─── 시작 가능 조건 ──────────────────────────────────────────
+  // BPM 은 펌웨어 스키마(60~200) 안에 들어와야 native 가 ack 거부 없이
+  // 세션을 받을 수 있다. 사용자가 60 미만으로 설정한 채 시작하지 못하도록
+  // 명시적으로 막는다 (이 가드가 빠지면 트레이닝 시작 직후 "내부 오류 :
+  // ble.writeSession 의 bpm 허용범위" 토스트가 뜬다).
+  const isBpmInRange = bpm >= BPM_MIN && bpm <= BPM_MAX;
   const isStartEnabled =
     selectedPodIds.size > 0 &&
-    bpm > 0 &&
+    isBpmInRange &&
     selectedMembers.length > 0;
 
   const handleStart = () => {
@@ -269,12 +274,25 @@ export default function TrainingSetup() {
           </section>
         )}
 
-        {/* BPM 설정 — 원형 다이얼 */}
+        {/* BPM 설정 — 원형 다이얼.
+              헤더에 이 트레이닝의 허용 BPM 범위(펌웨어 스키마, 60~200)와
+              권장 범위(60~140)를 함께 표시한다. 사용자가 범위 밖으로 설정한
+              채 시작하면 시작 버튼이 비활성화되고 안내문이 노출된다. */}
         <section className="mb-6">
-          <h2 className="text-sm font-semibold text-white mb-3">BPM 설정</h2>
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-sm font-semibold text-white">BPM 설정</h2>
+            <span className="text-[11px]" style={{ color: '#888' }}>
+              허용 {BPM_MIN}~{BPM_MAX} BPM · 권장 60~140
+            </span>
+          </div>
           <div className="rounded-2xl p-6 flex items-center justify-center" style={{ backgroundColor: '#1A1A1A' }}>
             <BpmDial value={bpm} onChange={setBpm} />
           </div>
+          {bpm > 0 && !isBpmInRange && (
+            <p className="mt-2 text-[11px]" style={{ color: '#FCA5A5' }}>
+              {BPM_MIN}~{BPM_MAX} BPM 사이로 설정해 주세요. (현재 {bpm} BPM)
+            </p>
+          )}
         </section>
 
         {/* 색상 — 진행 회원과 동일하게 기업 소속(관리자 + 승인된 개인) 전체에 노출.

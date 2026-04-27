@@ -1,5 +1,6 @@
 import { validateNativeToWebMessage, type NativeToWebMessage } from '@noilink/shared';
 import { STORAGE_KEYS } from '../utils/constants';
+import { setBleConnectedDeviceName } from './bleFirmwareReady';
 
 declare global {
   interface Window {
@@ -34,9 +35,18 @@ function dispatchNativeMessage(msg: NativeToWebMessage): void {
     case 'native.ack':
       window.dispatchEvent(new CustomEvent('noilink-native-ack', { detail: msg.payload }));
       break;
+    case 'ble.connection':
+      // 연결 시점에 디바이스 이름으로 펌웨어 탑재 여부를 판단해 둔다.
+      // (광고명 'NoiPod-XXXX' 면 정식 펌웨어, 그 외(예: 'NINA-B1-XXXXXX')는
+      //  시연 모드 — bleBridge 가 BLE write 를 자동 no-op 하고
+      //  TrainingSessionPlay 가 BLE 단절 abort 를 무시하도록 한다.)
+      if (msg.payload.connected != null) {
+        setBleConnectedDeviceName(msg.payload.connected.name);
+      }
+      window.dispatchEvent(new CustomEvent('noilink-native-bridge', { detail: msg }));
+      break;
     case 'ble.discovery':
     case 'ble.scanState':
-    case 'ble.connection':
     case 'ble.reconnect':
     case 'ble.notify':
     case 'ble.touch':
