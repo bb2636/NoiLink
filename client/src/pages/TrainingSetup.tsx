@@ -109,11 +109,11 @@ export default function TrainingSetup() {
 
   // ─── 세션 설정 (간소화) ──────────────────────────────────────
   const [level] = useState<Level>(3);
+  // 트레이닝 시간: 풀세션(종합/COMPOSITE/TAU)만 300초, 나머지는 모두 45초
   const totalDurationSec = useMemo(() => {
     if (isComposite) return SESSION_MAX_MS / 1000;
-    if (isFree) return 120;
-    return 60;
-  }, [isComposite, isFree]);
+    return 45;
+  }, [isComposite]);
 
   // ─── 시작 가능 조건 ──────────────────────────────────────────
   const isStartEnabled =
