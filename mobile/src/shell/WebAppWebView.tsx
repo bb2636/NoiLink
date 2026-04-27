@@ -115,6 +115,9 @@ export default function WebAppWebView() {
       setSupportMultipleWindows={false}
       allowsInlineMediaPlayback
       mediaPlaybackRequiresUserAction={false}
+      // iOS 좌측 가장자리 스와이프 → 뒤로가기 / 우측 → 앞으로 (안드로이드 하드웨어
+      // 백 키 처리와 짝을 이뤄, 모든 화면에서 직전 페이지로 자연스럽게 복귀).
+      allowsBackForwardNavigationGestures
     />
   );
 }
