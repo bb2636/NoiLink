@@ -1,9 +1,19 @@
 /**
  * 진행 회원 선택 모달
- * 기업 회원: 조직 멤버 리스트 / 개인 회원: 본인만 표시
- * 위로 슬라이드 시 펼침, 내리면 접힘
+ *
+ * - 기업 회원(소속 있음): 조직 멤버를 다중 선택 (체크박스 + 확인 버튼)
+ * - 개인 회원(소속 없음): 본인만 선택 가능 (탭 → 즉시 확정)
+ *
+ * 다중 선택 동작
+ *  - `initialSelectedIds` 로 부모가 가진 현재 선택을 받아 그대로 체크된 상태로 연다.
+ *  - 사용자가 체크/해제하다가 "확인" 을 누르면 그 시점 선택을 부모에게 한 번에 전달.
+ *  - 모달 안에서만 임시로 다루고, 모달을 닫는 즉시(취소/배경탭) 변경은 버려진다.
+ *
+ * 디자인 의도
+ *  - 진행 회원 칩에서 X 로 개별 제거 가능 → 모달은 "추가/삭제 일괄 편집" 용도.
+ *  - 빈 선택(0명) 도 허용해 부모가 자유롭게 처리 (시작 버튼 disable 등).
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../utils/api';
 import type { User } from '@noilink/shared';
@@ -11,22 +21,45 @@ import type { User } from '@noilink/shared';
 interface MemberSelectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (user: User) => void;
+  /**
+   * 사용자가 "확인" 을 눌렀을 때 호출. 빈 배열도 가능.
+   * 호출 후 부모가 모달을 닫는 책임을 지므로 본 컴포넌트는 onClose 도 함께 호출한다.
+   */
+  onConfirm: (users: User[]) => void;
   currentUser: User | null;
+  /** 부모의 현재 선택. 모달이 열릴 때 체크 상태로 복원된다. */
+  initialSelectedIds?: string[];
 }
 
 const BOTTOM_NAV_HEIGHT = 'calc(64px + env(safe-area-inset-bottom))';
 
-export default function MemberSelectModal({ isOpen, onClose, onSelect, currentUser }: MemberSelectModalProps) {
+export default function MemberSelectModal({
+  isOpen,
+  onClose,
+  onConfirm,
+  currentUser,
+  initialSelectedIds,
+}: MemberSelectModalProps) {
   const [members, setMembers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState(false);
+  // 모달 안에서만 다루는 임시 선택 집합 (확인 누르기 전엔 부모 상태에 영향 없음).
+  const [draftSelected, setDraftSelected] = useState<Set<string>>(new Set());
+  // initialSelectedIds 는 부모 렌더마다 새 배열 참조가 들어오므로,
+  // useEffect 의존성에 직접 넣으면 모달이 열려있는 동안 부모 리렌더가 일어날 때마다
+  // 사용자가 만든 draft 가 통째로 덮어써지는 버그가 생긴다.
+  // → ref 로 항상 최신값만 보관하고, 모달이 "닫힘 → 열림" 으로 전환될 때만
+  //   ref 의 현재 값을 draft 의 시드로 쓴다.
+  const initialIdsRef = useRef<string[] | undefined>(initialSelectedIds);
+  initialIdsRef.current = initialSelectedIds;
 
   useEffect(() => {
     if (isOpen && currentUser) {
       loadMembers();
       setExpanded(false);
+      setSearch('');
+      setDraftSelected(new Set(initialIdsRef.current ?? []));
     }
   }, [isOpen, currentUser]);
 
@@ -45,15 +78,36 @@ export default function MemberSelectModal({ isOpen, onClose, onSelect, currentUs
     }
   };
 
-  const filteredMembers = members.filter((m) =>
-    m.name.toLowerCase().includes(search.toLowerCase()) ||
-    (m.username || '').toLowerCase().includes(search.toLowerCase())
+  const filteredMembers = useMemo(
+    () =>
+      members.filter(
+        (m) =>
+          m.name.toLowerCase().includes(search.toLowerCase()) ||
+          (m.username || '').toLowerCase().includes(search.toLowerCase()),
+      ),
+    [members, search],
   );
 
-  // 기업 미소속 개인 회원: 본인만 선택 가능
   const isPersonal = !currentUser?.organizationId;
-  // 기업 소속(관리자 또는 가입 승인된 개인 회원): 동일 조직 회원 선택 가능
   const canSelectOthers = !!currentUser?.organizationId;
+
+  const toggleMember = (id: string) => {
+    setDraftSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleConfirm = () => {
+    // 멤버 리스트 순서를 유지하면서 선택된 것만 골라 부모에게 전달
+    const ordered = members.filter((m) => draftSelected.has(m.id));
+    onConfirm(ordered);
+    onClose();
+  };
+
+  const selectedCount = draftSelected.size;
 
   if (!isOpen) return null;
 
@@ -76,7 +130,7 @@ export default function MemberSelectModal({ isOpen, onClose, onSelect, currentUs
         animate={{
           opacity: 1,
           y: 0,
-          height: expanded ? 'calc(100vh - 80px)' : '45vh',
+          height: expanded ? 'calc(100vh - 80px)' : '55vh',
         }}
         exit={{ opacity: 0, y: 100 }}
         transition={{ type: 'tween', duration: 0.25 }}
@@ -84,12 +138,12 @@ export default function MemberSelectModal({ isOpen, onClose, onSelect, currentUs
         style={{
           backgroundColor: '#1A1A1A',
           bottom: BOTTOM_NAV_HEIGHT,
-          minHeight: '200px',
+          minHeight: '240px',
           maxHeight: 'calc(100vh - 80px)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 드래그 핸들 - 위로 슬라이드 시 펼침, 내리면 접힘 */}
+        {/* 드래그 핸들 */}
         <motion.div
           drag="y"
           dragConstraints={{ top: 0, bottom: 0 }}
@@ -110,10 +164,18 @@ export default function MemberSelectModal({ isOpen, onClose, onSelect, currentUs
             style={{ backgroundColor: '#666666' }}
           />
         </motion.div>
-        <div className="p-4 pt-0 border-b flex-shrink-0" style={{ borderColor: '#333333' }}>
-          <h2 className="text-lg font-bold" style={{ color: '#FFFFFF' }}>
-            진행 회원 선택
-          </h2>
+
+        <div className="px-4 pb-3 border-b flex-shrink-0" style={{ borderColor: '#333333' }}>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold" style={{ color: '#FFFFFF' }}>
+              진행 회원 선택
+            </h2>
+            {canSelectOthers && (
+              <span className="text-xs" style={{ color: '#AAED10' }}>
+                {selectedCount}명 선택
+              </span>
+            )}
+          </div>
           {canSelectOthers && (
             <div className="mt-3 relative">
               <input
@@ -131,11 +193,17 @@ export default function MemberSelectModal({ isOpen, onClose, onSelect, currentUs
                 stroke="currentColor"
                 viewBox="0 0 24 24"
               >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
               </svg>
             </div>
           )}
         </div>
+
         <div
           className="overflow-y-auto flex-1 p-4 scrollbar-hide"
           style={{ minHeight: 0 }}
@@ -148,7 +216,8 @@ export default function MemberSelectModal({ isOpen, onClose, onSelect, currentUs
             <button
               onClick={() => {
                 if (currentUser) {
-                  onSelect(currentUser);
+                  // 개인 회원은 본인만 가능 → 즉시 확정.
+                  onConfirm([currentUser]);
                   onClose();
                 }
               }}
@@ -163,27 +232,88 @@ export default function MemberSelectModal({ isOpen, onClose, onSelect, currentUs
             </p>
           ) : (
             <div className="space-y-2">
-              {filteredMembers.map((member) => (
-                <button
-                  key={member.id}
-                  onClick={() => {
-                    onSelect(member);
-                    onClose();
-                  }}
-                  className="w-full text-left px-4 py-3 rounded-lg flex items-center gap-3"
-                  style={{ backgroundColor: '#2A2A2A', color: '#FFFFFF' }}
-                >
-                  <span>{member.name}</span>
-                  {member.username && (
-                    <span className="text-sm" style={{ color: '#999999' }}>
-                      @{member.username}
+              {filteredMembers.map((member) => {
+                const checked = draftSelected.has(member.id);
+                return (
+                  <button
+                    key={member.id}
+                    type="button"
+                    onClick={() => toggleMember(member.id)}
+                    className="w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 transition-colors"
+                    style={{
+                      backgroundColor: checked ? '#2a3a14' : '#2A2A2A',
+                      color: '#FFFFFF',
+                      border: checked ? '1px solid #AAED10' : '1px solid transparent',
+                    }}
+                  >
+                    {/* 체크박스 */}
+                    <span
+                      className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
+                      style={{
+                        backgroundColor: checked ? '#AAED10' : 'transparent',
+                        border: checked ? 'none' : '1.5px solid #555',
+                      }}
+                    >
+                      {checked && (
+                        <svg
+                          className="w-3.5 h-3.5"
+                          viewBox="0 0 20 20"
+                          fill="none"
+                          stroke="#000"
+                          strokeWidth={3}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 10l3 3 7-7" />
+                        </svg>
+                      )}
                     </span>
-                  )}
-                </button>
-              ))}
+                    <span className="flex-1 truncate">{member.name}</span>
+                    {member.id === currentUser?.id && (
+                      <span className="text-xs flex-shrink-0" style={{ color: '#AAED10' }}>
+                        본인
+                      </span>
+                    )}
+                    {member.username && member.id !== currentUser?.id && (
+                      <span
+                        className="text-sm flex-shrink-0 truncate"
+                        style={{ color: '#999999' }}
+                      >
+                        @{member.username}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
+
+        {/* 다중 선택 모드일 때만 하단 확인 버튼 노출. 개인 회원은 위 버튼 탭으로 즉시 확정. */}
+        {canSelectOthers && (
+          <div
+            className="p-4 border-t flex-shrink-0 flex gap-2"
+            style={{ borderColor: '#333333' }}
+          >
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-3 rounded-xl font-semibold"
+              style={{ backgroundColor: '#2A2A2A', color: '#FFFFFF' }}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirm}
+              className="flex-1 py-3 rounded-xl font-semibold"
+              style={{
+                backgroundColor: '#AAED10',
+                color: '#000',
+              }}
+            >
+              확인 ({selectedCount})
+            </button>
+          </div>
+        )}
       </motion.div>
     </AnimatePresence>
   );

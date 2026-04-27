@@ -57,9 +57,17 @@ export default function TrainingSetup() {
   const isComposite = mode === 'COMPOSITE' || mode === 'TAU';
 
   // ─── 진행 회원 ───────────────────────────────────────────────
-  const [selectedMember, setSelectedMember] = useState<User | null>(user ?? null);
+  // 다중 선택 지원 (기업 회원). 본인 + 추가로 같은 조직 멤버를 함께 진행 가능.
+  // 개인 회원은 항상 [user] 한 명. 시작 시 첫 번째 멤버가 결과 저장의 1차 사용자.
+  const [selectedMembers, setSelectedMembers] = useState<User[]>(user ? [user] : []);
   const [showMemberModal, setShowMemberModal] = useState(false);
-  useEffect(() => { if (user) setSelectedMember(user); }, [user]);
+  useEffect(() => {
+    // 로그인 사용자가 바뀌면(혹은 처음 로드되면) 본인을 기본 선택으로 초기화
+    if (user) setSelectedMembers((prev) => (prev.length === 0 ? [user] : prev));
+  }, [user]);
+
+  const removeMember = (id: string) =>
+    setSelectedMembers((prev) => prev.filter((m) => m.id !== id));
 
   // ─── Pod 연결 ────────────────────────────────────────────────
   const [registered, setRegistered] = useState<RegisteredDevice[]>([]);
@@ -111,14 +119,18 @@ export default function TrainingSetup() {
   const isStartEnabled =
     selectedPodIds.size > 0 &&
     bpm > 0 &&
-    !!selectedMember;
+    selectedMembers.length > 0;
 
   const handleStart = () => {
-    if (!isStartEnabled || !selectedMember || !info || !mode) return;
+    if (!isStartEnabled || selectedMembers.length === 0 || !info || !mode) return;
+    // 첫 번째 선택 멤버가 결과 저장의 1차 사용자. 나머지는 participantIds 로 보존되어
+    // 향후 다중 사용자 동시 진행 분기에서 사용된다.
+    const primary = selectedMembers[0];
     const run: TrainingRunState = {
       catalogId: mode,
       apiMode: info.apiMode as TrainingMode,
-      userId: selectedMember.id,
+      userId: primary.id,
+      participantIds: selectedMembers.map((m) => m.id),
       title: info.title,
       totalDurationSec,
       bpm,
@@ -209,24 +221,53 @@ export default function TrainingSetup() {
         </section>
 
         {/* 진행 회원 — 기업 소속 회원 전용 (관리자/승인된 개인 회원) */}
+        {/* 다중 선택: 칩 형태로 N명 표시, 각 칩 X 로 개별 제거, "+" 로 모달 열어 일괄 편집 */}
         {hasOrganization && (
           <section className="mb-6">
             <h2 className="text-sm font-semibold text-white mb-3">진행 회원</h2>
             <div className="flex items-center gap-2 flex-wrap">
-              <span
-                className="px-4 py-1.5 rounded-full text-sm font-medium"
-                style={{ backgroundColor: '#AAED10', color: '#000' }}
-              >
-                {selectedMember?.nickname || selectedMember?.name || '나'}
-              </span>
+              {selectedMembers.map((m) => (
+                <span
+                  key={m.id}
+                  className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-full text-sm font-medium"
+                  style={{ backgroundColor: '#AAED10', color: '#000' }}
+                >
+                  <span className="truncate max-w-[120px]">
+                    {m.nickname || m.name || '회원'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeMember(m.id)}
+                    aria-label={`${m.name} 진행 회원에서 제거`}
+                    className="w-4 h-4 rounded-full flex items-center justify-center"
+                    style={{ backgroundColor: 'rgba(0,0,0,0.25)' }}
+                  >
+                    <svg
+                      className="w-2.5 h-2.5"
+                      viewBox="0 0 12 12"
+                      fill="none"
+                      stroke="#000"
+                      strokeWidth={2}
+                    >
+                      <path strokeLinecap="round" d="M3 3l6 6M9 3l-6 6" />
+                    </svg>
+                  </button>
+                </span>
+              ))}
               <button
                 onClick={() => setShowMemberModal(true)}
+                aria-label="진행 회원 추가/편집"
                 className="w-8 h-8 rounded-full flex items-center justify-center text-lg"
                 style={{ backgroundColor: '#2A2A2A', color: '#AAED10' }}
               >
                 +
               </button>
             </div>
+            {selectedMembers.length === 0 && (
+              <p className="mt-2 text-[11px]" style={{ color: '#888' }}>
+                진행 회원을 1명 이상 선택해 주세요.
+              </p>
+            )}
           </section>
         )}
 
@@ -276,7 +317,8 @@ export default function TrainingSetup() {
       <MemberSelectModal
         isOpen={showMemberModal}
         onClose={() => setShowMemberModal(false)}
-        onSelect={setSelectedMember}
+        onConfirm={setSelectedMembers}
+        initialSelectedIds={selectedMembers.map((m) => m.id)}
         currentUser={user}
       />
     </MobileLayout>

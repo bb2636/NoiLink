@@ -58,7 +58,19 @@ type ReconnectInfo = {
 export type TrainingRunState = {
   catalogId: string;
   apiMode: TrainingMode;
+  /**
+   * 결과 저장이 묶이는 1차(주) 사용자.
+   * 다중 진행 회원 선택(`participantIds`) 의 첫 번째와 동일하게 유지된다.
+   * 세션 엔진은 현재 단일 사용자 기준으로 동작하므로 점수/메트릭은 이 사용자에게 귀속된다.
+   * (TODO: 다중 사용자 동시 세션 분기 시 각 participantId 별 결과 저장으로 확장)
+   */
   userId: string;
+  /**
+   * 기업 회원 진행 회원 다중 선택 결과 (TrainingSetup → 여기로 그대로 전달).
+   * 길이 1 이상이고, `userId === participantIds[0]` 가 보장된다.
+   * 단일 진행 회원 케이스에서는 `[userId]` 한 개만 들어온다.
+   */
+  participantIds?: string[];
   title: string;
   totalDurationSec: number;
   bpm: number;
