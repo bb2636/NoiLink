@@ -153,7 +153,7 @@ export default function Training() {
         textColor={activeBanner?.textColor}
       />
       {/* 상단 스티키 헤더 — 휴대폰 노치/상단바 안전영역(safe-area-inset-top) 보정.
-          하단바와 동일한 덤벨 SVG 아이콘 + "트레이닝" 라벨을 칩 형태로 표시한다. */}
+          하단바와 동일한 덤벨 SVG 아이콘 + "트레이닝" 라벨 (버튼/칩 배경 없이 인라인). */}
       <header
         className="sticky top-0 left-0 right-0 z-40"
         style={{
@@ -162,31 +162,26 @@ export default function Training() {
           paddingTop: 'env(safe-area-inset-top)',
         }}
       >
-        <div className="max-w-md mx-auto px-4 h-14 flex items-center">
-          <span
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full"
-            style={{ backgroundColor: '#1A1A1A', border: '1px solid #2A2A2A' }}
+        <div className="max-w-md mx-auto px-4 h-12 flex items-center gap-2">
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="#AAED10"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            viewBox="0 0 24 24"
+            aria-hidden
           >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="#AAED10"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              viewBox="0 0 24 24"
-              aria-hidden
-            >
-              <path d="M6.5 6.5l11 11" />
-              <path d="M21 21l-1-1" />
-              <path d="M3 3l1 1" />
-              <path d="M18 22l4-4" />
-              <path d="M2 6l4-4" />
-              <path d="M3 10l7-7" />
-              <path d="M14 21l7-7" />
-            </svg>
-            <span className="text-white text-sm font-medium">트레이닝</span>
-          </span>
+            <path d="M6.5 6.5l11 11" />
+            <path d="M21 21l-1-1" />
+            <path d="M3 3l1 1" />
+            <path d="M18 22l4-4" />
+            <path d="M2 6l4-4" />
+            <path d="M3 10l7-7" />
+            <path d="M14 21l7-7" />
+          </svg>
+          <span className="text-[15px] font-semibold text-white">트레이닝</span>
         </div>
       </header>
 
