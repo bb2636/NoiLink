@@ -269,9 +269,10 @@ export default function Ranking() {
 
   return (
     <>
-      {/* 통일 헤더 — paddingTop으로 노치/상단바 안전영역 자체 보정 */}
+      {/* 상단 고정 헤더 — viewport에 직접 fixed.
+          휴대폰 상태바(safe-area-inset-top) 보정 + 본문과 구분되는 보더. */}
       <header
-        className="sticky top-0 z-40"
+        className="fixed top-0 left-0 right-0 z-50"
         style={{
           backgroundColor: '#0A0A0A',
           borderBottom: '1px solid #1A1A1A',
@@ -292,7 +293,7 @@ export default function Ranking() {
         </div>
       </header>
 
-      <div className="max-w-md mx-auto px-4 pt-4 pb-6" style={{ paddingBottom: '120px' }}>
+      <div className="max-w-md mx-auto px-4 pb-6" style={{ paddingTop: 'calc(48px + env(safe-area-inset-top) + 12px)', paddingBottom: '120px' }}>
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
           {/* 나의 랭킹 섹션 타이틀 */}
           <h2 className="text-base font-bold text-white mb-2.5">{myCardTitle}</h2>

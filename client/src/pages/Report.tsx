@@ -16,7 +16,6 @@ import {
 } from "../utils/mockMembers";
 import ComprehensiveEvaluation from "../components/ComprehensiveEvaluation";
 import RoleModelCard from "../components/RoleModelCard";
-import { MobileLayout } from "../components/Layout";
 import type { Report, MetricsScore, Session } from "@noilink/shared";
 
 // TODO: 실제 API 데이터로 교체 — 홈/랭킹과 동일한 단일 데모 프로필 사용
@@ -488,11 +487,11 @@ export default function Report() {
   };
 
   return (
-    <MobileLayout hideBottomNav>
     <div style={{ color: "#fff" }}>
-      {/* 상단 고정 헤더 — 휴대폰 상태바(safe-area) 분리 + 본문과 구분되는 보더 */}
+      {/* 상단 고정 헤더 — viewport에 직접 fixed.
+          휴대폰 상태바(safe-area-inset-top) 보정 + 본문과 구분되는 보더. */}
       <header
-        className="sticky top-0 z-30"
+        className="fixed top-0 left-0 right-0 z-50"
         style={{
           backgroundColor: "#0A0A0A",
           paddingTop: "env(safe-area-inset-top)",
@@ -552,7 +551,7 @@ export default function Report() {
       <div
         className="px-4 pb-6 space-y-5"
         style={{
-          paddingTop: "1rem",
+          paddingTop: "calc(48px + env(safe-area-inset-top) + 12px)",
           paddingBottom: "120px",
         }}
       >
@@ -787,6 +786,5 @@ export default function Report() {
       </section>
       </div>
     </div>
-    </MobileLayout>
   );
 }

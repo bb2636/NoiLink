@@ -152,10 +152,10 @@ export default function Training() {
         backgroundColor={activeBanner?.background}
         textColor={activeBanner?.textColor}
       />
-      {/* 상단 스티키 헤더 — 휴대폰 노치/상단바 안전영역(safe-area-inset-top) 보정.
-          하단바와 동일한 덤벨 SVG 아이콘 + "트레이닝" 라벨 (버튼/칩 배경 없이 인라인). */}
+      {/* 상단 고정 헤더 — viewport에 직접 fixed.
+          휴대폰 상태바(safe-area-inset-top) 보정 + 본문과 구분되는 보더. */}
       <header
-        className="sticky top-0 left-0 right-0 z-40"
+        className="fixed top-0 left-0 right-0 z-50"
         style={{
           backgroundColor: '#0A0A0A',
           borderBottom: '1px solid #1A1A1A',
@@ -185,7 +185,7 @@ export default function Training() {
         </div>
       </header>
 
-      <div className="max-w-md mx-auto px-4 pb-6" style={{ paddingTop: '20px', paddingBottom: '120px' }}>
+      <div className="max-w-md mx-auto px-4 pb-6" style={{ paddingTop: 'calc(48px + env(safe-area-inset-top) + 12px)', paddingBottom: '120px' }}>
         {/* AI 맞춤 트레이닝 (Quick Start) */}
         <section className="mb-8">
           <h2 className="text-base font-semibold text-white mb-1">AI 맞춤 트레이닝(Quick Start)</h2>
