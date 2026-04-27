@@ -456,13 +456,8 @@ export default function Report() {
             body: "세션 데이터가 쌓이면 지표별 근거 카드가 생성됩니다.",
           },
         ];
-  const roleModel = effectiveReport.recommendedRoleModel ?? {
-    name: brainimalInfo.name,
-    oneLiner:
-      brainimalInfo.description.slice(0, 48) +
-      (brainimalInfo.description.length > 48 ? "…" : ""),
-    description: brainimalInfo.description,
-  };
+  // 롤모델은 추후 동물 타입별로 추가 예정 — 현재는 워런 버핏 하드코딩
+  // (effectiveReport.recommendedRoleModel은 일단 사용 안 함)
 
   const orgLabel =
     displayUser.organizationName ||
@@ -656,31 +651,56 @@ export default function Report() {
         </div>
       </section>
 
-      {/* 뇌지컬 종합 평가 — 기업 리포트와 동일 UI */}
+      {/* 뇌지컬 종합 평가 — 약점 분석은 개인 리포트 전용 상세 카드로 표시 */}
       <ComprehensiveEvaluation
         metricsScore={effectiveReport.metricsScore}
         evidenceDetails={evidenceCards.slice(0, 3).map((c) => ({
           title: c.label,
           description: c.body,
         }))}
+        weaknessDetails={[
+          {
+            icon: "🌀",
+            iconBg: "#1E2B4E",
+            title: "변화 감지 민감도",
+            description: "급격한 환경 변화에 적응 속도가 느린 편이에요.",
+          },
+          {
+            icon: "🤝",
+            iconBg: "#3D2E1A",
+            title: "공동성",
+            description:
+              "혼자 집중할 때 최고 성과를 내지만, 그룹 활동에서는 에너지가 분산되는 경향이 있어요.",
+          },
+        ]}
       />
 
-      {/* 추천 롤모델 — 기업 리포트와 동일 UI */}
+      {/* 추천 롤모델 — 추후 동물별 롤모델 추가 예정. 현재는 워런 버핏 하드코딩. */}
       <RoleModelCard
         subtitle={`${displayUser.name ?? "회원"}님의 롤모델`}
-        name={roleModel.name}
-        quote={roleModel.oneLiner}
-        connectionHeadline={roleModel.description}
-        connectionDetail={effectiveReport.lifeText}
+        name="워런 버핏"
+        quote="원칙이 있으면 흔들리지 않는다!"
+        traits={["꾸준함", "장기 사고", "원칙 고수"]}
+        connectionHeadline="흔들리지 않는 원칙, 복리의 마법으로 돌아옵니다."
+        connectionDetail="단기 변동에 일희일비하지 않는 우직함이 버핏을 만들었습니다. 당신의 꾸준함도 곧 거대한 성과가 될 거예요."
       />
 
-      <p
-        className="text-[11px] text-center leading-relaxed px-2"
-        style={{ color: "#666" }}
+      {/* 의료 면책 조항 */}
+      <section
+        className="rounded-2xl p-4 border"
+        style={{ backgroundColor: "#1A1A1A", borderColor: "#2A2A2A" }}
       >
-        본 검사 결과는 의학적 진단을 대체하지 않으며, 참고용으로만 사용하시기
-        바랍니다.
-      </p>
+        <p className="text-[13px] font-bold text-white mb-2">
+          의료 면책 조항 (Disclaimer)
+        </p>
+        <p className="text-[12px] leading-relaxed" style={{ color: "#888" }}>
+          본 리포트는 웰니스 및 건강 관리를 위한 참고 자료이며, 전문적인 의료적
+          진단이나 치료를 대신할 수 없습니다. 측정 결과는 환경에 따라 달라질 수
+          있으며, 의학적 소견이 필요한 경우 반드시 전문의와 상담하시기 바랍니다.
+          (주)노이랩은 본 리포트의 해석 및 활용 결과에 대해 법적인 책임을 지지
+          않습니다.
+        </p>
+      </section>
     </div>
   );
 }

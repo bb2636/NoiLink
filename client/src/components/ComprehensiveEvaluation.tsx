@@ -44,11 +44,21 @@ export interface EvidenceDetail {
   description?: string;
 }
 
+export interface WeaknessDetail {
+  /** 이모지 또는 짧은 문자열 (예: '🌀', '🤝') */
+  icon: string;
+  /** 아이콘 배경색 (예: '#1E2B4E') */
+  iconBg?: string;
+  title: string;
+  description: string;
+}
+
 export interface ComprehensiveEvaluationProps {
   metricsScore: MetricsScore;
   evidenceTitles?: string[]; // 상세 분석 — 외부에서 주입(없으면 기본 문구)
   evidenceDetails?: EvidenceDetail[]; // 상세 분석(설명 포함). 지정 시 evidenceTitles 무시
   feedbackItems?: FeedbackItem[]; // 생활 밀착 피드백
+  weaknessDetails?: WeaknessDetail[]; // 약점 분석(상세 카드형). 지정 시 6대 지표 게이지 대신 사용
   collapsible?: boolean;
   defaultOpen?: boolean;
 }
@@ -76,6 +86,7 @@ export default function ComprehensiveEvaluation({
   evidenceTitles,
   evidenceDetails,
   feedbackItems,
+  weaknessDetails,
   collapsible = true,
   defaultOpen = true,
 }: ComprehensiveEvaluationProps) {
@@ -156,9 +167,13 @@ export default function ComprehensiveEvaluation({
           약점 분석
         </h4>
         <div className="space-y-2">
-          {weaknesses.map((w) => (
-            <WeaknessRow key={w.key} label={w.label} value={w.value} />
-          ))}
+          {weaknessDetails && weaknessDetails.length > 0
+            ? weaknessDetails.map((w, i) => (
+                <WeaknessDetailCard key={i} item={w} />
+              ))
+            : weaknesses.map((w) => (
+                <WeaknessRow key={w.key} label={w.label} value={w.value} />
+              ))}
         </div>
       </div>
 
@@ -279,7 +294,7 @@ export function StrengthGauge({
   color: string;
 }) {
   const SIZE = 88;
-  const STROKE = 7;
+  const STROKE = 11;
   const R = (SIZE - STROKE) / 2;
   const C = 2 * Math.PI * R;
   const offset = C * (1 - value / 100);
@@ -351,6 +366,32 @@ export function WeaknessRow({ label, value }: { label: string; value: number }) 
             background: `linear-gradient(90deg, #6D4FB8 0%, ${PURPLE} 100%)`,
           }}
         />
+      </div>
+    </div>
+  );
+}
+
+export function WeaknessDetailCard({ item }: { item: WeaknessDetail }) {
+  const bg = item.iconBg ?? '#2A1F3D';
+  return (
+    <div
+      className="rounded-2xl px-3.5 py-3.5 flex items-start gap-3"
+      style={{ backgroundColor: '#1A1A1A', border: '1px solid #2A2A2A' }}
+    >
+      <span
+        className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-lg"
+        style={{ backgroundColor: bg }}
+      >
+        {item.icon}
+      </span>
+      <div className="flex-1 min-w-0 pt-0.5">
+        <p className="text-[14px] font-bold text-white">{item.title}</p>
+        <p
+          className="text-[12px] mt-1.5 leading-relaxed"
+          style={{ color: '#B6B6B9' }}
+        >
+          {item.description}
+        </p>
       </div>
     </div>
   );
