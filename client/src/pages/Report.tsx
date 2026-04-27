@@ -508,7 +508,7 @@ export default function Report() {
               strokeLinecap="round"
               strokeLinejoin="round"
               viewBox="0 0 24 24"
-              style={{ color: "#AAED10" }}
+              style={{ color: viewingMember ? "#FFFFFF" : "#AAED10" }}
               aria-hidden
             >
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -546,12 +546,44 @@ export default function Report() {
             </svg>
           </button>
         </div>
+
+        {/* 기업 관리자가 멤버 리포트 보는 중 — 헤더 아래 별도 row 로 뒤로가기 */}
+        {viewingMember && (
+          <div
+            className="px-4 h-10 flex items-center"
+            style={{ borderTop: "1px solid #1A1A1A" }}
+          >
+            <button
+              type="button"
+              onClick={() => navigate("/report/organization?tab=members")}
+              className="inline-flex items-center gap-1.5 -ml-1 px-1 py-1 rounded"
+              aria-label="소속 인원 현황으로 돌아가기"
+              style={{ color: "#D4D4D4" }}
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+              <span className="text-[13px] font-medium">뒤로가기</span>
+            </button>
+          </div>
+        )}
       </header>
 
       <div
         className="px-4 pb-6 space-y-5"
         style={{
-          paddingTop: "calc(48px + env(safe-area-inset-top) + 12px)",
+          paddingTop: viewingMember
+            ? "calc(48px + 40px + env(safe-area-inset-top) + 12px)"
+            : "calc(48px + env(safe-area-inset-top) + 12px)",
           paddingBottom: "120px",
         }}
       >
