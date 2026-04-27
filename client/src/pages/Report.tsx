@@ -441,6 +441,15 @@ export default function Report() {
     displayUser.previousBrainAge,
   );
 
+  // 내 프로필 카드용: 실제 나이 대비 뇌지컬 나이 차이
+  // diff = 뇌지컬 나이 - 실제 나이
+  // diff <= 0 (뇌지컬이 어리거나 같음) → 파란색
+  // diff > 0  (뇌지컬이 더 많음)         → 빨간색
+  const brainAgeVsActualDiff =
+    typeof displayUser.age === "number" && typeof displayBrainAge === "number"
+      ? displayBrainAge - displayUser.age
+      : null;
+
   const evidenceCards =
     effectiveReport.metricEvidenceCards &&
     effectiveReport.metricEvidenceCards.length > 0
@@ -533,15 +542,15 @@ export default function Report() {
               <span className="text-white font-semibold text-sm">
                 {displayBrainAge}세
               </span>
-              {brainAgeChange && (
+              {brainAgeVsActualDiff !== null && (
                 <span
                   className="text-xs font-medium"
                   style={{
-                    color: brainAgeChange.isImproved ? "#AAED10" : "#f87171",
+                    color: brainAgeVsActualDiff <= 0 ? "#60A5FA" : "#f87171",
                   }}
                 >
-                  ({brainAgeChange.isImproved ? "-" : "+"}
-                  {brainAgeChange.value})
+                  ({brainAgeVsActualDiff > 0 ? "+" : ""}
+                  {brainAgeVsActualDiff})
                 </span>
               )}
             </div>
