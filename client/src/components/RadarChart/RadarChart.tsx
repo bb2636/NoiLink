@@ -1,8 +1,9 @@
 /**
  * 6대 지표 레이더 차트
- *  - 각 축에 빨간 화살표(외곽 → 데이터 꼭짓점) 항상 표시
- *  - 우상단 라운드 핀에 선택된 지표/평균 점수 노출 (기본: 기억력)
- *  - 꼭짓점 클릭 시 선택 지표 변경 + onPointClick 통지(선택)
+ *  - 기본 상태: 우상단 핀(지표명/평균) + 빨간 화살표 모두 숨김
+ *  - 꼭짓점 클릭 시: 해당 지표의 핀 + 빨간 화살표 표시 (토글)
+ *  - 같은 꼭짓점 재클릭 시: 둘 다 다시 숨김
+ *  - 다른 꼭짓점 클릭 시: 그 지표로 전환
  */
 import { useRef, useEffect, useState } from 'react';
 
@@ -42,17 +43,16 @@ export default function RadarChart({
   onPointHover,
 }: RadarChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // 기본 선택: 기억력 (우상단 핀용)
-  const [selectedKey, setSelectedKey] = useState<string>('memory');
-  // 빨간 화살표 툴팁 — 클릭한 꼭짓점에만 일시 표시
-  const [arrowKey, setArrowKey] = useState<string | null>(null);
+  // 기본 상태는 미선택 — 꼭짓점 클릭 시에만 핀+화살표가 함께 표시되고,
+  // 같은 꼭짓점을 다시 클릭하면 다시 사라진다 (단일 토글 상태로 통합).
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const center = size / 2;
   const radius = size * 0.4;
-  const selectedMetric = METRICS.find((m) => m.key === selectedKey) ?? METRICS[0];
-  const selectedValue = Math.round(
-    (data[selectedMetric.key as keyof typeof data] as number) || 0,
-  );
-  const arrowMetric = arrowKey ? METRICS.find((m) => m.key === arrowKey) : null;
+  const selectedMetric = selectedKey ? METRICS.find((m) => m.key === selectedKey) ?? null : null;
+  const selectedValue = selectedMetric
+    ? Math.round((data[selectedMetric.key as keyof typeof data] as number) || 0)
+    : 0;
+  const arrowMetric = selectedMetric;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -206,13 +206,12 @@ export default function RadarChart({
     });
     const found = best as { key: string; label: string; value: number; d: number } | null;
     if (found && found.d <= 30) {
-      setSelectedKey(found.key);
-      // 같은 꼭짓점 재클릭 시 토글로 닫기
-      setArrowKey((prev) => (prev === found.key ? null : found.key));
+      // 같은 꼭짓점 재클릭 → 닫기, 다른 꼭짓점 클릭 → 그 지표로 전환
+      setSelectedKey((prev) => (prev === found.key ? null : found.key));
       onPointClick?.(found.label, found.value);
       onPointHover?.(found.label, found.value);
     } else {
-      setArrowKey(null);
+      setSelectedKey(null);
     }
   };
 
@@ -226,23 +225,25 @@ export default function RadarChart({
         style={{ width: size, height: size }}
         onClick={handleClick}
       />
-      {/* 우상단 핀 — 선택 지표 + 평균 점수 (시안 동일: 살짝 안쪽, 라운드 카드) */}
-      <div
-        className="absolute rounded-lg px-3 py-1.5 text-[11px] leading-tight shadow-lg"
-        style={{
-          top: size * 0.18,
-          right: 0,
-          backgroundColor: '#262626',
-          color: '#E5E5E5',
-          border: '1px solid rgba(170,237,16,0.35)',
-          minWidth: 92,
-        }}
-      >
-        <div className="font-semibold text-white mb-0.5">{selectedMetric.label}</div>
-        <div className="text-[10px]" style={{ color: '#cfcfcf' }}>
-          {pinLabel} : <span className="font-bold" style={{ color: ACCENT }}>{selectedValue}점</span>
+      {/* 우상단 핀 — 꼭짓점 클릭 시에만 노출 (선택 지표 + 평균 점수). 재클릭 시 사라짐. */}
+      {selectedMetric && (
+        <div
+          className="absolute rounded-lg px-3 py-1.5 text-[11px] leading-tight shadow-lg"
+          style={{
+            top: size * 0.18,
+            right: 0,
+            backgroundColor: '#262626',
+            color: '#E5E5E5',
+            border: '1px solid rgba(170,237,16,0.35)',
+            minWidth: 92,
+          }}
+        >
+          <div className="font-semibold text-white mb-0.5">{selectedMetric.label}</div>
+          <div className="text-[10px]" style={{ color: '#cfcfcf' }}>
+            {pinLabel} : <span className="font-bold" style={{ color: ACCENT }}>{selectedValue}점</span>
+          </div>
         </div>
-      </div>
+      )}
 
     </div>
   );
