@@ -70,6 +70,30 @@ export default function Device() {
   useEffect(() => subscribeLegacyBleMode(setLegacyModeState), []);
   // 테스트 점등 진행 중 표시
   const [testBlinkRunning, setTestBlinkRunning] = useState(false);
+  // 진단 로그 — 송신/ack 결과를 화면에 직접 노출 (토스트가 짧아 놓쳤을 때 대비)
+  const [diagLog, setDiagLog] = useState<string[]>([]);
+
+  const pushDiag = (line: string) => {
+    const ts = new Date().toLocaleTimeString('ko-KR', { hour12: false });
+    setDiagLog((prev) => [`[${ts}] ${line}`, ...prev].slice(0, 12));
+  };
+
+  // 모든 native.ack 를 listen 해서 진단 로그에 기록.
+  // ok=true 도 기록해 "메시지가 native 까지 도달했고 BLE write 까지 끝났다" 는
+  // 명확한 신호를 사용자가 화면에서 볼 수 있게 한다.
+  useEffect(() => {
+    const onAck = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { id?: string; ok?: boolean; error?: string };
+      if (!detail) return;
+      if (detail.ok) {
+        pushDiag(`✓ ack ok (${detail.id ?? '?'})`);
+      } else {
+        pushDiag(`✗ ack 거부: ${detail.error ?? '(사유 없음)'}`);
+      }
+    };
+    window.addEventListener('noilink-native-ack', onAck);
+    return () => window.removeEventListener('noilink-native-ack', onAck);
+  }, []);
 
   /**
    * 테스트 점등: 트레이닝 화면에 들어가지 않고도 점등 신호가 기기에 도달하는지
@@ -81,9 +105,18 @@ export default function Device() {
     if (testBlinkRunning) return;
     setTestBlinkRunning(true);
     try {
+      // 환경 진단 — native shell 이 아닌 일반 웹/캐시된 PWA 에서 누른 경우
+      // 모든 BLE 메시지가 silent 하게 사라지므로 가장 먼저 알린다.
+      if (!isNative) {
+        pushDiag('환경: 일반 웹 (네이티브 셸 아님 — BLE 메시지 보낼 수 없음)');
+        return;
+      }
+      pushDiag(`환경: 네이티브 셸 / 모드: ${legacyMode ? '레거시' : '정식'}`);
+      pushDiag('→ START 송신');
       bleWriteControl(CTRL_START);
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 250));
       for (let pod = 0; pod < 4; pod++) {
+        pushDiag(`→ LED Pod${pod + 1} 송신`);
         bleWriteLed({
           tickId: pod,
           pod,
@@ -92,6 +125,7 @@ export default function Device() {
         });
         await new Promise((r) => setTimeout(r, 700));
       }
+      pushDiag('→ STOP 송신');
       bleWriteControl(CTRL_STOP);
     } finally {
       setTestBlinkRunning(false);
@@ -354,6 +388,33 @@ export default function Device() {
               ? '테스트 점등 보내기 (Pod 1→4)'
               : '연결된 기기가 없어요'}
           </button>
+
+          {/* 진단 로그 — 송신/ack 결과를 화면에 직접 누적 표시. 토스트가
+              짧아 놓쳤거나 native ack 가 ok=true 인 경우에도 무엇이 일어났는지
+              확인할 수 있다. 행이 없으면 패널 자체를 숨긴다. */}
+          {diagLog.length > 0 && (
+            <div className="mt-3 p-2 rounded-lg" style={{ backgroundColor: '#0A0A0A' }}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px]" style={{ color: '#999999' }}>
+                  진단 로그 (최근 12건)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDiagLog([])}
+                  className="text-[10px]"
+                  style={{ color: '#666666' }}
+                >
+                  지우기
+                </button>
+              </div>
+              <pre
+                className="text-[10px] whitespace-pre-wrap break-words leading-relaxed"
+                style={{ color: '#CCCCCC', fontFamily: 'monospace', maxHeight: 180, overflowY: 'auto' }}
+              >
+                {diagLog.join('\n')}
+              </pre>
+            </div>
+          )}
         </div>
       </div>
 
