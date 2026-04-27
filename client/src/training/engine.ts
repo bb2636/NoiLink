@@ -24,7 +24,9 @@ import {
   RHYTHM_PHASE_MS,
   SESSION_PHASE_COGNITIVE,
   SESSION_PHASE_RHYTHM,
+  defaultOnMsForLevel,
   judgeRhythmError,
+  judgmentDoubleTapWindowMs,
   logicColorToCode,
   rhythmStepsForBeat,
 } from '@noilink/shared';
@@ -490,8 +492,15 @@ export class TrainingEngine {
       this.acc.mTotalSeqs += 1;
       this.acc.mShown += seqLen;
       // 시퀀스 보여주기: tickInterval 마다 하나씩 (destroy 시 정리)
+      // 명세 A.MEMORY: Lv1~2 는 연속 동일 Pod 금지 (학습 진입 부담 완화)
+      const banConsecutive = this.cfg.level <= 2;
+      let prevPod = -1;
       for (let i = 0; i < seqLen; i++) {
-        const podId = Math.floor(Math.random() * this.cfg.podCount);
+        let podId = Math.floor(Math.random() * this.cfg.podCount);
+        if (banConsecutive && this.cfg.podCount > 1 && podId === prevPod) {
+          podId = (podId + 1) % this.cfg.podCount;
+        }
+        prevPod = podId;
         this.memoryQueue.push(podId);
         this.schedule(() => {
           this.lightSinglePod(podId, 'GREEN', tickInterval * 0.6);
@@ -505,7 +514,9 @@ export class TrainingEngine {
         this.memoryLastTapAt = 0;
         this.allOff();
         // WHITE 입력 신호 — Pod별 monotonic tickId 부여 + BLE 점등
-        const recallWindow = tickInterval * seqLen;
+        // 명세 A.MEMORY: Recall 입력 시간 = on_ms + 250ms (시퀀스 길이만큼 누적)
+        const onMsPerStep = defaultOnMsForLevel(this.cfg.level) + 250;
+        const recallWindow = onMsPerStep * seqLen;
         const now = Date.now();
         this.pods = this.pods.map(p => {
           const tickId = this.nextTickId();
@@ -602,6 +613,20 @@ export class TrainingEngine {
 
   private fireFocusTick(beatMs: number): void {
     // 60% 타겟(BLUE), 40% 방해(RED/YELLOW)
+    // 명세 C.FOCUS: Lv3+ 는 타겟+방해 동시 점등 (방해 자극 속에서 타겟만 선택)
+    const allowSimul = this.cfg.level >= 3 && this.cfg.podCount >= 2;
+    if (allowSimul && Math.random() < 0.3) {
+      // 타겟 1 + 방해 1 동시 점등 (서로 다른 Pod)
+      const tPod = Math.floor(Math.random() * this.cfg.podCount);
+      let dPod = Math.floor(Math.random() * this.cfg.podCount);
+      if (dPod === tPod) dPod = (dPod + 1) % this.cfg.podCount;
+      const distractor: LogicColor = Math.random() < 0.5 ? 'RED' : 'YELLOW';
+      this.acc.fTargetCount += 1;
+      this.acc.fDistractorCount += 1;
+      this.recordIntervalCount('total', this.elapsedMs(), 1);
+      this.lightTwoPods(tPod, 'BLUE', dPod, distractor, beatMs * 0.9, true);
+      return;
+    }
     const isTarget = Math.random() < 0.6;
     const color: LogicColor = isTarget ? 'BLUE' : (Math.random() < 0.5 ? 'RED' : 'YELLOW');
     const podId = Math.floor(Math.random() * this.cfg.podCount);
@@ -796,8 +821,10 @@ export class TrainingEngine {
     }
 
     // 더블탭 처리 (JUDGMENT YELLOW)
+    // 명세 D.JUDGMENT: 더블탭 윈도우 = min(700ms, 0.9*beat_ms)
     let isDoubleTap = false;
-    if (this.lastTapAt && this.lastTapAt.podId === podId && (now - this.lastTapAt.ts) <= 600) {
+    const dblWindowMs = judgmentDoubleTapWindowMs(this.cfg.bpm);
+    if (this.lastTapAt && this.lastTapAt.podId === podId && (now - this.lastTapAt.ts) <= dblWindowMs) {
       isDoubleTap = true;
       this.lastTapAt = null;
     } else {
@@ -912,7 +939,8 @@ export class TrainingEngine {
     this.memoryReplay.push(pod.id);
     const idx = this.memoryReplay.length - 1;
     const expected = this.memoryQueue[idx];
-    if (expected === pod.id) {
+    const isHit = expected === pod.id;
+    if (isHit) {
       this.acc.mCorrect += 1;
     }
     // 실제 RT: 첫 입력은 RECALL 시작 시각 대비, 이후는 직전 입력 대비 시간
@@ -920,6 +948,14 @@ export class TrainingEngine {
     const rt = Math.max(0, now - refTs);
     if (rt > 0) this.acc.mRTs.push(rt);
     this.memoryLastTapAt = now;
+    // 명세 A.MEMORY: Lv3+ 는 오입력 시 즉시 해당 사이클 실패
+    if (!isHit && this.cfg.level >= 3) {
+      this.memoryPhase = 'SHOW';
+      this.memoryReplay = [];
+      this.memoryQueue = [];
+      this.allOff();
+      return;
+    }
     if (this.memoryReplay.length >= this.memoryQueue.length) {
       const allOk = this.memoryReplay.every((p, i) => p === this.memoryQueue[i]);
       if (allOk) this.acc.mPerfectSeqs += 1;

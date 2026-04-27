@@ -263,6 +263,50 @@ function scoreTier(v: number): 'low' | 'mid' | 'high' {
   return 'high';
 }
 
+/** 명세 3.2 Fact: 실제 수치(%) 반영 조건문 — 점수 구간별 핵심 지표 평가 추가 문구 */
+function factScoreBandClause(name: string, score: number): string {
+  const v = Math.round(score);
+  if (v >= 80) return ` 특히 ${v}점대로 ${name}님의 핵심 지표가 매우 안정적인 수준입니다.`;
+  if (v >= 50) return ` 다만 ${v}점대 평균 구간이라 ${name}님의 핵심 지표는 추가 안정화 여지가 있습니다.`;
+  return ` 다만 현재 ${v}점으로 ${name}님의 핵심 지표는 보완 훈련이 필요한 수치입니다.`;
+}
+
+/** 명세 3.2 Life: 일상 생활 연결 — 점수 구간별 실생활 적용 가이드 */
+function lifeScoreBandClause(name: string, score: number): string {
+  const v = Math.round(score);
+  if (v >= 80) return ` ${name}님은 이 강점을 일상 업무·학습에서 더 적극적으로 활용해 보세요.`;
+  if (v >= 50) return ` ${name}님은 짧은 일상 루틴부터 굳혀가면 강점을 안정적으로 끌어올릴 수 있습니다.`;
+  return ` ${name}님은 우선 부담 없는 짧은 루틴부터 가볍게 시작하는 것이 좋습니다.`;
+}
+
+/** 브레이니멀 타입의 핵심 지표 (점수 구간 판정 기준) */
+const TYPE_PRIMARY_METRIC: Record<BrainimalType, keyof MetricsScore> = {
+  OWL_FOCUS: 'focus',
+  CHEETAH_JUDGMENT: 'judgment',
+  BEAR_ENDURANCE: 'endurance',
+  DOLPHIN_BRILLIANT: 'memory',
+  TIGER_STRATEGIC: 'comprehension',
+  FOX_BALANCED: 'focus',
+  CAT_DELICATE: 'memory',
+  EAGLE_INSIGHT: 'comprehension',
+  LION_BOLD: 'judgment',
+  DOG_SOCIAL: 'agility',
+  KOALA_CALM: 'endurance',
+  WOLF_CREATIVE: 'agility',
+};
+
+/** 추천 트레이닝 모드 한글 라벨 (Hint 가이드 문구용) */
+const MODE_KO: Record<TrainingMode, string> = {
+  MEMORY: '기억력',
+  COMPREHENSION: '이해력',
+  FOCUS: '집중력',
+  JUDGMENT: '판단력',
+  AGILITY: '멀티태스킹',
+  ENDURANCE: '지구력',
+  COMPOSITE: '종합 트레이닝',
+  FREE: '자유 트레이닝',
+};
+
 export function buildMetricEvidenceCards(scores: MetricsScore): MetricEvidenceCard[] {
   const bodies: Record<string, Record<'low' | 'mid' | 'high', string>> = {
     memory: {
@@ -520,11 +564,19 @@ export function generateReport(
   const lifeIndex = (seed * 2) % template.life.length;
   const hintIndex = (seed * 3) % template.hint.length;
 
-  const factText = generateSentence(template.fact[factIndex], userName, metricsScore, reportVersion);
-  const lifeText = generateSentence(template.life[lifeIndex], userName, metricsScore, reportVersion);
+  // 명세 3.2: Fact/Life 는 핵심 지표 점수 구간 조건문으로 보강
+  const primaryKey = TYPE_PRIMARY_METRIC[brainimalType];
+  const primaryScore = metricValue(metricsScore, primaryKey);
+  const baseFact = generateSentence(template.fact[factIndex], userName, metricsScore, reportVersion);
+  const baseLife = generateSentence(template.life[lifeIndex], userName, metricsScore, reportVersion);
+  const factText = baseFact + factScoreBandClause(userName, primaryScore);
+  const lifeText = baseLife + lifeScoreBandClause(userName, primaryScore);
+  // 명세 3.2: Hint = 추천 트레이닝과 연결된 가이드
   let hintText = generateSentence(template.hint[hintIndex], userName, metricsScore, reportVersion);
   if (recommendFull) {
-    hintText += ` 육각형 프로필이 한쪽으로 치우치거나 지표 간 편차가 작아, 종합 트레이닝으로 재밸런스하는 편이 좋습니다.`;
+    hintText += ` 육각형 프로필이 한쪽으로 치우치거나 지표 간 편차가 작아, ${MODE_KO.COMPOSITE}으로 재밸런스하는 편이 좋습니다.`;
+  } else {
+    hintText += ` 다음 세션은 가장 낮은 ${MODE_KO[recommendedMode] ?? recommendedMode} 보완 모드를 ${userName}님에게 우선 추천드려요.`;
   }
   if (fatigue.active) {
     hintText += ` 후반 피로·리듬 저하 신호가 있어 다음 세션은 BPM ${fatigue.bpm}, 레벨 ${fatigue.level}부터 시작하는 편이 안전합니다.`;
