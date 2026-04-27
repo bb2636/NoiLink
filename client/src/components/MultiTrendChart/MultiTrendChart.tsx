@@ -113,10 +113,9 @@ export default function MultiTrendChart({ data, height = 220, headerLeft }: Mult
     const range = Y_MAX - Y_MIN;
 
     // 영역(층) — 뒤(기억력=파랑) → 앞(순발력=라임) 순으로 그려서 색 띠가 쌓이도록.
-    // 그라데이션 페이드(=뒤 레이어를 잡아먹는 원인) 대신 솔리드 반투명 채움 사용.
-    // 각 지표는 0~chartBottom 까지 자기 영역을 칠해서, 위로 갈수록 더 큰 값을 가진
-    // 뒤 레이어가 띠처럼 노출된다 (이미지 2 스택 영역 차트 외관과 동일).
-    const FILL_ALPHA = 0.55;
+    // 겹치는 구간에서 앞 레이어가 뒤 색을 덮지 않도록 채움 알파를 낮게 유지한다
+    // (반투명으로 비쳐서 모든 색이 묻히지 않고 함께 보임).
+    const FILL_ALPHA = 0.22;
     METRIC_ORDER.forEach(({ key, color }) => {
       if (!selected.has(key)) return;
 
