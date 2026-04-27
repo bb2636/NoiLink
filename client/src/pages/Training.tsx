@@ -152,29 +152,45 @@ export default function Training() {
         backgroundColor={activeBanner?.background}
         textColor={activeBanner?.textColor}
       />
-      <div className="max-w-md mx-auto px-4 pb-6" style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '120px' }}>
-        {/* 페이지 헤더 */}
-        <div className="flex items-center gap-2 mb-6">
-          <svg
-            className="w-7 h-7 text-white"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            viewBox="0 0 24 24"
+      {/* 상단 스티키 헤더 — 휴대폰 노치/상단바 안전영역(safe-area-inset-top) 보정.
+          하단바와 동일한 덤벨 SVG 아이콘 + "트레이닝" 라벨을 칩 형태로 표시한다. */}
+      <header
+        className="sticky top-0 left-0 right-0 z-40"
+        style={{
+          backgroundColor: '#0A0A0A',
+          borderBottom: '1px solid #1A1A1A',
+          paddingTop: 'env(safe-area-inset-top)',
+        }}
+      >
+        <div className="max-w-md mx-auto px-4 h-14 flex items-center">
+          <span
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+            style={{ backgroundColor: '#1A1A1A', border: '1px solid #2A2A2A' }}
           >
-            <path d="M6.5 6.5l11 11" />
-            <path d="M21 21l-1-1" />
-            <path d="M3 3l1 1" />
-            <path d="M18 22l4-4" />
-            <path d="M2 6l4-4" />
-            <path d="M3 10l7-7" />
-            <path d="M14 21l7-7" />
-          </svg>
-          <h1 className="text-2xl font-bold text-white">트레이닝</h1>
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="#AAED10"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              viewBox="0 0 24 24"
+              aria-hidden
+            >
+              <path d="M6.5 6.5l11 11" />
+              <path d="M21 21l-1-1" />
+              <path d="M3 3l1 1" />
+              <path d="M18 22l4-4" />
+              <path d="M2 6l4-4" />
+              <path d="M3 10l7-7" />
+              <path d="M14 21l7-7" />
+            </svg>
+            <span className="text-white text-sm font-medium">트레이닝</span>
+          </span>
         </div>
+      </header>
 
+      <div className="max-w-md mx-auto px-4 pb-6" style={{ paddingTop: '20px', paddingBottom: '120px' }}>
         {/* AI 맞춤 트레이닝 (Quick Start) */}
         <section className="mb-8">
           <h2 className="text-base font-semibold text-white mb-1">AI 맞춤 트레이닝(Quick Start)</h2>
