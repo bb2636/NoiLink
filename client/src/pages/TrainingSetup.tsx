@@ -66,8 +66,8 @@ export default function TrainingSetup() {
     if (user) setSelectedMembers((prev) => (prev.length === 0 ? [user] : prev));
   }, [user]);
 
-  const removeMember = (id: string) =>
-    setSelectedMembers((prev) => prev.filter((m) => m.id !== id));
+  // 진행 회원 제거는 +(편집) 버튼이 여는 MemberSelectModal 의 일괄 onConfirm 경유.
+  // (이전 디자인 복구로 칩 위 X 버튼은 제거됨 — 기능은 모달에서 그대로 유지)
 
   // ─── Pod 연결 ────────────────────────────────────────────────
   const [registered, setRegistered] = useState<RegisteredDevice[]>([]);
@@ -170,29 +170,39 @@ export default function TrainingSetup() {
           </p>
         </div>
 
-        {/* Pod 연결 */}
+        {/* Pod 연결 — 이미지 3 디자인:
+              ① 섹션 타이틀("Pod 연결") 단독 분리
+              ② 블루투스 아이콘 + "N개의 pod 연결 됨 >" 가로형 카드 (전체가 /device 진입 트리거)
+              ③ 8개 Pod 그리드 (4×2) — 위 두 요소와 같은 섹션으로 묶음 */}
         <section className="mb-6">
-          {/* 헤더: 좌측 블루투스+타이틀 / 우측 연결 수 배지 */}
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <svg
-                className="w-4 h-4"
-                style={{ color: isPrimaryConnected ? '#AAED10' : '#888' }}
-                viewBox="0 0 24 24"
-                fill="currentColor"
-              >
-                <path d="M17.71 7.71L12 2h-1v7.59L6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l5.71-5.71-4.3-4.29 4.3-4.29z" />
-              </svg>
-              <h2 className="text-sm font-semibold text-white">Pod 연결</h2>
-            </div>
-            <button
-              onClick={() => navigate('/device')}
-              className="px-4 py-1.5 rounded-full text-xs font-medium"
-              style={{ backgroundColor: '#1A1A1A', color: '#fff', border: '1px solid #2A2A2A' }}
+          <h2 className="text-sm font-semibold text-white mb-3">Pod 연결</h2>
+
+          {/* 블루투스 + 연결 수 카드 */}
+          <button
+            type="button"
+            onClick={() => navigate('/device')}
+            className="w-full flex items-center justify-between rounded-2xl px-4 py-3 mb-3"
+            style={{ backgroundColor: '#1A1A1A', border: '1px solid #2A2A2A' }}
+            aria-label="기기 관리 화면으로 이동"
+          >
+            <svg
+              className="w-5 h-5"
+              style={{ color: isPrimaryConnected ? '#AAED10' : '#666' }}
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden
             >
-              {registered.length}개의 pod 연결 됨
-            </button>
-          </div>
+              <path d="M17.71 7.71L12 2h-1v7.59L6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l5.71-5.71-4.3-4.29 4.3-4.29z" />
+            </svg>
+            <span className="flex items-center gap-1.5">
+              <span className="text-sm" style={{ color: '#D4D4D4' }}>
+                {registered.length}개의 pod 연결 됨
+              </span>
+              <svg className="w-4 h-4" style={{ color: '#888' }} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </span>
+          </button>
 
           {/* 8개 Pod 그리드 (4×2) */}
           <div className="grid grid-cols-4 gap-2">
@@ -220,8 +230,10 @@ export default function TrainingSetup() {
           </p>
         </section>
 
-        {/* 진행 회원 — 기업 소속 회원 전용 (관리자/승인된 개인 회원) */}
-        {/* 다중 선택: 칩 형태로 N명 표시, 각 칩 X 로 개별 제거, "+" 로 모달 열어 일괄 편집 */}
+        {/* 진행 회원 — 기업 소속 회원 전용 (관리자/승인된 개인 회원).
+              이미지 2(이전 디자인) 복구: 컴팩트한 어두운 그린 칩 + 라임 텍스트.
+              개별 X 버튼은 제거하고, +(추가/편집) 버튼이 여는 모달에서 일괄 편집/제거.
+              → 다중 선택 기능은 그대로 유지 (removeMember 호출은 모달 onConfirm 경유). */}
         {hasOrganization && (
           <section className="mb-6">
             <h2 className="text-sm font-semibold text-white mb-3">진행 회원</h2>
@@ -229,36 +241,23 @@ export default function TrainingSetup() {
               {selectedMembers.map((m) => (
                 <span
                   key={m.id}
-                  className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-full text-sm font-medium"
-                  style={{ backgroundColor: '#AAED10', color: '#000' }}
+                  className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium"
+                  style={{
+                    backgroundColor: '#1A2A1A',
+                    color: '#AAED10',
+                    border: '1px solid #2A3A2E',
+                  }}
                 >
-                  <span className="truncate max-w-[120px]">
+                  <span className="truncate max-w-[100px]">
                     {m.nickname || m.name || '회원'}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => removeMember(m.id)}
-                    aria-label={`${m.name} 진행 회원에서 제거`}
-                    className="w-4 h-4 rounded-full flex items-center justify-center"
-                    style={{ backgroundColor: 'rgba(0,0,0,0.25)' }}
-                  >
-                    <svg
-                      className="w-2.5 h-2.5"
-                      viewBox="0 0 12 12"
-                      fill="none"
-                      stroke="#000"
-                      strokeWidth={2}
-                    >
-                      <path strokeLinecap="round" d="M3 3l6 6M9 3l-6 6" />
-                    </svg>
-                  </button>
                 </span>
               ))}
               <button
                 onClick={() => setShowMemberModal(true)}
                 aria-label="진행 회원 추가/편집"
-                className="w-8 h-8 rounded-full flex items-center justify-center text-lg"
-                style={{ backgroundColor: '#2A2A2A', color: '#AAED10' }}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-base leading-none"
+                style={{ backgroundColor: '#2A2A2A', color: '#D4D4D4' }}
               >
                 +
               </button>

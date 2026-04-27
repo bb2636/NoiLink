@@ -153,11 +153,13 @@ export default function Device() {
   return (
     <MobileLayout>
       <div className="max-w-md mx-auto px-4 pb-6" style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '120px' }}>
-        {/* 헤더 */}
-        <div className="mb-6 flex items-center gap-4">
+        {/* 헤더 — 뒤로가기 버튼 터치 영역(48×48) 확보, 타이틀과 명확히 구분 */}
+        <div className="mb-6 flex items-center gap-2">
           <button
             onClick={() => navigate(-1)}
-            className="flex items-center"
+            type="button"
+            aria-label="뒤로가기"
+            className="w-10 h-10 -ml-2 flex items-center justify-center rounded-full"
             style={{ color: '#FFFFFF' }}
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
