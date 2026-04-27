@@ -10,6 +10,7 @@ import { motion } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
+import freeTrainingBg from '../assets/brainimals/noi_splash.png';
 import { TRAINING_BY_ID } from '../utils/trainingConfig';
 import {
   getTrainingAbortNotice,
@@ -270,26 +271,60 @@ export default function Training() {
           </div>
         </section>
 
-        {/* 자유 훈련 */}
+        {/* 자유 훈련 — 첨부 이미지 디자인:
+            · 그린 틴트(#0E1812) 배경 카드 + 우측 상단으로 페이드되는 두뇌 이미지 오버레이
+            · 좌측 상단에 보더가 있는 "자유 훈련" 칩
+            · 볼드 타이틀 + 가이드 카피
+            · 라임 보더 + 라임 텍스트의 아웃라인 CTA 버튼
+        */}
         <section>
           <div
-            className="inline-block px-3 py-1 rounded-full text-xs font-medium mb-3"
-            style={{ backgroundColor: '#1A1A1A', color: '#999' }}
+            className="relative rounded-2xl p-5 overflow-hidden"
+            style={{ backgroundColor: '#0E1812' }}
           >
-            자유 훈련
-          </div>
-          <div className="rounded-2xl p-4" style={{ backgroundColor: '#1A1A1A' }}>
-            <h3 className="text-white text-lg font-bold mb-2">프리 트레이닝</h3>
-            <p className="text-xs text-gray-400 leading-relaxed mb-4">
-              추천 루틴 말고 원하는 메뉴를 직접 조합해서 자유롭게 훈련할 수 있어요.
-            </p>
-            <button
-              onClick={() => navigate('/training/setup/FREE')}
-              className="w-full py-3 rounded-full font-semibold flex items-center justify-center gap-2"
-              style={{ backgroundColor: '#AAED10', color: '#000' }}
-            >
-              직접 선택해서 시작하기 →
-            </button>
+            {/* 우측에 페이드되어 깔리는 배경 이미지 */}
+            <div
+              aria-hidden
+              className="absolute inset-y-0 right-0 w-1/2 pointer-events-none"
+              style={{
+                backgroundImage: `url(${freeTrainingBg})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center right',
+                opacity: 0.18,
+                maskImage:
+                  'linear-gradient(to left, rgba(0,0,0,1) 30%, rgba(0,0,0,0) 100%)',
+                WebkitMaskImage:
+                  'linear-gradient(to left, rgba(0,0,0,1) 30%, rgba(0,0,0,0) 100%)',
+              }}
+            />
+
+            <div className="relative z-10">
+              <span
+                className="inline-block px-3 py-1 rounded-full text-xs font-medium mb-3"
+                style={{
+                  backgroundColor: 'rgba(170,237,16,0.06)',
+                  color: '#E5E7EB',
+                  border: '1px solid #2A3A2E',
+                }}
+              >
+                자유 훈련
+              </span>
+              <h3 className="text-white text-xl font-bold mb-2">프리 트레이닝</h3>
+              <p className="text-xs text-gray-400 leading-relaxed mb-5">
+                추천 루틴 말고 원하는 메뉴를 직접 조합해서 자유롭게 훈련할 수 있어요.
+              </p>
+              <button
+                onClick={() => navigate('/training/setup/FREE')}
+                className="w-full py-3 rounded-full font-semibold flex items-center justify-center gap-2"
+                style={{
+                  backgroundColor: 'transparent',
+                  color: '#AAED10',
+                  border: '1px solid #AAED10',
+                }}
+              >
+                직접 선택해서 시작하기 →
+              </button>
+            </div>
           </div>
         </section>
       </div>
