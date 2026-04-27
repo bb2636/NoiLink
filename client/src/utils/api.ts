@@ -279,7 +279,24 @@ class ApiClient {
       this.request<Record<string, RankingEntry[]>>(path),
     );
   }
-  
+
+  /**
+   * "나의 랭킹" 카드 4개 stat (종합·합계 시간·연속·출석률) + 본인 등수.
+   * 서버가 14일 창 단일 진실원으로 묶어 돌려준다 — 카드와 랭킹표 표시값이
+   * 분기되지 않도록 하는 단일 출처. (server/routes/rankings.ts → /user/:userId/card)
+   */
+  async getMyRankingCard(userId: string) {
+    const path = `/rankings/user/${userId}/card`;
+    return this.coalesceInflight<{
+      windowDays: number;
+      compositeScore: number | null;
+      totalTimeHours: number;
+      streakDays: number;
+      attendanceRate: number;
+      myRanks: { composite?: number; time?: number; streak?: number };
+    }>(`GET ${path}`, () => this.request(path));
+  }
+
   // Generic GET method
   async get<T>(endpoint: string): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint);

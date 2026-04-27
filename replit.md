@@ -75,6 +75,17 @@ Auto-detection priority:
 - Auth middleware protects user update endpoints (self-or-admin only)
 - x-user-id header bypass removed
 
+## "나의 랭킹" 카드 단일 진실원
+
+- `GET /api/rankings/user/:userId/card` (requireAuth + 본인/관리자/동일 조직 기업
+  관리자) 가 카드의 4개 stat 을 한 번에 돌려준다 — `compositeScore` (없으면 null),
+  `totalTimeHours`, `streakDays`, `attendanceRate`, 그리고 본인 등수 `myRanks`.
+- 모두 랭킹표(`/api/rankings`) 와 동일한 14일 창 / 동일한 세션 데이터에서
+  파생된다. 출석률·연속·dayKey 계산은 KST 기준 (`isoToKstLocalDate`).
+- 회귀 보호: `server/routes/rankings.user-card.test.ts` (9 테스트). 카드가
+  과거처럼 DEMO_PROFILE 하드코딩(80점/4시간/5일/90%) 으로 회귀하면 테스트와
+  랭킹표 표시값이 즉시 갈라진다.
+
 ## Idempotency (training save retry safety)
 
 - 결과 저장 라우트(`POST /api/sessions`, `POST /api/metrics/calculate`, `POST /api/metrics/raw`)는

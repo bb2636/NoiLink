@@ -5,13 +5,23 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
 import type { RankingEntry, RankingType, Session, User } from '@noilink/shared';
+import { isoToKstLocalDate } from '@noilink/shared';
+import { requireAuth, type AuthRequest } from '../middleware/auth.js';
+import { userCanActOnTargetUserId } from '../utils/session-user-policy.js';
 
 const router = Router();
 
 const MS_DAY = 24 * 60 * 60 * 1000;
+/** 카드/랭킹 집계가 함께 사용하는 공통 14일 창 길이 (명세 5장). */
+const RANKING_WINDOW_DAYS = 14;
 
+/**
+ * 일자 키. 출석률·연속 일수 산정 모두 KST 기준 (Asia/Seoul) 으로 묶어
+ * 디바이스 시간대/서버 UTC 와 무관하게 한국 사용자의 달력 일치를 보장한다.
+ * (Task #132: KST 라벨 단일 진실원, `shared/kst-date.ts`)
+ */
 function dayKey(iso: string): string {
-  return new Date(iso).toISOString().slice(0, 10);
+  return isoToKstLocalDate(iso) ?? new Date(iso).toISOString().slice(0, 10);
 }
 
 /** 개인: 닉네임 우선, 기관 소속: 본명 */
@@ -275,6 +285,89 @@ router.get('/user/:userId', async (req: Request, res: Response) => {
     const userRankings = rankings.filter((r: RankingEntry) => r.userId === userId);
 
     res.json({ success: true, data: userRankings });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/rankings/user/:userId/card
+ *
+ * "나의 랭킹" 카드 4개 stat 의 단일 진실원.
+ * 모두 같은 14일 창 / 같은 사용자 세션 데이터에서 파생되어 카드 ↔ 랭킹표 사이의
+ * 표시값 불일치(과거 데모 하드코딩 잔재) 를 원천 차단한다.
+ *
+ * 응답 필드
+ *  - compositeScore: COMPOSITE 14일 창 / 일 상위 2회 / 가중 1.2 / 상위 3회 평균.
+ *      해당 기간에 유효 COMPOSITE 세션이 없으면 null (UI 가 "-" 처리).
+ *  - totalTimeHours: 14일 창 모든 세션 duration 합을 시간으로 반올림. 0이면 0.
+ *      (랭킹표는 초 단위 score → Math.round(score/3600) 로 변환해 표시 중이므로
+ *       카드도 같은 변환을 사용해 일치시킨다.)
+ *  - streakDays: 14일 창 안에서 달력 기준 연속 일수 최댓값. 세션 없으면 0.
+ *  - attendanceRate: 14일 중 유효 세션이 1건이라도 있는 일 수 / 14 × 100.
+ *      랭킹표에는 노출되지 않지만 카드의 4번째 stat 으로 합쳐 같은 창 기준으로
+ *      계산해 일관성을 보장한다.
+ *  - myRanks: rankings 테이블의 사용자 본인 등수 (계산 결과가 없으면 해당 키 없음).
+ *
+ * 인가: 본인 / 관리자 / 동일 조직 기업 관리자 만 조회 가능.
+ */
+router.get('/user/:userId/card', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { userId } = req.params;
+
+    const users: User[] = (await db.get('users')) || [];
+    if (!userCanActOnTargetUserId(authReq.user!, userId, users)) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+
+    const sessions: Session[] = (await db.get('sessions')) || [];
+    const now = Date.now();
+    const windowStart = now - RANKING_WINDOW_DAYS * MS_DAY;
+
+    const composite = compositeRankingScore(sessions, userId, windowStart);
+    const total = totalTimeRanking(sessions, userId, windowStart);
+    const streakDays = streakInWindow(sessions, userId, windowStart, now);
+
+    // 출석률: 14일 중 유효 세션이 1건이라도 있는 일 수
+    const attendedDays = new Set<string>();
+    for (const s of sessions) {
+      if (s.userId !== userId) continue;
+      if (s.isValid === false) continue;
+      const t = new Date(s.createdAt).getTime();
+      if (t >= windowStart && t <= now) attendedDays.add(dayKey(s.createdAt));
+    }
+    const attendanceRate = Math.round((attendedDays.size / RANKING_WINDOW_DAYS) * 100);
+
+    // 등수는 이미 계산된 rankings 테이블에서 읽어와 카드와 랭킹표가 같은 라운드
+    // 결과를 공유하도록 한다.
+    await calculateRankings();
+    const rankings: RankingEntry[] = (await db.get('rankings')) || [];
+    const myRanks: { composite?: number; time?: number; streak?: number } = {};
+    for (const r of rankings) {
+      if (r.userId !== userId) continue;
+      if (r.rankingType === 'COMPOSITE_SCORE') myRanks.composite = r.rank;
+      else if (r.rankingType === 'TOTAL_TIME') myRanks.time = r.rank;
+      else if (r.rankingType === 'STREAK') myRanks.streak = r.rank;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        windowDays: RANKING_WINDOW_DAYS,
+        compositeScore: composite ? composite.score : null,
+        // 랭킹표(`Ranking.tsx`)는 TOTAL_TIME 표시 시 `Math.max(1, round(score/3600))`
+        // 로 1시간 미만 사용자도 1로 끌어올린다. 카드도 같은 식을 적용해
+        // "표는 1시간 / 카드는 0시간" 같은 미세 불일치를 차단한다.
+        totalTimeHours: total ? Math.max(1, Math.round(total.score / 3600)) : 0,
+        streakDays,
+        attendanceRate,
+        myRanks,
+      },
+    });
   } catch (error) {
     res.status(500).json({
       success: false,

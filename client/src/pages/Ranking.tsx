@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
-import { DEMO_PROFILE } from '../utils/demoProfile';
 import { api } from '../utils/api';
 import { MOCK_MEMBERS, getMockMemberTotalScore, type MockMember } from '../utils/mockMembers';
 import type { RankingEntry, RankingType } from '@noilink/shared';
@@ -72,6 +71,7 @@ const PERSONAL_ROWS: Record<TabKey, Row[]> = {
 };
 
 // 기업 내 랭킹 — 회원 관리(MOCK_MEMBERS)와 동일한 인원/지표를 사용해 동적으로 산출.
+// (TODO: 기업 회원 데이터가 서버에 들어오면 이 mock 도 실데이터로 교체)
 // 동일 점수면 동률 처리(같은 등수). composite는 종합 점수, time은 streak에서 파생한
 // 합계 트레이닝 횟수, streak는 연속 일수 그대로 사용.
 function rankRows(items: { nickname: string; value: number }[]): Row[] {
@@ -103,23 +103,25 @@ function buildOrgRowsFromMembers(members: MockMember[]): Record<TabKey, Row[]> {
 
 const ORG_ROWS: Record<TabKey, Row[]> = buildOrgRowsFromMembers(MOCK_MEMBERS);
 
-// 내 랭킹 통계 — 단일 데모 프로필(DEMO_PROFILE)에서 가져와 다른 화면과 일치시킴
-const PERSONAL_MY_RANK = {
-  rankByTab: DEMO_PROFILE.rankByTab as Record<TabKey, number>,
-  composite: DEMO_PROFILE.brainIndex,
-  totalTime: DEMO_PROFILE.totalTimeHours,
-  streakDays: DEMO_PROFILE.streakDays,
-  attendanceRate: DEMO_PROFILE.attendanceRate,
-  totalTimeUnit: '시간',
+/**
+ * "나의 랭킹" 카드의 4개 stat (종합·합계 시간·연속·출석률) + 등수.
+ *
+ * 과거: DEMO_PROFILE 하드코딩(80점/4시간/5일/90%) + user 테이블 캐시 필드를
+ *       섞어 써서 "카드 ≠ 랭킹표" 가 동시에 보이는 모순이 생겼다.
+ * 현재: 서버 `/api/rankings/user/:id/card` 한 곳에서 같은 14일 창 / 같은
+ *       세션 데이터로 4개 모두 산출 → 카드와 랭킹표가 같은 진실원을 본다.
+ */
+type CardStats = {
+  compositeScore: number | null;
+  totalTimeHours: number;
+  streakDays: number;
+  attendanceRate: number;
 };
-const ORG_MY_RANK = {
-  // 관리자 본인은 시드 12명 뒤(13위)
-  rankByTab: { composite: 13, time: 13, streak: 13 } as Record<TabKey, number>,
-  composite: 75,
-  totalTime: 5,
+const EMPTY_CARD_STATS: CardStats = {
+  compositeScore: null,
+  totalTimeHours: 0,
   streakDays: 0,
-  attendanceRate: DEMO_PROFILE.attendanceRate,
-  totalTimeUnit: '회',
+  attendanceRate: 0,
 };
 
 const VISIBLE_DEFAULT = 10;
@@ -179,11 +181,13 @@ export default function Ranking() {
   // 기업 소속 개인은 일반 개인 랭킹(전체)만 볼 수 있음.
   const isOrgAdmin = user?.userType === 'ORGANIZATION';
   const fallbackDataset = isOrgAdmin ? ORG_ROWS_FULL : PERSONAL_ROWS_FULL;
-  const myStats = isOrgAdmin ? ORG_MY_RANK : PERSONAL_MY_RANK;
 
   // 서버 랭킹 — 실데이터 우선, 비어있으면 fallback
   const [serverRows, setServerRows] = useState<Record<TabKey, Row[]> | null>(null);
+  // 카드 4개 stat — 서버 단일 진실원 (`/rankings/user/:id/card`)
+  const [cardStats, setCardStats] = useState<CardStats>(EMPTY_CARD_STATS);
   const [myServerRank, setMyServerRank] = useState<Partial<Record<TabKey, number>>>({});
+  const [cardLoaded, setCardLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -212,16 +216,20 @@ export default function Ranking() {
         }
 
         if (user?.id) {
-          const meRes = await api.get<RankingEntry[]>(`/rankings/user/${user.id}`);
-          if (!cancelled && meRes.success && meRes.data) {
-            const map: Partial<Record<TabKey, number>> = {};
-            for (const e of meRes.data) {
-              const tab = (Object.keys(TAB_TO_TYPE) as TabKey[]).find(
-                (k) => TAB_TO_TYPE[k] === e.rankingType,
-              );
-              if (tab) map[tab] = e.rank;
-            }
-            setMyServerRank(map);
+          const cardRes = await api.getMyRankingCard(user.id);
+          if (!cancelled && cardRes.success && cardRes.data) {
+            setCardStats({
+              compositeScore: cardRes.data.compositeScore,
+              totalTimeHours: cardRes.data.totalTimeHours,
+              streakDays: cardRes.data.streakDays,
+              attendanceRate: cardRes.data.attendanceRate,
+            });
+            setMyServerRank({
+              composite: cardRes.data.myRanks.composite,
+              time: cardRes.data.myRanks.time,
+              streak: cardRes.data.myRanks.streak,
+            });
+            setCardLoaded(true);
           }
         }
       } catch (e) {
@@ -245,13 +253,19 @@ export default function Ranking() {
 
   const rows = useMemo(() => dataset[tab], [dataset, tab]);
   const suffix = TABS.find((t) => t.id === tab)!.suffix;
-  const myRank = myServerRank[tab] ?? myStats.rankByTab[tab];
+  // 등수 표시: 카드 응답이 없으면 "-" 로, 응답은 있는데 해당 탭에 등수가
+  // 없으면 (= 14일 창에 유효 세션 0건) "-" 로 표기.
+  const myRank = myServerRank[tab];
   const nickname = user?.name || user?.username || '홍길동';
   const myCardTitle = isOrgAdmin ? '기업 내 나의 랭킹' : '나의 랭킹';
 
-  // 실제 로그인 사용자 데이터로 통계 카드 보강
-  const liveStreak = user?.streak ?? myStats.streakDays;
-  const liveComposite = user?.brainAge ?? myStats.composite;
+  // 카드 4개 stat — 모두 서버 14일 창 단일 진실원에서 옴.
+  // 종합 점수가 null 이면 "-" 표기 (세션 0건). 다른 stat 은 0 으로 자연 표기.
+  const compositeDisplay = cardStats.compositeScore != null ? `${cardStats.compositeScore}점` : '-';
+  const totalTimeDisplay = `${cardStats.totalTimeHours}${isOrgAdmin ? '회' : '시간'}`;
+  const streakDisplay = `${cardStats.streakDays}일`;
+  const attendanceDisplay = `${cardStats.attendanceRate}%`;
+  const rankDisplay = myRank != null ? `${myRank}등` : (cardLoaded ? '-' : '…');
 
   return (
     <>
@@ -299,17 +313,17 @@ export default function Ranking() {
                 className="px-3 py-1 rounded-full text-xs font-bold shrink-0"
                 style={{ backgroundColor: '#2a3a14', color: '#AAED10', border: '1px solid #3d5a1c' }}
               >
-                {myRank}등
+                {rankDisplay}
               </span>
             </div>
 
             <div className="h-px mb-3" style={{ backgroundColor: '#2a2a2a' }} />
 
             <div className="grid grid-cols-2 gap-y-2 text-sm">
-              <Stat label="종합트레이닝" value={`${liveComposite}점`} />
-              <Stat label="합계 시간"    value={`${myStats.totalTime}${myStats.totalTimeUnit}`} />
-              <Stat label="연속 트레이닝" value={`${liveStreak}일`} />
-              <Stat label="출석률"       value={`${myStats.attendanceRate}%`} />
+              <Stat label="종합트레이닝" value={compositeDisplay} />
+              <Stat label="합계 시간"    value={totalTimeDisplay} />
+              <Stat label="연속 트레이닝" value={streakDisplay} />
+              <Stat label="출석률"       value={attendanceDisplay} />
             </div>
           </div>
 
