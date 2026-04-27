@@ -241,6 +241,42 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
   방지를 위해 `payload.subscriptionId === subId && payload.key === 'notify'`
   로 필터. IR 패킷은 throttle (count 변화 즉시 / distance 1.5초당 1회).
 
+## 점등-전용 트레이닝 (현재 펌웨어 한정)
+
+NINA-B1-FB55CE 펌웨어는 IR/TOUCH 입력의 정확도/안정성이 채점에 필요한
+수준에 미치지 못해, 앱은 입력을 일체 받지 않고 점등 신호만 BPM 타이밍에
+맞춰 자동 송신한다. 트레이닝 시작 시 모든 흐름이 점등-전용 화면으로
+진입하고, 결과 화면도 점수 대신 단순 "완료"만 표시한다.
+
+- **TrainingEngine.pause()/resume()** (`client/src/training/engine.ts`)
+  - `pause()`: 회복 윈도우 마감 + `allOff()` + RAF/setTimeout/회복 grace 모두
+    cancel + `bleWriteControl(CTRL_STOP)` + `pausedAt`/`isPaused=true` 기록.
+  - `resume()`: `dt = Date.now() - pausedAt` 만큼 시간 기준점들
+    (`startedAt`, `currentPhaseStartedAt`, `memoryRecallStartedAt`,
+    `memoryLastTapAt`, `switchedAt`, `lastTapAt.ts`) 을 일제히 +dt 보정 →
+    `bleWriteControl(CTRL_START)` 재송신 → `startElapsedRaf()` 재시작 →
+    남은 phase 시간만큼 `currentTickFire` 를 setTimeout 으로 다시 예약.
+    남은 시간이 0 이하이면 즉시 `currentPhaseOnEnd()` 호출.
+  - 회귀 테스트: `client/src/training/engine.pauseResume.test.ts` (6 통과).
+- **TrainingBlinkPlay.tsx** (`client/src/pages/TrainingBlinkPlay.tsx`)
+  - 입력 무시: `handleTap`/`handleBleTouch`/`PodGrid` 전부 미사용. 진단용
+    notify 구독도 등록하지 않는다 (Device 화면이 별도로 담당).
+  - UI: 헤더 + BPM 카드 (라임 테두리) + 원형 SVG progress (라임 stroke,
+    중앙 총 시간/경과 mm:ss) + 하단 취소(회색)/일시정지·재개(오렌지).
+  - BLE 단절 회복 그레이스 (8s) 정책은 기존 `TrainingSessionPlay` 와 동일.
+  - 자연 종료 시 `navigate('/result', { state: { blinkOnly: true, title } })`.
+  - 회귀 테스트: `client/src/pages/TrainingBlinkPlay.test.tsx` (7 통과).
+- **Result.tsx — blinkOnly 분기**: `state.blinkOnly === true` 면 점수/회복/
+  비교/부분-결과 카드를 모두 숨기고 단순 "트레이닝 완료" + 확인 버튼만
+  렌더한다. 회귀 테스트: `Result.test.tsx` 의 "점등-전용 완료 분기"
+  describe (2 통과).
+- **라우팅**:
+  - 신규: `/training/blink-session` → `<TrainingBlinkPlay />`. `TrainingSetup`
+    이 모든 트레이닝을 이 라우트로 보낸다.
+  - 보존: `/training/session` → `<TrainingSessionPlay />`. 향후 펌웨어가
+    입력 모드를 지원하면 `TrainingSetup` 의 navigate 한 줄만 바꿔 복귀할
+    수 있도록 화면/테스트를 그대로 유지한다.
+
 ## Deployment
 
 - Target: autoscale

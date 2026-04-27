@@ -5,11 +5,19 @@ import { useLocation } from 'react-router-dom';
 /**
  * 외곽 MobileLayout 래퍼 — 트레이닝 진행/결과처럼 몰입형 화면에서는 하단 탭바를 숨김.
  * (해당 페이지가 자체 MobileLayout을 사용하더라도 외곽 탭바 중복 렌더를 방지)
+ *
+ * 탭바를 숨길 경로는 export 해서 회귀 테스트가 정합성을 잠글 수 있게 한다.
+ * 점등-전용 진행 화면(`/training/blink-session`)도 몰입형이므로 반드시 포함.
  */
+export const HIDE_BOTTOM_NAV_ROUTES: readonly string[] = [
+  '/training/session',
+  '/training/blink-session',
+  '/result',
+];
+
 function OuterMobileLayout({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
-  const noNavRoutes = ['/training/session', '/result'];
-  const hideNav = noNavRoutes.some((r) => pathname.startsWith(r));
+  const hideNav = HIDE_BOTTOM_NAV_ROUTES.some((r) => pathname.startsWith(r));
   return <MobileLayout hideBottomNav={hideNav}>{children}</MobileLayout>;
 }
 import { useAuth, AuthProvider } from './hooks/useAuth';
@@ -35,6 +43,7 @@ import OrganizationMembers from './pages/OrganizationMembers';
 import Record from './pages/Record';
 import TrainingSetup from './pages/TrainingSetup';
 import TrainingSessionPlay from './pages/TrainingSessionPlay';
+import TrainingBlinkPlay from './pages/TrainingBlinkPlay';
 import Splash from './pages/Splash';
 import Device from './pages/Device';
 import DeviceAdd from './pages/DeviceAdd';
@@ -230,6 +239,21 @@ function AppRoutes() {
                   element={
                     <ProtectedRoute>
                       <TrainingSessionPlay />
+                    </ProtectedRoute>
+                  }
+                />
+                {/*
+                  점등-전용 트레이닝 진행 화면(TrainingBlinkPlay).
+                  현재 NINA-B1-FB55CE 펌웨어 사양상 앱은 입력을 받지 않고
+                  타이머/신호 전달만 하므로, TrainingSetup 이 모든 트레이닝을
+                  이 라우트로 보낸다. 기존 `/training/session` 라우트는 미래에
+                  펌웨어가 입력 모드를 지원하면 다시 활성화하기 위해 보존.
+                */}
+                <Route
+                  path="/training/blink-session"
+                  element={
+                    <ProtectedRoute>
+                      <TrainingBlinkPlay />
                     </ProtectedRoute>
                   }
                 />

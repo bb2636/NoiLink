@@ -142,7 +142,10 @@ export default function TrainingSetup() {
       yieldsScore: !isFree,
       isComposite: isComposite || info.apiMode === 'COMPOSITE',
     };
-    navigate('/training/session', { state: run });
+    // 현재 펌웨어 사양(앱은 입력을 받지 않고 점등 신호 전달만)에 맞춰 모든 트레이닝을
+    // 점등-전용 화면으로 보낸다. 향후 펌웨어가 입력 모드를 지원하면 `/training/session`
+    // (TrainingSessionPlay) 라우트가 그대로 살아 있어 분기를 한 줄만 바꿔 복귀할 수 있다.
+    navigate('/training/blink-session', { state: run });
   };
 
   return (

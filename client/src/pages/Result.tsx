@@ -83,6 +83,13 @@ export type TrainingResultState = {
    * 일반(첫 응답) 흐름에서는 undefined 로 안내가 뜨지 않는다.
    */
   replayed?: boolean;
+  /**
+   * 점등-전용 트레이닝(TrainingBlinkPlay) 완료 신호.
+   * - true: 본 화면이 점수/비교/회복/부분결과 카드를 모두 숨기고 단순 "완료" 화면을 그린다.
+   *   서버 제출이 없는 경로이므로 `sessionId`/`displayScore`/`previousScore` 도 모두 미설정.
+   * - false/undefined: 기존 점수 산출 모드 — 모든 카드 정상 노출.
+   */
+  blinkOnly?: boolean;
 };
 
 /** 회복이 N회 이상 발생하면 환경 점검 안내를 추가로 노출 (Task #36). */
@@ -353,6 +360,55 @@ export default function Result() {
       })),
     []
   );
+
+  // ── 점등-전용 트레이닝 완료 화면 ──
+  // 점수/비교/회복/부분결과 카드 모두 숨기고 단순 "완료" 메시지 + 확인 버튼만 노출.
+  // 서버 제출 경로가 없는 흐름이므로 sessionId/displayScore 등을 조회/렌더하지 않는다.
+  // ── 반드시 yieldsScore===false 의 "자유 트레이닝" 분기보다 앞에 둔다 ──
+  // 점등-전용 화면(TrainingBlinkPlay)도 yieldsScore=false 로 함께 전달하기 때문에
+  // 순서가 바뀌면 자유 트레이닝 화면("수고했어요!")으로 잘못 빠진다.
+  if (state?.blinkOnly) {
+    return (
+      <MobileLayout hideBottomNav>
+        <div
+          className="flex flex-col items-center justify-center px-6"
+          style={{
+            minHeight: '100vh',
+            backgroundColor: '#0A0A0A',
+            paddingTop: 'env(safe-area-inset-top)',
+            paddingBottom: 'env(safe-area-inset-bottom)',
+          }}
+          data-testid="blink-only-result"
+        >
+          <div
+            className="rounded-full flex items-center justify-center mb-6"
+            style={{
+              width: 96,
+              height: 96,
+              backgroundColor: 'rgba(170, 237, 16, 0.12)',
+              border: '2px solid #AAED10',
+            }}
+          >
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#AAED10" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </div>
+          <h1 className="text-white text-2xl font-bold mb-2">트레이닝 완료</h1>
+          <p className="text-gray-400 text-base mb-10 text-center">
+            {state.title ? `${state.title}의 ` : ''}점등 신호를 모두 보냈어요.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate('/training', { replace: true })}
+            className="w-full max-w-sm py-4 rounded-2xl font-semibold"
+            style={{ backgroundColor: '#AAED10', color: '#000000' }}
+          >
+            확인
+          </button>
+        </div>
+      </MobileLayout>
+    );
+  }
 
   // 점수 산출이 없는 트레이닝 (자유 트레이닝 등)
   if (hasPayload && state?.yieldsScore === false) {
