@@ -8,6 +8,7 @@ import {
   type WebToNativeMessage,
 } from '@noilink/shared';
 import { isNoiLinkNativeShell } from './initNativeBridge';
+import { getBleFirmwareReady } from './bleFirmwareReady';
 
 function newRequestId(): string {
   const c = globalThis.crypto;
@@ -15,8 +16,28 @@ function newRequestId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+/**
+ * 펌웨어 미탑재 기기(예: u-blox NINA-B1 디폴트 펌웨어, 광고명 'NINA-B1-XXXXXX')에
+ * BLE write 를 보내봐야 모듈 단에서 무시되며, 일부 펌웨어는 응답이 없어
+ * withResponse write 가 timeout → ack(false) 토스트로 이어진다.
+ *
+ * 그래서 "정식 펌웨어 아님(=getBleFirmwareReady() === false)" 으로 확인된 경우에는
+ * write 류 메시지만 silent no-op 처리한다. 스캔/연결/구독/재연결 같은 비-write
+ * 메시지는 그대로 보내, 디바이스 페이지의 연결 흐름과 TOUCH notify(펌웨어가
+ * 들어오면 자동으로 살아남) 는 영향이 없다.
+ */
+const BLE_WRITE_TYPES: ReadonlySet<WebToNativeMessage['type']> = new Set([
+  'ble.writeLed',
+  'ble.writeSession',
+  'ble.writeControl',
+  'ble.writeCharacteristic',
+]);
+
 function post(message: WebToNativeMessage): void {
   if (!isNoiLinkNativeShell()) return;
+  if (BLE_WRITE_TYPES.has(message.type) && getBleFirmwareReady() === false) {
+    return;
+  }
   window.ReactNativeWebView!.postMessage(JSON.stringify(message));
 }
 
