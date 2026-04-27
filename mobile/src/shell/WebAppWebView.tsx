@@ -1,7 +1,8 @@
 import { NATIVE_BRIDGE_VERSION } from '@noilink/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { BackHandler, Platform, StyleSheet, View } from 'react-native';
 import WebView from 'react-native-webview';
+import type { WebViewNavigation } from 'react-native-webview';
 import { getStoredToken, getStoredUserDisplay } from '../auth/storage';
 import { dispatchWebMessage, ensureAppLifecycleHandlerBound } from '../bridge/NativeBridgeDispatcher';
 import { postNativeToWeb, registerWebViewInjector } from '../bridge/injectToWeb';
@@ -16,6 +17,11 @@ export default function WebAppWebView() {
     userId: string | null;
     displayName: string | null;
   } | null>(null);
+  // Android 하드웨어 백 키 처리에 필요. WebView 의 내부 history 깊이를 추적해
+  // 화면 안에서 뒤로 갈 곳이 있으면 앱 종료 대신 WebView 를 한 단계 되돌린다.
+  // SPA(react-router)도 history.pushState 를 쓰기 때문에 안드로이드 WebView 의
+  // canGoBack 이 정상적으로 갱신된다.
+  const canGoBackRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,6 +59,25 @@ export default function WebAppWebView() {
     };
   }, []);
 
+  // Android 하드웨어 뒤로가기 — 화면 안에서 뒤로 갈 곳이 있으면 앱 종료를
+  // 막고 WebView 한 단계 뒤로. 루트(첫 화면)에서는 기본 동작(앱 종료 또는
+  // OS 처리)을 그대로 따른다. iOS 는 하드웨어 백 키가 없어 noop.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (canGoBackRef.current && webRef.current) {
+        webRef.current.goBack();
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, []);
+
+  const onNavigationStateChange = useCallback((state: WebViewNavigation) => {
+    canGoBackRef.current = state.canGoBack;
+  }, []);
+
   const onMessage = useCallback((event: { nativeEvent: { data: string } }) => {
     void dispatchWebMessage(event.nativeEvent.data);
   }, []);
@@ -86,6 +111,7 @@ export default function WebAppWebView() {
       onLoadEnd={() => {
         void pushFreshSessionToWeb();
       }}
+      onNavigationStateChange={onNavigationStateChange}
       setSupportMultipleWindows={false}
       allowsInlineMediaPlayback
       mediaPlaybackRequiresUserAction={false}

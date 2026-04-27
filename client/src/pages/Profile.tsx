@@ -107,8 +107,6 @@ export default function Profile() {
         touchAction: 'pan-y',
         overscrollBehavior: 'none',
         position: 'relative',
-        overflow: 'hidden',
-        paddingBottom: 'env(safe-area-inset-bottom)',
       }}
     >
       {/* 성공 배너 */}
@@ -151,11 +149,10 @@ export default function Profile() {
       <div
         className="max-w-md mx-auto px-4 pt-4"
         style={{
-          paddingBottom: 'calc(96px + env(safe-area-inset-bottom))',
-          overflowY: 'auto',
-          height: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 48px - 64px - 12px)',
-          maxHeight: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 48px - 64px - 12px)',
-          WebkitOverflowScrolling: 'touch',
+          // 외곽 MobileLayout 스크롤 컨테이너를 사용 (자체 스크롤/height 설정 제거).
+          // 하단바(고정 pill) 가림 방지: nav 콘텐츠 ~76px + nav paddingBottom 12px
+          // + safe-area + 여유 = 약 130px 확보.
+          paddingBottom: 'calc(130px + env(safe-area-inset-bottom))',
         }}
       >
 
