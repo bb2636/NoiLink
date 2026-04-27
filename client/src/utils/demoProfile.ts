@@ -50,8 +50,9 @@ export const DEMO_PROFILE = {
   // 랭킹
   rankByTab: { composite: 13, time: 27, streak: 19 } as Record<'composite' | 'time' | 'streak', number>,
 
-  // 트렌드
-  trendPoints: [62, 66, 70, 68, 72, 75, 78, 80] as number[],
+  // 트렌드 — 최근 10회 트레이닝 기록(홈 화면 점수 변화 라인 차트, X축 1~10)
+  // 마지막 점수(80) - 첫 점수(60) = 20점 → "트레이닝 점수가 20점 상승했네요!" 카피와 일치
+  trendPoints: [60, 62, 65, 64, 68, 70, 73, 75, 78, 80] as number[],
 
   // 자주하는 트레이닝
   topTrainings: ['기억력 트레이닝', '집중력 트레이닝', '프리트레이닝'] as string[],

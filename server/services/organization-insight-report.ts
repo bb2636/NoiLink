@@ -23,7 +23,7 @@ const BRAINIMAL_LABEL: Record<BrainimalType, string> = {
   BEAR_ENDURANCE: '끈기있는 곰',
   DOLPHIN_BRILLIANT: '명석한 돌고래',
   TIGER_STRATEGIC: '전략적인 호랑이',
-  FOX_BALANCED: '균형적인 여우',
+  FOX_BALANCED: '균형 잡힌 여우',
   CAT_DELICATE: '섬세한 고양이',
   EAGLE_INSIGHT: '통찰력의 독수리',
   LION_BOLD: '대담한 사자',

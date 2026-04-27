@@ -38,9 +38,10 @@ function resolveVariant(
 ): HomeVariant {
   if (!user) return 'first-time';
   if (user.userType === 'ORGANIZATION') return 'enterprise';
-  // TODO: 실 데이터 도입 시 first-time/broken 분기 복구
-  // 데모: 항상 streak-active 화면(목업)을 노출하여 빈 화면 방지
-  return 'streak-active';
+  // TODO: 실 데이터 도입 시 first-time 분기 복구.
+  // 데모: 첨부 이미지(연속 트레이닝이 끊긴 상태) 와 동일 화면을 보여주기 위해
+  //       streak-broken 으로 노출 — 🔥 + "시작하기" 버튼이 함께 표시된다.
+  return 'streak-broken';
 }
 
 export default function Home() {
@@ -235,13 +236,13 @@ function StandardHome({ variant, home, user }: StandardProps) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.05 }}
           className="rounded-2xl p-4 mb-6"
-          style={{ backgroundColor: '#1A1A1A' }}
+          style={{ backgroundColor: '#0E1812' }}
         >
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <div
                 className="w-9 h-9 rounded-full flex items-center justify-center overflow-hidden"
-                style={{ backgroundColor: '#2A2A2A' }}
+                style={{ backgroundColor: '#1F2A24' }}
               >
                 <img
                   src={brainimalInfo.icon}
@@ -253,7 +254,7 @@ function StandardHome({ variant, home, user }: StandardProps) {
             </div>
             <span
               className="px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1.5"
-              style={{ backgroundColor: '#2A2A2A', color: brainimalInfo.color }}
+              style={{ backgroundColor: `${brainimalInfo.color}26`, color: brainimalInfo.color }}
             >
               <img src={brainimalInfo.icon} alt="" className="w-4 h-4 rounded-full object-cover" />
               {brainimalInfo.name}
@@ -270,7 +271,7 @@ function StandardHome({ variant, home, user }: StandardProps) {
 
         {/* 트레이닝 요약 */}
         <h2 className="text-white text-base font-semibold mb-3">트레이닝 요약</h2>
-        <div className="rounded-2xl p-4 mb-6" style={{ backgroundColor: '#1A1A1A' }}>
+        <div className="rounded-2xl p-4 mb-6" style={{ backgroundColor: '#0E1812' }}>
           <div className="flex items-center justify-between mb-4">
             <span className="px-2.5 py-1 rounded-full text-xs font-semibold text-black" style={{ backgroundColor: '#AAED10' }}>
               주간 성장률 +{weeklyChange}
@@ -319,7 +320,7 @@ function StandardHome({ variant, home, user }: StandardProps) {
 
         {/* 나의 트렌드 */}
         <h2 className="text-white text-base font-semibold mb-3">나의 트렌드</h2>
-        <div className="rounded-2xl p-4 mb-5" style={{ backgroundColor: '#1A1A1A' }}>
+        <div className="rounded-2xl p-4 mb-5" style={{ backgroundColor: '#0E1812' }}>
           <div className="grid grid-cols-7 gap-1">
             {weekdayLabels.map((d, i) => (
               <div key={d} className="flex flex-col items-center gap-2">
@@ -338,11 +339,11 @@ function StandardHome({ variant, home, user }: StandardProps) {
         {/* 연속 트레이닝 트렌드 — variant별 분기 */}
         <StreakSection variant={variant} streakDays={streakDays} onStart={() => navigate('/training')} />
 
-        {/* 최근 트레이닝 점수 변화 */}
+        {/* 최근 트레이닝 점수 변화 — 최근 10회 트레이닝 기록 반영 */}
         <h2 className="text-white text-base font-semibold mt-6 mb-3">최근 트레이닝 점수 변화 트렌드</h2>
-        <div className="rounded-2xl p-4" style={{ backgroundColor: '#1A1A1A' }}>
+        <div className="rounded-2xl p-4" style={{ backgroundColor: '#0E1812' }}>
           <div className="text-sm mb-3" style={{ color: '#AAED10' }}>
-            트레이닝 점수가 {scoreUpDelta > 0 ? `+${scoreUpDelta}` : scoreUpDelta}점 변화했어요
+            트레이닝 점수가 {scoreUpDelta > 0 ? `${scoreUpDelta}점 상승했네요!` : `${scoreUpDelta}점 변화했어요`}
           </div>
           <MiniLineChart points={trendPoints} />
         </div>
@@ -370,15 +371,17 @@ function StreakSection({
       className="rounded-2xl p-4 relative overflow-hidden"
       style={{
         background: isActive
-          ? 'radial-gradient(120% 100% at 100% 50%, rgba(170,237,16,0.18) 0%, rgba(170,237,16,0.05) 35%, #1A1A1A 70%)'
-          : 'linear-gradient(135deg, #1a2a1a 0%, #1A1A1A 100%)',
+          ? 'radial-gradient(120% 100% at 100% 50%, rgba(170,237,16,0.18) 0%, rgba(170,237,16,0.05) 35%, #0E1812 70%)'
+          : 'radial-gradient(120% 100% at 100% 50%, rgba(170,237,16,0.18) 0%, rgba(170,237,16,0.06) 40%, #0E1812 75%)',
       }}
     >
       <div className="flex items-center justify-between relative z-10">
         <div className="flex-1">
           <div className="text-white font-semibold mb-1">연속 트레이닝 트렌드</div>
           <div className="text-gray-400 text-xs leading-relaxed whitespace-pre-line">
-            {isActive ? '꾸준함이 확실히 쌓이고 있어요!' : '오늘 훈련을 완료하면\n연속 트레이닝 불씨가 켜져요!'}
+            {isActive
+              ? '꾸준함이 확실히 쌓이고 있어요!'
+              : '오늘 훈련을 안 하면\n연속 트레이닝 불씨가 꺼져요!'}
           </div>
         </div>
 

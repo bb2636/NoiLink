@@ -73,7 +73,8 @@ function deriveStats(
     .map((x) => ({ ...x, score: scoreOf(x.s, x.m) }))
     .filter((x): x is typeof x & { score: number } => x.score !== null);
 
-  const trendPoints = scored.slice(-8).map((x) => x.score);
+  // 점수 변화 트렌드 — 최근 10회 트레이닝 기록 반영(홈 화면 라인 차트 X축 1~10)
+  const trendPoints = scored.slice(-10).map((x) => x.score);
 
   // BPM 평균 — 최근 7개
   const recentBpm = indexed.slice(-7).map((x) => x.s.bpm).filter((b) => typeof b === 'number' && b > 0);
@@ -81,14 +82,16 @@ function deriveStats(
     ? Math.round(recentBpm.reduce((a, b) => a + b, 0) / recentBpm.length)
     : null;
 
-  // 주간 변화: 최신 점수 - 7개 전 점수 (없으면 첫 점수)
+  // 주간 변화: 최신 점수 - 7개 전 점수 (없으면 첫 점수).
+  // scoreUpDelta: 트렌드 윈도우(최근 10회) 시작점 대비 마지막 점수의 상승폭 — 카드 카피
+  // "트레이닝 점수가 N점 상승했네요!"가 라인 차트와 일치하도록 동일 윈도우를 쓴다.
   let weeklyChange: number | null = null;
   let scoreUpDelta: number | null = null;
   if (scored.length >= 2) {
     const last = scored[scored.length - 1].score;
     const ref = scored[Math.max(0, scored.length - 8)].score;
     weeklyChange = last - ref;
-    scoreUpDelta = last - scored[scored.length - 2].score;
+    scoreUpDelta = trendPoints.length >= 2 ? last - trendPoints[0] : last - scored[scored.length - 2].score;
   }
 
   // 브레인 인덱스 — 최근 3회 평균

@@ -65,9 +65,9 @@ export const BRAINIMAL_INFO: Record<BrainimalType, BrainimalInfo> = {
   FOX_BALANCED: {
     icon: foxIcon,
     emoji: '🦊',
-    name: '균형적인 여우',
+    name: '균형 잡힌 여우',
     description: '모든 지표가 고르게 발달되어 있어 안정적인 능력을 보입니다.',
-    color: '#ea580c',
+    color: '#F59E0B',
   },
   CAT_DELICATE: {
     icon: catIcon,
