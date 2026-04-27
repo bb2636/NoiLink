@@ -347,14 +347,14 @@ function PodSlot({
 
   return (
     <div
-      className="rounded-xl px-2.5 py-2.5 flex flex-col items-stretch min-h-[72px]"
+      className="rounded-xl px-3 py-3 flex flex-col items-stretch min-h-[84px]"
       style={{
         backgroundColor: '#1A1A1A',
         border: isSelected ? `1.5px solid ${accent}` : '1.5px solid #2A2A2A',
       }}
     >
       {/* 위 라벨 (번호 + Pod N) */}
-      <div className="flex items-center gap-1.5 mb-2">
+      <div className="flex items-center gap-1.5 mb-2.5">
         <span
           className="text-[11px] font-bold w-4 h-4 rounded-[3px] flex items-center justify-center leading-none"
           style={{
@@ -373,19 +373,19 @@ function PodSlot({
         </span>
       </div>
 
-      {/* 토글 또는 기기 관리 */}
+      {/* 토글 또는 기기 관리 — 카드 가로 중앙 정렬 */}
       {hasDevice ? (
         <button
           onClick={onToggle}
           disabled={disabled}
-          className="self-start"
+          className="self-center"
         >
           <Toggle on={isSelected} />
         </button>
       ) : (
         <button
           onClick={onManage}
-          className="text-[11px] text-left"
+          className="text-[11px] self-center"
           style={{ color: '#666' }}
         >
           기기 관리 &gt;
