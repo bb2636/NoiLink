@@ -71,13 +71,19 @@ export default function Device() {
     isConnected: connectedId === d.id,
   }));
 
-  // localStorage / 네이티브 BLE 이벤트로 연결 상태 동기화
+  // localStorage / 네이티브 BLE 이벤트로 연결 상태 동기화.
+  // (1) 'storage' — 다른 탭/창에서 변경된 경우 (web 전용)
+  // (2) 'noilink-native-bridge' (ble.connection) — native 측 BLE 연결/해제
+  // (3) visibilitychange / focus — 다른 페이지에서 연결/해제가 일어난 뒤
+  //     디바이스 페이지로 돌아오거나, 폰을 잠갔다 깨운 직후에도 마지막
+  //     상태가 즉시 화면에 반영되도록 보강. 사용자가 "기기 관리에서
+  //     실시간으로 보이지 않는다"고 신고한 케이스 대응.
   useEffect(() => {
-    const storageHandler = () => {
+    const reloadFromStorage = () => {
       setConnectedId(getConnectedDeviceId());
       setRegistered(loadRegisteredDevices());
     };
-    window.addEventListener('storage', storageHandler);
+    window.addEventListener('storage', reloadFromStorage);
 
     const bridgeHandler = (e: Event) => {
       const msg = (e as CustomEvent<NativeToWebMessage>).detail;
@@ -91,6 +97,8 @@ export default function Device() {
           );
         } catch {}
         setConnectedId(c.id);
+        // 새 기기가 native 단에서 막 등록된 경우도 함께 끌어온다.
+        setRegistered(loadRegisteredDevices());
       } else {
         // 연결 종료 (정상/오류 모두)
         localStorage.removeItem(STORAGE_KEYS.CONNECTED_DEVICE);
@@ -99,9 +107,17 @@ export default function Device() {
     };
     window.addEventListener('noilink-native-bridge', bridgeHandler as EventListener);
 
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') reloadFromStorage();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', reloadFromStorage);
+
     return () => {
-      window.removeEventListener('storage', storageHandler);
+      window.removeEventListener('storage', reloadFromStorage);
       window.removeEventListener('noilink-native-bridge', bridgeHandler as EventListener);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', reloadFromStorage);
     };
   }, []);
 

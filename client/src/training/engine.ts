@@ -16,6 +16,8 @@ import type {
   TrainingMode,
 } from '@noilink/shared';
 import {
+  BPM_MAX,
+  BPM_MIN,
   COLOR_CODE,
   COMPOSITE_TOTAL_MS,
   COGNITIVE_PHASE_MS,
@@ -30,7 +32,21 @@ import {
   logicColorToCode,
   rhythmStepsForBeat,
 } from '@noilink/shared';
+
 import { bleWriteControl, bleWriteLed, bleWriteSession } from '../native/bleBridge';
+
+// BLE 송신용 BPM 안전벨트.
+// 사용자가 0~59 같은 범위 밖 값으로 시작하더라도 펌웨어 스키마(60~200)를
+// 위반해 native 가 ack 거부 → "내부 오류" 토스트가 뜨는 사고를 막는다.
+// 화면 측(TrainingSetup)에서도 동일 범위로 입력을 막지만 엔진 자체에서도
+// 한 번 더 가두는 것이 안전.
+function clampBpmForBle(bpm: number): number {
+  if (!Number.isFinite(bpm)) return BPM_MIN;
+  const rounded = Math.round(bpm);
+  if (rounded < BPM_MIN) return BPM_MIN;
+  if (rounded > BPM_MAX) return BPM_MAX;
+  return rounded;
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // 색상/Pod 상태
@@ -278,7 +294,7 @@ export class TrainingEngine {
         const firstPhase = first.type === 'RHYTHM' ? SESSION_PHASE_RHYTHM : SESSION_PHASE_COGNITIVE;
         this.currentBlePhase = firstPhase;
         bleWriteSession({
-          bpm: this.cfg.bpm,
+          bpm: clampBpmForBle(this.cfg.bpm),
           level: this.cfg.level,
           phase: firstPhase,
           durationSec: Math.round(first.durationMs / 1000),
@@ -290,7 +306,7 @@ export class TrainingEngine {
       this.currentCognitiveMode = this.cfg.mode === 'FREE' ? 'FOCUS' : this.cfg.mode;
       this.currentBlePhase = SESSION_PHASE_COGNITIVE;
       bleWriteSession({
-        bpm: this.cfg.bpm,
+        bpm: clampBpmForBle(this.cfg.bpm),
         level: this.cfg.level,
         phase: SESSION_PHASE_COGNITIVE,
         durationSec: Math.round(this.cfg.totalDurationMs / 1000),
@@ -462,7 +478,7 @@ export class TrainingEngine {
     if (blePhase !== this.currentBlePhase) {
       this.currentBlePhase = blePhase;
       bleWriteSession({
-        bpm: this.cfg.bpm,
+        bpm: clampBpmForBle(this.cfg.bpm),
         level: this.cfg.level,
         phase: blePhase,
         durationSec: Math.round(seg.durationMs / 1000),
@@ -476,7 +492,11 @@ export class TrainingEngine {
 
   // ───── tick 루프 ────────────────────────────────────────────────────
   private startTickLoop(durationMs: number, onPhaseEnd?: () => void): void {
-    const beatMs = Math.max(120, Math.round(60_000 / this.cfg.bpm));
+    // 내부 tick 주기 계산도 BPM 안전벨트(60~200)를 거친 값으로. cfg.bpm 이
+    // 어떤 경로로든 0/Infinity/NaN 으로 들어오면 60_000/bpm 가 NaN 이 되어
+    // tick 루프가 멈춘다. Math.max(120, …) 가 NaN 을 잡지 못하므로 입력
+    // 단계에서 clamp 해 두는 것이 안전.
+    const beatMs = Math.max(120, Math.round(60_000 / clampBpmForBle(this.cfg.bpm)));
     const tickInterval = beatMs; // 1 beat = 1 tick
     const phaseStart = Date.now();
     const segIsRhythm =
