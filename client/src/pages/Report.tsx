@@ -6,7 +6,7 @@ import RadarChart from "../components/RadarChart";
 import MultiTrendChart, {
   type TrendPoint,
 } from "../components/MultiTrendChart/MultiTrendChart";
-import { calculateBrainAge, calculateBrainAgeChange } from "../utils/brainAge";
+import { calculateBrainAge } from "../utils/brainAge";
 import { getBrainimalIcon, DEFAULT_BRAINIMAL } from "../utils/brainimalIcons";
 import { DEMO_PROFILE, DEMO_METRICS } from "../utils/demoProfile";
 import {
@@ -134,7 +134,7 @@ function HelpTooltip({
       </div>
       {open && (
         <div
-          className="absolute left-0 top-full mt-2 z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-full px-3 py-1 text-[12px]"
+          className="absolute left-0 top-full mt-2 z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-full px-3 py-0.5 text-[11px] leading-none"
           style={{ backgroundColor: "#2A2A2A", color: "#E5E5E5" }}
         >
           <span>{text}</span>
@@ -145,7 +145,7 @@ function HelpTooltip({
               setOpen(false);
             }}
             aria-label="닫기"
-            className="text-[12px] leading-none"
+            className="text-[11px] leading-none"
             style={{ color: "#888" }}
           >
             ✕
@@ -436,11 +436,6 @@ export default function Report() {
   const displayBrainAge =
     displayUser.brainAge ??
     calculateBrainAge(effectiveReport.metricsScore, displayUser.age);
-  const brainAgeChange = calculateBrainAgeChange(
-    displayBrainAge,
-    displayUser.previousBrainAge,
-  );
-
   // 내 프로필 카드용: 실제 나이 대비 뇌지컬 나이 차이
   // diff = 뇌지컬 나이 - 실제 나이
   // diff <= 0 (뇌지컬이 어리거나 같음) → 파란색
@@ -622,11 +617,11 @@ export default function Report() {
             border: "1px solid #2A3A12",
           }}
         >
-          <p className="text-xs mb-3" style={{ color: "#B6B6B9" }}>
-            {displayUser.name}님의 브레이니멀
+          <p className="text-xs mb-4" style={{ color: "#B6B6B9" }}>
+            {displayUser.name}님, 축하드려요.
           </p>
           <div
-            className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center mb-3"
+            className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center mb-4"
             style={{ backgroundColor: "#0F0F0F", border: "1px solid #2A2A2A" }}
           >
             {brainimalInfo.icon ? (
@@ -639,16 +634,24 @@ export default function Report() {
               <span className="text-3xl">{brainimalInfo.emoji}</span>
             )}
           </div>
-          <p className="text-xl font-bold" style={{ color: "#AAED10" }}>
+          <p className="text-2xl font-bold mb-3" style={{ color: "#AAED10" }}>
             {brainimalInfo.name}
           </p>
-          {brainAgeChange && (
-            <p className="text-xs mt-2" style={{ color: "#B6B6B9" }}>
-              <span className="text-white font-semibold">
-                {brainAgeChange.value}점
-              </span>{" "}
-              이 {brainAgeChange.isImproved ? "올랐어요" : "내렸어요"}
-            </p>
+          {brainAgeVsActualDiff !== null && (
+            <>
+              <p className="text-xs" style={{ color: "#B6B6B9" }}>
+                {brainAgeVsActualDiff === 0
+                  ? "두뇌 나이 평균과"
+                  : "두뇌 나이 평균보다"}
+              </p>
+              <p className="text-base font-bold text-white mt-0.5">
+                {brainAgeVsActualDiff < 0
+                  ? `${Math.abs(brainAgeVsActualDiff)}살 더 젊어요!`
+                  : brainAgeVsActualDiff > 0
+                    ? `${brainAgeVsActualDiff}살 더 많아요`
+                    : "같아요"}
+              </p>
+            </>
           )}
         </div>
       </section>

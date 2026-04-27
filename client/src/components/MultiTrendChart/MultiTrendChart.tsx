@@ -170,7 +170,7 @@ export default function MultiTrendChart({ data, height = 220, headerLeft }: Mult
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
-            className="flex items-center gap-2 px-4 py-1 rounded-full text-sm font-medium border"
+            className="flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-medium border leading-none"
             style={{
               backgroundColor: '#FFFFFF',
               borderColor: '#FFFFFF',
@@ -178,7 +178,7 @@ export default function MultiTrendChart({ data, height = 220, headerLeft }: Mult
             }}
           >
             <span>{triggerLabel}</span>
-            <span className="text-xs" style={{ color: '#000' }}>
+            <span className="text-[10px]" style={{ color: '#000' }}>
               ▾
             </span>
           </button>

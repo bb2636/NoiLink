@@ -48,20 +48,3 @@ export function calculateBrainAge(
   return Math.max(10, Math.min(100, brainAge)); // 10~100세 범위 제한
 }
 
-/**
- * 뇌지컬 나이 변화량 계산
- */
-export function calculateBrainAgeChange(
-  currentBrainAge: number,
-  previousBrainAge?: number
-): { value: number; isImproved: boolean } | null {
-  if (previousBrainAge === undefined) {
-    return null;
-  }
-
-  const change = currentBrainAge - previousBrainAge;
-  return {
-    value: Math.abs(change),
-    isImproved: change < 0, // 나이가 줄어들면 개선
-  };
-}
