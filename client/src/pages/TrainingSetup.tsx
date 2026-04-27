@@ -48,7 +48,6 @@ export default function TrainingSetup() {
   const { mode } = useParams<{ mode: string }>();
   const { user } = useAuth();
 
-  const isEnterprise = user?.userType === 'ORGANIZATION';
   // 기업 소속(관리자 또는 승인된 개인 회원) — 진행 회원/색상 섹션 노출
   const hasOrganization = !!user?.organizationId;
   const info = mode ? TRAINING_BY_ID[mode] : null;
@@ -278,8 +277,9 @@ export default function TrainingSetup() {
           </div>
         </section>
 
-        {/* 색상 — 기업 회원 전용 */}
-        {isEnterprise && (
+        {/* 색상 — 진행 회원과 동일하게 기업 소속(관리자 + 승인된 개인) 전체에 노출.
+              (이전에는 isEnterprise(관리자만)로 게이트되어 있어 조직 소속 일반 회원에게는 안 보였음) */}
+        {hasOrganization && (
           <section className="mb-6">
             <h2 className="text-sm font-semibold text-white mb-3">색상</h2>
             <div className="flex items-center gap-3">
