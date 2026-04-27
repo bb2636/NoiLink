@@ -58,10 +58,17 @@ export function getLastBleDeviceName(): string | null {
 
 /**
  * 현재 연결 대상이 정식 펌웨어를 탑재했다고 추정되는가?
- * - 한 번도 연결된 적 없으면 null (= 알 수 없음 → 안전하게 send 를 시도)
- * - 연결된 적 있는 경우, 이름이 'NoiPod-' 로 시작하면 true, 아니면 false
+ *
+ * 정책 변경(사용자 결정): NoiLink 의 본질은 "앱은 타이머 + 신호 전달기,
+ * 실제 점등/입력 캡처는 기기 펌웨어"이다. 따라서 광고명 휴리스틱으로
+ * 임의로 시연 모드를 끼워넣지 않는다. 항상 정식 펌웨어가 있다고 가정해
+ * BLE write 를 native 로 그대로 보낸다. 기기 펌웨어가 없거나 응답이 없는
+ * 케이스는 사용자가 BLE 단절/응답 부재로 인지한다.
+ *
+ * 모듈 자체와 `looksLikeNoiPodFirmware` / `setBleConnectedDeviceName` 등은
+ * 디버그·향후 명시적 토글(예: 디바이스 페이지의 "데모 모드" 스위치)용으로
+ * 그대로 둔다.
  */
 export function getBleFirmwareReady(): boolean | null {
-  if (lastDeviceName == null) return null;
-  return looksLikeNoiPodFirmware(lastDeviceName);
+  return true;
 }

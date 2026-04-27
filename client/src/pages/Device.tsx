@@ -11,6 +11,7 @@ import { ensureDemoDevicesSeeded } from '../utils/seedDemoDevices';
 import { bleConnect, bleDisconnect } from '../native/bleBridge';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { subscribeAckErrorBanner, type AckBannerSubscription } from '../native/nativeAckErrors';
+import { getLegacyBleMode, setLegacyBleMode, subscribeLegacyBleMode } from '../native/legacyBleMode';
 import type { NativeToWebMessage } from '@noilink/shared';
 
 export interface DeviceInfo {
@@ -63,6 +64,9 @@ export default function Device() {
   // 브릿지가 web→native 메시지를 거부할 때 (`native.ack.ok=false`) 화면에 띄울 안내.
   // 핵심 흐름(연결/해제) 도중 조용히 실패하지 않도록 짧은 토스트로 사유를 노출한다 (Task #77).
   const [ackErrorBanner, setAckErrorBanner] = useState<string | null>(null);
+  // 레거시 BLE 모드 토글 (NoiPod 정식 펌웨어 미탑재 NINA-B1 모듈용)
+  const [legacyMode, setLegacyModeState] = useState<boolean>(getLegacyBleMode);
+  useEffect(() => subscribeLegacyBleMode(setLegacyModeState), []);
 
   const devicesWithConnection: DeviceInfo[] = registered.map((d) => ({
     id: d.id,
@@ -256,6 +260,49 @@ export default function Device() {
           <span className="text-3xl mr-2">+</span>
           <span className="font-semibold">기기 추가</span>
         </button>
+
+        {/* 레거시 점등 모드 토글
+            - 기기에 NoiPod 정식 펌웨어가 아직 들어가지 않은 경우(예: 광고명
+              'NINA-B1-XXXXXX'),  앱이 보내는 12바이트 NoiPod 프레임을 펌웨어가
+              해석하지 못해 LED 가 안 바뀐다.
+            - 이 토글을 켜면 LED 점등에 한해 짧은 명령 `4e <pod+1> 0d`,
+              START `aa 55`, STOP `ff` 형식으로 송신해, 단순 LED 컨트롤러
+              펌웨어에서도 점등이 동작하도록 한다.
+            - 정식 펌웨어가 들어가면 OFF 로 두고 기본 NoiPod 프로토콜을 사용. */}
+        <div
+          className="mt-6 rounded-2xl p-4"
+          style={{ backgroundColor: '#1A1A1A' }}
+        >
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div>
+              <div className="font-semibold" style={{ color: '#FFFFFF' }}>
+                레거시 점등 모드
+              </div>
+              <div className="text-xs mt-1" style={{ color: '#999999' }}>
+                NoiPod 정식 펌웨어 미탑재 기기(예: NINA-B1-XXXXXX)에서
+                LED 점등을 동작시키려면 켜세요.
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={legacyMode}
+              onClick={() => setLegacyBleMode(!legacyMode)}
+              className="relative w-12 h-7 rounded-full transition-colors flex-shrink-0"
+              style={{ backgroundColor: legacyMode ? '#AAED10' : '#333333' }}
+            >
+              <span
+                className="absolute top-0.5 w-6 h-6 rounded-full bg-white transition-transform"
+                style={{ transform: legacyMode ? 'translateX(22px)' : 'translateX(2px)' }}
+              />
+            </button>
+          </div>
+          {legacyMode && (
+            <div className="text-xs mt-2" style={{ color: '#AAED10' }}>
+              ON: 점등 신호를 짧은 명령으로 보냅니다. 입력은 화면 탭으로 받습니다.
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 브릿지 거부(ack ok=false) 토스트 — 한국어 안내 + 디버그 키 (Task #77).

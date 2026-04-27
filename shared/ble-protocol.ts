@@ -439,3 +439,41 @@ export function mixedColorRate(level: number): number {
   if (level >= 5) return 0.35;
   return ((level - 1) / 4) * 0.35;
 }
+
+// ---------------------------------------------------------------------------
+// 레거시 모드 인코더 (NoiPod 정식 펌웨어 미탑재 모듈용)
+//
+// NINA-B1 디폴트 펌웨어 또는 그 위에 얹힌 단순 LED 컨트롤러 펌웨어가
+// 12바이트 NoiPod 프레임을 모르는 경우 사용한다. 참조: savexx 스펙
+// (`attached_assets/BLE_SAVEXX_FULL_SPEC_*.md`) §11 / §12.5
+//
+//   - LED 점등 :  `4e <pod+1 1바이트> 0d` (3바이트, "N" + idx + CR)
+//   - START    :  `aa 55`
+//   - STOP     :  `ff`
+//
+// 색상 / onMs 는 레거시 펌웨어가 자체적으로 처리(또는 무시)하므로 페이로드에
+// 싣지 않는다. SESSION 메타(BPM/level/durationSec)도 레거시 펌웨어가
+// 모르므로 호출부에서 송신 자체를 생략한다.
+// ---------------------------------------------------------------------------
+
+/**
+ * 레거시 LED 점등 프레임. pod 0..7 만 허용(spec §11 COLOR 1..8 슬롯).
+ * 우리 앱은 pod 0..3 만 사용하지만 향후 확장에 대비해 0..7 허용.
+ */
+export function encodeLegacyLedFrame(opts: { pod: number }): Uint8Array {
+  const pod = opts.pod | 0;
+  if (pod < 0 || pod > 7) {
+    throw new RangeError(`encodeLegacyLedFrame: pod out of range (0..7): ${pod}`);
+  }
+  return new Uint8Array([0x4e, pod + 1, 0x0d]);
+}
+
+/** 레거시 START 프레임 `aa 55`. */
+export function encodeLegacyControlStartFrame(): Uint8Array {
+  return new Uint8Array([0xaa, 0x55]);
+}
+
+/** 레거시 STOP 프레임 `ff`. */
+export function encodeLegacyControlStopFrame(): Uint8Array {
+  return new Uint8Array([0xff]);
+}
