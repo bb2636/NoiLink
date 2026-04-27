@@ -463,15 +463,97 @@ export default function Report() {
     displayUser.organizationName ||
     (displayUser.organizationId ? "소속 기관" : null);
 
+  const handleShare = async () => {
+    const shareData = {
+      title: "NoiLink 개인 리포트",
+      text: `${displayUser.name || "내"} 뇌지컬 리포트`,
+      url: window.location.href,
+    };
+    try {
+      if (typeof navigator !== "undefined" && (navigator as Navigator & { share?: (data: ShareData) => Promise<void> }).share) {
+        await (navigator as Navigator & { share: (data: ShareData) => Promise<void> }).share(shareData);
+        return;
+      }
+    } catch {
+      // 사용자가 공유 시트를 닫은 경우 — 무시
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(shareData.url);
+      alert("링크가 복사됐어요");
+    } catch {
+      alert(shareData.url);
+    }
+  };
+
   return (
-    <div
-      className="px-4 pb-6 space-y-5"
-      style={{
-        paddingTop: "calc(1.5rem + env(safe-area-inset-top))",
-        paddingBottom: "120px",
-        color: "#fff",
-      }}
-    >
+    <div style={{ color: "#fff" }}>
+      {/* 상단 고정 헤더 — 휴대폰 상태바(safe-area) 분리 + 본문과 구분되는 보더 */}
+      <header
+        className="sticky top-0 z-30"
+        style={{
+          backgroundColor: "#0A0A0A",
+          paddingTop: "env(safe-area-inset-top)",
+          borderBottom: "1px solid #1A1A1A",
+        }}
+      >
+        <div className="px-4 h-12 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              viewBox="0 0 24 24"
+              style={{ color: "#AAED10" }}
+              aria-hidden
+            >
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <path d="M14 2v6h6" />
+              <path d="M9 18v-3" />
+              <path d="M12 18v-6" />
+              <path d="M15 18v-2" />
+            </svg>
+            <span className="text-[15px] font-semibold text-white">
+              개인 리포트
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleShare}
+            className="p-2 -mr-2 rounded-full"
+            aria-label="리포트 공유"
+            style={{ color: "#fff" }}
+          >
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              viewBox="0 0 24 24"
+              aria-hidden
+            >
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div
+        className="px-4 pb-6 space-y-5"
+        style={{
+          paddingTop: "1rem",
+          paddingBottom: "120px",
+        }}
+      >
       {/* 내 프로필 */}
       <section>
         <h3 className="text-base font-bold text-white mb-2">내 프로필</h3>
@@ -701,6 +783,7 @@ export default function Report() {
           않습니다.
         </p>
       </section>
+      </div>
     </div>
   );
 }
