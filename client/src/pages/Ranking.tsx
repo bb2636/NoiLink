@@ -288,12 +288,14 @@ export default function Ranking() {
             <rect x="10.25" y="7" width="3.5" height="13" rx="1" />
             <rect x="16.5" y="3" width="3.5" height="17" rx="1" />
           </svg>
-          <h1 className="text-base font-bold" style={{ color: '#fff' }}>{myCardTitle}</h1>
+          <h1 className="text-base font-bold" style={{ color: '#fff' }}>랭킹</h1>
         </div>
       </header>
 
       <div className="max-w-md mx-auto px-4 pt-4 pb-6" style={{ paddingBottom: '120px' }}>
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+          {/* 나의 랭킹 섹션 타이틀 */}
+          <h2 className="text-base font-bold text-white mb-2.5">{myCardTitle}</h2>
           {/* 나의 랭킹 카드 */}
           <div
             className="rounded-2xl p-4 mb-5"

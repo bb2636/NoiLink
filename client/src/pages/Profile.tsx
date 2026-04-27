@@ -190,20 +190,12 @@ export default function Profile() {
             {user.email || '이메일 없음'}
           </p>
 
-          {/* 기업 관리자(ORGANIZATION) — 기관 리포트 진입 */}
+          {/* 기업 관리자(ORGANIZATION) — 소속 표시 (기관 리포트 보기는 리포트 탭과 중복이라 제거) */}
           {user.userType === 'ORGANIZATION' && user.organizationId && (
             <div className="flex flex-col items-center gap-2 mb-2 w-full">
               <p className="text-center text-xs px-4 py-2 rounded-full" style={{ backgroundColor: '#1A2A1A', color: '#AAED10' }}>
                 {user.organizationName || '기업 관리자'} · 관리자
               </p>
-              <button
-                type="button"
-                onClick={() => navigate('/report/organization')}
-                className="px-6 py-2 rounded-full text-xs font-medium border text-white"
-                style={{ backgroundColor: 'transparent', borderColor: '#3a3a3a' }}
-              >
-                기관 리포트 보기
-              </button>
             </div>
           )}
 
