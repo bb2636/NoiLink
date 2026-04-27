@@ -104,6 +104,35 @@ function buildOrgRowsFromMembers(members: MockMember[]): Record<TabKey, Row[]> {
 const ORG_ROWS: Record<TabKey, Row[]> = buildOrgRowsFromMembers(MOCK_MEMBERS);
 
 /**
+ * 기업 랭킹 — 서버 응답(실데이터) + MOCK_MEMBERS 더미 멤버를 합쳐 다시 등수 매김.
+ * 더미 멤버는 OrganizationReport 의 "소속 인원 현황" 탭과 동일한 진실원이라
+ * 리포트에는 보이지만 랭킹에는 빠지는 모순을 막는다.
+ *
+ * - 동일 닉네임은 서버 측을 우선 (실데이터 신뢰).
+ * - 합쳐진 뒤 value 내림차순 정렬, 동점은 같은 등수.
+ */
+function mergeOrgRows(
+  serverRows: Record<TabKey, Row[]>,
+  mockRows: Record<TabKey, Row[]>,
+): Record<TabKey, Row[]> {
+  const out: Record<TabKey, Row[]> = { composite: [], time: [], streak: [] };
+  (Object.keys(out) as TabKey[]).forEach((k) => {
+    const seen = new Set(serverRows[k].map((r) => r.nickname));
+    const extras = mockRows[k].filter((r) => !seen.has(r.nickname));
+    const merged = [...serverRows[k], ...extras].sort((a, b) => b.value - a.value);
+    let prevValue = Number.POSITIVE_INFINITY;
+    let prevRank = 0;
+    out[k] = merged.map((r, i) => {
+      const rank = r.value === prevValue ? prevRank : i + 1;
+      prevValue = r.value;
+      prevRank = rank;
+      return { rank, nickname: r.nickname, value: r.value };
+    });
+  });
+  return out;
+}
+
+/**
  * "나의 랭킹" 카드의 4개 stat (종합·합계 시간·연속·출석률) + 등수.
  *
  * 과거: DEMO_PROFILE 하드코딩(80점/4시간/5일/90%) + user 테이블 캐시 필드를
@@ -210,9 +239,13 @@ export default function Ranking() {
                   : Math.round(e.score),
             }));
           });
-          // 어느 탭에라도 데이터가 있으면 서버값 사용
-          const hasAny = out.composite.length || out.time.length || out.streak.length;
-          if (hasAny) setServerRows(out);
+          // 기업 관리자: 더미 멤버(MOCK_MEMBERS)를 합쳐 다시 등수 매김.
+          //   서버에 멤버가 실제 user 로 등록되지 않아도, 리포트와 동일한
+          //   더미 로스터가 랭킹에서도 보이도록 일관성을 맞춘다.
+          const merged = isOrgAdmin ? mergeOrgRows(out, ORG_ROWS) : out;
+          // 어느 탭에라도 데이터가 있으면 (서버+더미) 합산값 사용
+          const hasAny = merged.composite.length || merged.time.length || merged.streak.length;
+          if (hasAny) setServerRows(merged);
         }
 
         if (user?.id) {
