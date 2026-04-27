@@ -166,7 +166,7 @@ export default function Training() {
           <svg
             className="w-4 h-4"
             fill="none"
-            stroke="#AAED10"
+            stroke="#FFFFFF"
             strokeWidth={2}
             strokeLinecap="round"
             strokeLinejoin="round"
