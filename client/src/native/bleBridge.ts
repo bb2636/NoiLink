@@ -1,5 +1,11 @@
 import {
+  COLOR_CODE,
+  CTRL_START,
+  CTRL_STOP,
   NATIVE_BRIDGE_VERSION,
+  encodeLegacyControlStartFrame,
+  encodeLegacyControlStopFrame,
+  encodeLegacyLedFrame,
   type BleScanFilterPayload,
   type ColorCode,
   type ControlCmd,
@@ -9,6 +15,7 @@ import {
 } from '@noilink/shared';
 import { isNoiLinkNativeShell } from './initNativeBridge';
 import { getBleFirmwareReady } from './bleFirmwareReady';
+import { getLegacyBleMode, uint8ArrayToBase64 } from './legacyBleMode';
 
 function newRequestId(): string {
   const c = globalThis.crypto;
@@ -120,6 +127,20 @@ export function bleWriteLed(payload: {
   flags?: number;
   mode?: 'auto' | 'withResponse' | 'withoutResponse';
 }): void {
+  // 레거시 모드: NoiPod 12바이트 프레임 대신 savexx 명세 §12.5 의 3바이트
+  // `4e <pod+1> 0d` 로 점등 신호만 전송. OFF 의도(colorCode=OFF 또는 onMs=0)는
+  // 레거시 펌웨어에서 단일 pod OFF 명령이 정의되지 않았으므로 송신 생략.
+  if (getLegacyBleMode()) {
+    const isOff = payload.colorCode === COLOR_CODE.OFF || payload.onMs === 0;
+    if (isOff) return;
+    try {
+      const bytes = encodeLegacyLedFrame({ pod: payload.pod });
+      bleWriteCharacteristic('write', uint8ArrayToBase64(bytes));
+    } catch {
+      // pod 범위 초과 등 인코딩 실패는 silent skip (트레이닝 흐름 보호)
+    }
+    return;
+  }
   post({
     v: NATIVE_BRIDGE_VERSION,
     id: newRequestId(),
@@ -136,6 +157,8 @@ export function bleWriteSession(payload: {
   durationSec: number;
   flags?: number;
 }): void {
+  // 레거시 펌웨어는 SESSION 메타를 모르므로 송신 생략.
+  if (getLegacyBleMode()) return;
   post({
     v: NATIVE_BRIDGE_VERSION,
     id: newRequestId(),
@@ -146,6 +169,15 @@ export function bleWriteSession(payload: {
 
 /** START / STOP / PAUSE 컨트롤 */
 export function bleWriteControl(cmd: ControlCmd): void {
+  // 레거시 모드: START → `aa 55`, STOP → `ff`, PAUSE → 미정의(skip).
+  if (getLegacyBleMode()) {
+    if (cmd === CTRL_START) {
+      bleWriteCharacteristic('write', uint8ArrayToBase64(encodeLegacyControlStartFrame()));
+    } else if (cmd === CTRL_STOP) {
+      bleWriteCharacteristic('write', uint8ArrayToBase64(encodeLegacyControlStopFrame()));
+    }
+    return;
+  }
   post({
     v: NATIVE_BRIDGE_VERSION,
     id: newRequestId(),

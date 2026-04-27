@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
+  encodeLegacyControlStartFrame,
+  encodeLegacyControlStopFrame,
+  encodeLegacyLedFrame,
   SYNC_BYTE,
   OP_LED,
   OP_SESSION,
@@ -554,5 +557,42 @@ describe('mixedColorRate — Lv≤1 → 0, Lv≥5 → 0.35, 사이 선형 보간
       expect(v).toBeGreaterThanOrEqual(prev);
       prev = v;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 레거시 모드 인코더 (savexx 명세 §11/§12.5)
+// ---------------------------------------------------------------------------
+
+describe('encodeLegacyLedFrame', () => {
+  it('pod 0 → 4e 01 0d', () => {
+    expect(Array.from(encodeLegacyLedFrame({ pod: 0 }))).toEqual([0x4e, 0x01, 0x0d]);
+  });
+  it('pod 1 → 4e 02 0d', () => {
+    expect(Array.from(encodeLegacyLedFrame({ pod: 1 }))).toEqual([0x4e, 0x02, 0x0d]);
+  });
+  it('pod 3 → 4e 04 0d (앱이 사용하는 4 pod 의 마지막)', () => {
+    expect(Array.from(encodeLegacyLedFrame({ pod: 3 }))).toEqual([0x4e, 0x04, 0x0d]);
+  });
+  it('pod 7 → 4e 08 0d (spec §11 COLOR 1..8 상한)', () => {
+    expect(Array.from(encodeLegacyLedFrame({ pod: 7 }))).toEqual([0x4e, 0x08, 0x0d]);
+  });
+  it('pod -1 또는 8 → RangeError', () => {
+    expect(() => encodeLegacyLedFrame({ pod: -1 })).toThrow(RangeError);
+    expect(() => encodeLegacyLedFrame({ pod: 8 })).toThrow(RangeError);
+  });
+  it('항상 길이 3', () => {
+    for (let p = 0; p <= 7; p++) {
+      expect(encodeLegacyLedFrame({ pod: p }).length).toBe(3);
+    }
+  });
+});
+
+describe('encodeLegacyControlStartFrame / encodeLegacyControlStopFrame', () => {
+  it('START → aa 55', () => {
+    expect(Array.from(encodeLegacyControlStartFrame())).toEqual([0xaa, 0x55]);
+  });
+  it('STOP → ff', () => {
+    expect(Array.from(encodeLegacyControlStopFrame())).toEqual([0xff]);
   });
 });
