@@ -66,11 +66,21 @@ export default function TermsModal({ isOpen, onClose, terms, title }: TermsModal
                 </h1>
               </div>
 
-              {/* 내용 */}
+              {/* 내용
+                  ─────────────────────────────────────────────
+                  flex 컬럼 안에서 자식에 `flex-1 + overflow-y-auto` 만 주면,
+                  flex 자식의 기본 `min-height: auto` 가 콘텐츠 높이로 잡혀서
+                  부모(`h-full`)보다 자식이 더 커지는 순간 overflow 가 부모를
+                  넘어서 버린다. 그 결과 내부 스크롤이 활성화되지 않고,
+                  긴 약관 본문의 아래쪽이 잘려 보이게 된다.
+                  → `min-h-0` 으로 자식이 부모보다 줄어들 수 있게 만들어야
+                    `overflow-y-auto` 가 실제 스크롤로 동작한다. */}
               <div 
-                className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-6"
+                className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 pb-6"
                 style={{ 
                   paddingBottom: `calc(24px + env(safe-area-inset-bottom))`,
+                  WebkitOverflowScrolling: 'touch',
+                  overscrollBehavior: 'contain',
                 }}
               >
                 {terms ? (
