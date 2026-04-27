@@ -99,16 +99,22 @@ export function bleUnsubscribeCharacteristic(subscriptionId: string): void {
 
 /**
  * Characteristic write. UUID는 네이티브 셸이 NoiPod 상수에서 매핑합니다.
+ *
+ * `mode`로 BLE write 신뢰도를 지정할 수 있다. NUS(Nordic UART) 계열 펌웨어처럼
+ * 응답을 보내지 않는 펌웨어는 'withoutResponse'를 명시해야 한다 — 'auto' 폴백이
+ * `withResponse` 시도로 넘어가면 응답이 없어 ble-plx 가 timeout 으로 누적되어
+ * 다음 write 가 silent drop 된다.
  */
 export function bleWriteCharacteristic(
   key: NoiPodCharacteristicKey,
-  base64Value: string
+  base64Value: string,
+  mode?: 'auto' | 'withResponse' | 'withoutResponse'
 ): void {
   post({
     v: NATIVE_BRIDGE_VERSION,
     id: newRequestId(),
     type: 'ble.writeCharacteristic',
-    payload: { key, base64Value },
+    payload: mode ? { key, base64Value, mode } : { key, base64Value },
   });
 }
 
@@ -135,7 +141,10 @@ export function bleWriteLed(payload: {
     if (isOff) return;
     try {
       const bytes = encodeLegacyLedFrame({ pod: payload.pod });
-      bleWriteCharacteristic('write', uint8ArrayToBase64(bytes));
+      // NUS 펌웨어는 응답을 보내지 않으므로 명시적으로 'withoutResponse' 로 송신.
+      // 'auto' 폴백이 `withResponse` 로 넘어가면 ble-plx 가 응답을 기다리다 timeout
+      // 으로 누적되어 트레이닝 박자에 맞춘 빠른 연속 LED 가 silent drop 된다.
+      bleWriteCharacteristic('write', uint8ArrayToBase64(bytes), 'withoutResponse');
     } catch {
       // pod 범위 초과 등 인코딩 실패는 silent skip (트레이닝 흐름 보호)
     }
@@ -170,11 +179,20 @@ export function bleWriteSession(payload: {
 /** START / STOP / PAUSE 컨트롤 */
 export function bleWriteControl(cmd: ControlCmd): void {
   // 레거시 모드: START → `aa 55`, STOP → `ff`, PAUSE → 미정의(skip).
+  // LED 와 동일한 이유로 NUS 펌웨어에는 'withoutResponse' 로 명시 송신.
   if (getLegacyBleMode()) {
     if (cmd === CTRL_START) {
-      bleWriteCharacteristic('write', uint8ArrayToBase64(encodeLegacyControlStartFrame()));
+      bleWriteCharacteristic(
+        'write',
+        uint8ArrayToBase64(encodeLegacyControlStartFrame()),
+        'withoutResponse',
+      );
     } else if (cmd === CTRL_STOP) {
-      bleWriteCharacteristic('write', uint8ArrayToBase64(encodeLegacyControlStopFrame()));
+      bleWriteCharacteristic(
+        'write',
+        uint8ArrayToBase64(encodeLegacyControlStopFrame()),
+        'withoutResponse',
+      );
     }
     return;
   }

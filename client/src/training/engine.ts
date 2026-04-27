@@ -35,6 +35,19 @@ import {
 
 import { bleWriteControl, bleWriteLed, bleWriteSession } from '../native/bleBridge';
 
+/**
+ * START(`aa 55`) 송신 직후 첫 LED 명령까지의 마진(ms).
+ *
+ * 사용자 NINA-B1 펌웨어 같은 NUS 계열은 START 처리에 시간이 필요한데, 이 마진이
+ * 너무 짧으면 첫 LED 명령을 통째로 무시하고 본체가 멈춰 보일 수 있다. 디바이스
+ * 화면의 점등 진단(`Device.tsx#handleTestBlink`)이 사용자 기기에서 정상 동작하는
+ * 500ms 마진과 동일하게 둔다.
+ *
+ * 변경 시 `engine.test.ts` / `engine.pauseResume.test.ts` 의 첫 tick 대기 시간도
+ * 함께 갱신해야 한다 — 두 곳 모두 본 상수를 import 해 사용한다.
+ */
+export const FIRST_TICK_DELAY_MS = 500;
+
 // BLE 송신용 BPM 안전벨트.
 // 사용자가 0~59 같은 범위 밖 값으로 시작하더라도 펌웨어 스키마(60~200)를
 // 위반해 native 가 ack 거부 → "내부 오류" 토스트가 뜨는 사고를 막는다.
@@ -659,8 +672,9 @@ export class TrainingEngine {
     };
     // pause 후 resume 시 같은 fireTick 을 재호출할 수 있도록 인스턴스 필드에 보존.
     this.currentTickFire = fireTick;
-    // 첫 tick은 살짝 딜레이(준비)
-    this.tickTimer = window.setTimeout(fireTick, 350);
+    // 첫 tick은 살짝 딜레이(준비). 디바이스 점등 진단의 START→LED 마진과 동일하게 두어
+    // NUS 계열 펌웨어가 START(`aa 55`) 를 처리할 충분한 시간을 보장한다.
+    this.tickTimer = window.setTimeout(fireTick, FIRST_TICK_DELAY_MS);
   }
 
   // ───── 일시정지 / 재개 ────────────────────────────────────────────────

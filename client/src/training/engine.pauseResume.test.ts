@@ -64,7 +64,25 @@ function controlCalls(): number[] {
 }
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  // vitest 2.x 부터 useFakeTimers 의 default toFake 에 RAF 가 빠졌으므로 elapsed RAF
+  // 검증을 위해 명시적으로 추가한다 (전체 default 목록 + RAF 한 쌍).
+  vi.useFakeTimers({
+    toFake: [
+      'setTimeout',
+      'clearTimeout',
+      'setInterval',
+      'clearInterval',
+      'setImmediate',
+      'clearImmediate',
+      'Date',
+      'queueMicrotask',
+      'requestAnimationFrame',
+      'cancelAnimationFrame',
+      'requestIdleCallback',
+      'cancelIdleCallback',
+      'performance',
+    ],
+  });
   mockedWriteLed.mockClear();
   mockedWriteControl.mockClear();
   mockedWriteSession.mockClear();
@@ -81,7 +99,7 @@ describe('TrainingEngine pause/resume', () => {
     const engine = new TrainingEngine(cfg);
     engine.start();
     // FOCUS 모드는 첫 fireTick(350ms)에서 lightSinglePod 또는 lightTwoPods 로 점등.
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(510);
 
     // 점등이 일어났는지 확인 — 색이 들어간 LED 프레임이 최소 하나는 있어야 함.
     const colorWrites = mockedWriteLed.mock.calls
@@ -158,7 +176,7 @@ describe('TrainingEngine pause/resume', () => {
     const { cfg } = makeCfg();
     const engine = new TrainingEngine(cfg);
     engine.start();
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(510);
 
     engine.pause();
     const ledAfterFirstPause = mockedWriteLed.mock.calls.length;
@@ -180,7 +198,7 @@ describe('TrainingEngine pause/resume', () => {
     const { cfg } = makeCfg();
     const engine = new TrainingEngine(cfg);
     engine.start();
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(510);
     engine.destroy();
 
     const ledBefore = mockedWriteLed.mock.calls.length;
@@ -195,7 +213,7 @@ describe('TrainingEngine pause/resume', () => {
     const { cfg } = makeCfg({ bpm: 120 }); // beat = 500ms
     const engine = new TrainingEngine(cfg);
     engine.start();
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(510);
 
     engine.pause();
     vi.advanceTimersByTime(2_000);
@@ -235,8 +253,10 @@ describe('TrainingEngine pause/resume', () => {
     vi.advanceTimersByTime(7_500);
     expect(bag.completed.length).toBe(0);
 
-    // 추가로 1s 더 흘리면 잔여시간을 모두 소진해 onComplete 가 호출된다.
-    vi.advanceTimersByTime(1_000);
+    // 추가로 1.1s 더 흘리면 잔여시간을 모두 소진해 onComplete 가 호출된다.
+    // (첫 fireTick 마진 500ms + tickInterval 1000ms 누적 시 다음 fireTick 시각이
+    // 정확히 phase 종료(8000ms) 직후 1ms 단위까지 떨어지는 것을 안전 마진으로 회피)
+    vi.advanceTimersByTime(1_100);
     expect(bag.completed.length).toBe(1);
 
     engine.destroy();
