@@ -262,6 +262,19 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
   모드의 `fireTick` 첫 호출 마진(handleTestBlink 의 START→sleep(500)→LED 와
   같은 정책) 과 일치시켜 NUS 펌웨어가 START(`aa 55`) 를 처리하는 동안 들어온
   LED 프레임을 잃어버리지 않게 한다.
+- **Native-side write 직렬화** (`mobile/src/ble/BleManager.ts`):
+  `WebAppWebView.onMessage` 가 매 메시지마다 `void dispatchWebMessage(...)` 로
+  fire-and-forget 호출하고 dispatcher 가 각 메시지를 독립 promise chain 으로
+  처리하기 때문에, JS 의 `enqueueLegacyWrite` 가 50ms 간격으로 N 개 postMessage
+  를 띄워도 native 측에는 N 개의 `writeCharacteristic` 호출이 동시 in-flight 가
+  된다. ble-plx 의 `writeCharacteristicWithoutResponseForService` 는 OS GATT 큐에
+  enqueue 하고 즉시 리턴하므로 NUS 펌웨어가 동시 폭주 frame 일부를 silent drop
+  한다(증상: JS/native 카운터는 올라가는데 본체 LED 미점등). `writeChain`
+  (Promise chain mutex) 으로 모든 write 호출을 직렬로 묶고, 직전 write 종료 후
+  `WRITE_GAP_MS=30` 만큼 갭을 둬서 펌웨어가 frame 을 처리할 시간을 확보한다.
+  handleTestBlink 가 1초 sleep 으로 자연 직렬화하던 것과 같은 효과를 트레이닝
+  포함 모든 write 경로에 일괄 적용. 한 write 실패가 이후 write 를 막지 않도록
+  `writeChain` 은 catch 로 흡수하고, public promise 만 reject 한다.
 
 ## 점등-전용 트레이닝 (현재 펌웨어 한정)
 

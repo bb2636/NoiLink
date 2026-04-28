@@ -90,6 +90,29 @@ export class NoiLinkBleController {
   private dynamicLocators: Partial<Record<NoiPodCharacteristicKey, BleCharacteristicLocator>> = {};
   private lastGattDiscovery: BleGattDiscoveryResult | null = null;
 
+  /**
+   * GATT write 직렬화 체인 — 모든 `writeCharacteristic` 호출을 한 줄로 잇는다.
+   *
+   * 배경: WebView 의 `onMessage` 는 매 메시지마다 `void dispatchWebMessage(...)` 로
+   * fire-and-forget 호출되고, dispatcher 는 각 메시지를 독립 promise chain 으로
+   * 처리한다. 즉 JS 측이 `enqueueLegacyWrite` 로 50ms 간격을 띄워도 native 측에는
+   * N 개의 `writeCharacteristic` 호출이 동시 in-flight 가 될 수 있다.
+   *
+   * react-native-ble-plx 의 `writeCharacteristicWithoutResponseForService` 는 OS 의
+   * GATT 큐에 frame 을 enqueue 하고 즉시 리턴한다. NUS 계열(NINA-B1) 펌웨어는
+   * `withoutResponse` 동시 폭주를 처리하지 못해 일부 frame 을 silent drop 하거나
+   * LED 출력 자체를 무시한다 — 증상: JS 카운터/native 카운터는 올라가는데 본체
+   * LED 가 안 변함.
+   *
+   * 본 체인은 모든 write 를 직렬로 묶어 이전 write 의 promise 가 settle 된 후에야
+   * 다음 write 를 시작한다. handleTestBlink 가 1초 sleep 으로 자연 직렬화하던
+   * 것과 같은 효과를, 모든 write 경로(트레이닝/테스트/세션 등)에 일괄 적용.
+   */
+  private writeChain: Promise<unknown> = Promise.resolve();
+  /** 각 write 사이의 최소 간격 — NUS 펌웨어가 직전 frame 을 처리할 시간을 확보. */
+  private static readonly WRITE_GAP_MS = 30;
+  private lastWriteFinishedAt = 0;
+
   /** dispatcher가 재연결 이벤트를 web으로 push하기 위해 등록 */
   setEventHandlers(handlers: BleManagerEventHandlers): void {
     this.events = handlers;
@@ -714,6 +737,12 @@ export class NoiLinkBleController {
 
   /**
    * Write 한 번에 GATT로 전송. mode 'auto'(기본)는 noResponse → 실패 시 withResponse 폴백.
+   *
+   * **직렬화**: 모든 호출은 `writeChain` 에 묶여 직전 write 의 promise 가 settle 된
+   * 후에야 다음 write 가 시작된다. 또 직전 write 종료 시각으로부터 `WRITE_GAP_MS` 가
+   * 지나야 다음 write 가 발사된다. 이 두 가지가 NUS 계열 펌웨어가 `withoutResponse`
+   * frame 을 안전히 처리할 시간을 보장한다 (위 `writeChain` 주석 참조).
+   *
    * @param value `Uint8Array`는 내부에서 base64로 인코딩, `string`은 이미 **base64**인 것으로 간주해 그대로 전송
    * @returns 실제 사용된 mode
    */
@@ -723,56 +752,74 @@ export class NoiLinkBleController {
     value: Uint8Array | string,
     mode: BleWriteMode = 'auto'
   ): Promise<'withResponse' | 'withoutResponse'> {
-    const dev = this.connected;
-    if (!dev) {
-      throw new BleManagerError('NOT_CONNECTED', 'write', '연결된 기기가 없습니다.');
-    }
-    const base64Payload = typeof value === 'string' ? value : uint8ArrayToBase64(value);
-    console.log(
-      '[BLE] writeCharacteristic',
-      serviceUUID,
-      characteristicUUID,
-      'b64.len=',
-      base64Payload.length,
-      'mode=',
-      mode
-    );
-
-    if (mode === 'withResponse') {
-      try {
-        await dev.writeCharacteristicWithResponseForService(serviceUUID, characteristicUUID, base64Payload);
-        return 'withResponse';
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        throw new BleManagerError('WRITE_FAIL', 'write', msg, dev.id);
+    const next = this.writeChain.then(async () => {
+      const dev = this.connected;
+      if (!dev) {
+        throw new BleManagerError('NOT_CONNECTED', 'write', '연결된 기기가 없습니다.');
       }
-    }
-
-    if (mode === 'withoutResponse') {
-      try {
-        await dev.writeCharacteristicWithoutResponseForService(serviceUUID, characteristicUUID, base64Payload);
-        return 'withoutResponse';
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        throw new BleManagerError('WRITE_FAIL', 'write', msg, dev.id);
+      // 직전 write 종료 후 WRITE_GAP_MS 가 안 지났으면 그 차이만큼 추가 대기.
+      const since = Date.now() - this.lastWriteFinishedAt;
+      const wait = NoiLinkBleController.WRITE_GAP_MS - since;
+      if (wait > 0) {
+        await new Promise<void>((r) => setTimeout(r, wait));
       }
-    }
 
-    // auto: noResponse 우선, 실패 시 withResponse 폴백 (savexx 명세 §9.2)
-    try {
-      await dev.writeCharacteristicWithoutResponseForService(serviceUUID, characteristicUUID, base64Payload);
-      return 'withoutResponse';
-    } catch (eNoRsp) {
-      const noRspMsg = eNoRsp instanceof Error ? eNoRsp.message : String(eNoRsp);
-      console.log('[BLE] write noResponse failed → trying withResponse', noRspMsg);
+      const base64Payload = typeof value === 'string' ? value : uint8ArrayToBase64(value);
+      console.log(
+        '[BLE] writeCharacteristic',
+        serviceUUID,
+        characteristicUUID,
+        'b64.len=',
+        base64Payload.length,
+        'mode=',
+        mode
+      );
+
       try {
-        await dev.writeCharacteristicWithResponseForService(serviceUUID, characteristicUUID, base64Payload);
-        return 'withResponse';
-      } catch (eWithRsp) {
-        const msg = eWithRsp instanceof Error ? eWithRsp.message : String(eWithRsp);
-        throw new BleManagerError('WRITE_FAIL', 'write', `noResponse+withResponse 모두 실패: ${msg}`, dev.id);
+        if (mode === 'withResponse') {
+          try {
+            await dev.writeCharacteristicWithResponseForService(serviceUUID, characteristicUUID, base64Payload);
+            return 'withResponse' as const;
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            throw new BleManagerError('WRITE_FAIL', 'write', msg, dev.id);
+          }
+        }
+
+        if (mode === 'withoutResponse') {
+          try {
+            await dev.writeCharacteristicWithoutResponseForService(serviceUUID, characteristicUUID, base64Payload);
+            return 'withoutResponse' as const;
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            throw new BleManagerError('WRITE_FAIL', 'write', msg, dev.id);
+          }
+        }
+
+        // auto: noResponse 우선, 실패 시 withResponse 폴백 (savexx 명세 §9.2)
+        try {
+          await dev.writeCharacteristicWithoutResponseForService(serviceUUID, characteristicUUID, base64Payload);
+          return 'withoutResponse' as const;
+        } catch (eNoRsp) {
+          const noRspMsg = eNoRsp instanceof Error ? eNoRsp.message : String(eNoRsp);
+          console.log('[BLE] write noResponse failed → trying withResponse', noRspMsg);
+          try {
+            await dev.writeCharacteristicWithResponseForService(serviceUUID, characteristicUUID, base64Payload);
+            return 'withResponse' as const;
+          } catch (eWithRsp) {
+            const msg = eWithRsp instanceof Error ? eWithRsp.message : String(eWithRsp);
+            throw new BleManagerError('WRITE_FAIL', 'write', `noResponse+withResponse 모두 실패: ${msg}`, dev.id);
+          }
+        }
+      } finally {
+        this.lastWriteFinishedAt = Date.now();
       }
-    }
+    });
+
+    // 다음 호출이 본 promise 의 settle(성공/실패 무관) 후에 줄을 서도록 chain 을 갱신.
+    // catch 로 흡수하지 않으면 한 번의 write 실패가 이후 모든 write 를 막아 버린다.
+    this.writeChain = next.catch(() => undefined);
+    return next;
   }
 
   /**
