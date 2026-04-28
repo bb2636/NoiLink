@@ -194,6 +194,51 @@ async function patchUserMockData(
  * - approvalStatus 없이 organizationId 만으로 소속 처리(개인회원 → 기업 소속 형태).
  * - 조직 레코드의 memberUserIds 에 함께 등록.
  */
+/**
+ * 마이그레이션: 이미 KV 에 시드된 demo-org 멤버(@demo-org.local)가
+ * userType: 'ORGANIZATION' + approvalStatus: 'APPROVED' 로 들어가 있으면
+ * PERSONAL 로 강제 패치한다. 관리자 페이지의 "기업회원" 탭에는 조직 admin
+ * (org@org.com) 한 명만 남게 된다.
+ *
+ * - 멱등: 이미 PERSONAL 이면 no-op.
+ * - 다른 cross-collection 변경과 직렬화하기 위해 USERS 락 안에서 수행.
+ */
+async function migrateDemoOrgMembersToPersonal(): Promise<void> {
+  await withKeyLock(KV_LOCK.USERS, async () => {
+    const users = (await db.get('users')) || [];
+    let demoCount = 0;
+    let changed = 0;
+    for (let i = 0; i < users.length; i += 1) {
+      const u = users[i];
+      const isDemoMember =
+        typeof u?.email === 'string' && u.email.endsWith('@demo-org.local');
+      if (!isDemoMember) continue;
+      demoCount += 1;
+      const next: any = { ...u };
+      let touched = false;
+      if (u.userType === 'ORGANIZATION') {
+        next.userType = 'PERSONAL';
+        touched = true;
+      }
+      if (u.approvalStatus !== undefined) {
+        next.approvalStatus = undefined;
+        touched = true;
+      }
+      if (touched) {
+        next.updatedAt = new Date().toISOString();
+        users[i] = next;
+        changed += 1;
+      }
+    }
+    if (changed > 0) {
+      await db.set('users', users);
+      console.log(`✅ Demo org members migrated to PERSONAL: ${changed}명 (총 ${demoCount}명 중)`);
+    } else {
+      console.log(`ℹ️  Demo org members migration: 변경 없음 (총 ${demoCount}명, 모두 이미 PERSONAL)`);
+    }
+  });
+}
+
 async function seedDemoOrgPersonalMember(): Promise<void> {
   await seedUser({
     email: ORG_MEMBER_EMAIL,
@@ -308,10 +353,13 @@ async function seedDemoOrgMembers(): Promise<void> {
         username: m.username,
         email: `${m.username}@demo-org.local`,
         name: m.name,
-        userType: 'ORGANIZATION',
+        // 데모 조직에 "소속된 개인 회원" 의도. 관리자 페이지에서 기업회원 탭에는
+        // 조직을 운영하는 admin (org@org.com) 한 명만 노출되도록, 멤버들은
+        // PERSONAL 로 시드한다 (이전에는 ORGANIZATION + APPROVED 로 들어가서
+        // "기업회원 13명" 으로 잘못 보임 — 시드 정정 + 아래 마이그레이션으로 패치).
+        userType: 'PERSONAL',
         organizationId: ORG_ID,
         organizationName: ORG_NAME,
-        approvalStatus: 'APPROVED',
         age: m.age,
         brainAge: m.brainAge,
         brainimalType: m.brainimalType,
@@ -572,6 +620,9 @@ export async function seedAdminAccount(): Promise<void> {
         organizationName: ORG_NAME,
       });
       await seedDemoOrgMembers();
+      // 기존 KV 의 demo-org 멤버가 ORGANIZATION 으로 들어가 있으면 PERSONAL 로 패치
+      // (관리자 페이지 "기업회원" 탭 분류 정정 — admin 한 명만 남도록).
+      await migrateDemoOrgMembersToPersonal();
       await seedDemoOrgPersonalMember();
       await seedTestUserTrainings();
       // 기업명이 변경된 경우 기존 organization/users 레코드의 organizationName 도 동기화

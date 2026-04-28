@@ -41,7 +41,75 @@ const COLOR_OPTIONS = [
   { id: 'green',  color: '#7FE65B' },
   { id: 'yellow', color: '#F1C232' },
   { id: 'blue',   color: '#3D6BFF' },
+  // 화이트 — 기억력의 "입력 신호", 이해력의 "전환 경고" 등 신호 색상으로 사용.
+  // 어두운 배경 위에서 식별되도록 매우 옅은 회색 테두리로 그려질 것이다.
+  { id: 'white',  color: '#FFFFFF' },
 ] as const;
+
+/**
+ * 트레이닝별 색상 가이드.
+ * - `fixed: true` 인 항목은 사용자가 색상을 고를 수 없고, 화면에는 색상별 의미만
+ *   안내 (진행 중 펌웨어가 자동으로 해당 색을 점등).
+ * - `fixed: false` 인 항목(지구력 등)은 기존처럼 사용자가 색상을 고를 수 있다.
+ *
+ * 각 트레이닝 사양:
+ *  - 기억력(MEMORY): 초록(자극), 하양(입력 신호)
+ *  - 이해력(COMPREHENSION): 초록(정답), 파랑(정답), 흰색(전환 경고)
+ *  - 집중력(FOCUS): 파랑(타겟), 빨강·노랑·초록·혼합(방해)
+ *  - 판단력(JUDGMENT): 초록(1회 터치), 빨강(대기), 노랑(2회 터치)
+ *  - 지구력(ENDURANCE): 사용자 선택
+ *  - 멀티태스킹(AGILITY): 초록(앵커, 손), 파랑(오른발), 노랑(왼발)
+ *
+ * NOTE: catalog id 'AGILITY' 는 "순발력(기존 멀티태스킹)" 으로 매핑되어 있어
+ * 사용자가 말하는 "멀티태스킹" 트레이닝이 곧 AGILITY 다 (`shared/types.ts` 참조).
+ */
+type ColorEntry = { color: string; label: string };
+type TrainingColorScheme = { fixed: true; entries: ColorEntry[] } | { fixed: false };
+
+const TRAINING_COLOR_SCHEMES: Record<string, TrainingColorScheme> = {
+  MEMORY: {
+    fixed: true,
+    entries: [
+      { color: '#7FE65B', label: '자극' },
+      { color: '#FFFFFF', label: '입력 신호' },
+    ],
+  },
+  COMPREHENSION: {
+    fixed: true,
+    entries: [
+      { color: '#7FE65B', label: '정답' },
+      { color: '#3D6BFF', label: '정답' },
+      { color: '#FFFFFF', label: '전환 경고' },
+    ],
+  },
+  FOCUS: {
+    fixed: true,
+    entries: [
+      { color: '#3D6BFF', label: '타겟' },
+      { color: '#E84545', label: '방해' },
+      { color: '#F1C232', label: '방해' },
+      { color: '#7FE65B', label: '방해' },
+      { color: 'mixed',   label: '방해(혼합)' },
+    ],
+  },
+  JUDGMENT: {
+    fixed: true,
+    entries: [
+      { color: '#7FE65B', label: '1회 터치' },
+      { color: '#E84545', label: '대기' },
+      { color: '#F1C232', label: '2회 터치' },
+    ],
+  },
+  AGILITY: {
+    fixed: true,
+    entries: [
+      { color: '#7FE65B', label: '앵커(손)' },
+      { color: '#3D6BFF', label: '오른발' },
+      { color: '#F1C232', label: '왼발' },
+    ],
+  },
+  ENDURANCE: { fixed: false },
+};
 
 export default function TrainingSetup() {
   const navigate = useNavigate();
@@ -101,9 +169,18 @@ export default function TrainingSetup() {
   const isPrimaryConnected = registered.length > 0;
 
   // ─── BPM (per-user) ─────────────────────────────────────────
-  const [bpm, setBpm] = useState(0);
+  // 기본값 60 — 디바이스 점등 테스트(`Device.handleTestBlink`)가 쓰는 1초 간격
+  // (= 60 BPM)과 동일하게 시작해, 사용자가 다이얼을 돌리지 않아도 곧바로
+  // 펌웨어가 안정적으로 처리하는 박자에서 트레이닝을 시작할 수 있게 한다.
+  const [bpm, setBpm] = useState(60);
 
-  // ─── 색상 (enterprise only) ──────────────────────────────────
+  // ─── 색상 ────────────────────────────────────────────────────
+  // 트레이닝별 색상 가이드 (위 TRAINING_COLOR_SCHEMES 참조).
+  //  - fixed: true  → 화면은 색상 의미 안내, 사용자 선택 불가.
+  //  - fixed: false → 사용자가 색상 직접 선택 (지구력 등).
+  // 별도 매핑이 없는 트레이닝(종합/랜덤/자유 등)은 사용자 선택 분기에 떨어진다.
+  const colorScheme = mode ? TRAINING_COLOR_SCHEMES[mode] : undefined;
+  const isFixedColor = colorScheme?.fixed === true;
   const [color, setColor] = useState<string>('green');
 
   // ─── 세션 설정 (간소화) ──────────────────────────────────────
@@ -298,9 +375,27 @@ export default function TrainingSetup() {
           )}
         </section>
 
-        {/* 색상 — 진행 회원과 동일하게 기업 소속(관리자 + 승인된 개인) 전체에 노출.
-              (이전에는 isEnterprise(관리자만)로 게이트되어 있어 조직 소속 일반 회원에게는 안 보였음) */}
-        {hasOrganization && (
+        {/* 색상 — 트레이닝마다 정해진 색상이 있으면 그 의미를 안내 (선택 불가).
+              그 외(지구력/종합/랜덤/자유 등)는 기존처럼 사용자가 직접 색상 선택.
+              두 경우 모두 모든 회원에게 노출 (기업 게이트 제거).
+        */}
+        {isFixedColor && colorScheme && colorScheme.fixed ? (
+          <section className="mb-6">
+            <h2 className="text-sm font-semibold text-white mb-3">색상</h2>
+            <p className="text-[11px] mb-3" style={{ color: '#888' }}>
+              이 트레이닝은 색상이 자동으로 지정됩니다.
+            </p>
+            <div className="flex items-start gap-3 flex-wrap">
+              {colorScheme.entries.map((e, i) => (
+                <ColorChipWithLabel
+                  key={`${e.color}-${e.label}-${i}`}
+                  color={e.color}
+                  label={e.label}
+                />
+              ))}
+            </div>
+          </section>
+        ) : (
           <section className="mb-6">
             <h2 className="text-sm font-semibold text-white mb-3">색상</h2>
             <div className="flex items-center gap-3">
@@ -308,10 +403,13 @@ export default function TrainingSetup() {
                 <button
                   key={c.id}
                   onClick={() => setColor(c.id)}
+                  aria-label={`${c.id} 색상 선택`}
                   className="w-8 h-8 rounded-full transition-all"
                   style={{
                     backgroundColor: c.color,
-                    boxShadow: color === c.id ? '0 0 0 2px #fff' : 'none',
+                    // 흰색 칩이 어두운 배경에서 사라지지 않도록 옅은 회색 테두리.
+                    border: c.id === 'white' ? '1px solid #3A3A3A' : 'none',
+                    boxShadow: color === c.id ? '0 0 0 2px #AAED10' : 'none',
                     transform: color === c.id ? 'scale(1.1)' : 'scale(1)',
                   }}
                 />
@@ -412,6 +510,33 @@ function PodSlot({
           기기 관리 &gt;
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * 자동 지정 색상 안내 칩 — 동그라미 + 그 아래 라벨.
+ *  - "혼합" 같은 의미적 색은 `color === 'mixed'` 로 들어오며 무지개 그라데이션으로 그린다.
+ *  - 흰색은 어두운 배경에서 사라지지 않도록 옅은 테두리를 둔다.
+ */
+function ColorChipWithLabel({ color, label }: { color: string; label: string }) {
+  const isMixed = color === 'mixed';
+  const isWhite = color.toUpperCase() === '#FFFFFF';
+  return (
+    <div className="flex flex-col items-center gap-1.5 min-w-[44px]">
+      <span
+        className="block w-8 h-8 rounded-full"
+        style={{
+          background: isMixed
+            ? 'conic-gradient(#E84545, #F1C232, #7FE65B, #3D6BFF, #E84545)'
+            : color,
+          border: isWhite ? '1px solid #3A3A3A' : 'none',
+        }}
+        aria-hidden
+      />
+      <span className="text-[11px] leading-none" style={{ color: '#D4D4D4' }}>
+        {label}
+      </span>
     </div>
   );
 }
