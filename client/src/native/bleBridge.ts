@@ -63,9 +63,33 @@ function post(message: WebToNativeMessage): void {
 // 본 큐는 레거시 분기에서 `bleWriteCharacteristic` 호출을 50ms 간격으로 흩뿌려,
 // 가장 빠른 박자 (BPM 200 = 300ms 간격) 에서도 안정적으로 들어가게 만든다.
 const LEGACY_WRITE_INTERVAL_MS = 50;
-let legacyWriteQueue: Array<() => void> = [];
+type LegacyJob = { fn: () => void; hex: string };
+let legacyWriteQueue: LegacyJob[] = [];
 let legacyWriteTimer: ReturnType<typeof setTimeout> | null = null;
 let legacyLastWriteAt = 0;
+
+// 진단용 — 큐 드레인이 실제로 native bridge 로 BLE write 를 보낸 횟수.
+// 트레이닝 화면 진단 라인에 노출해 "엔진은 점등을 시도했으나 실제 BLE write 가
+// 발사되지 않았다" 시나리오를 즉시 식별한다.
+let legacyEmittedCount = 0;
+let legacyLastEmittedFrameHex = '';
+
+function bytesToHex(b: Uint8Array): string {
+  return Array.from(b, (n) => n.toString(16).padStart(2, '0')).join(' ');
+}
+
+export function getLegacyEmittedCount(): number {
+  return legacyEmittedCount;
+}
+
+export function getLegacyLastEmittedFrameHex(): string {
+  return legacyLastEmittedFrameHex;
+}
+
+export function resetLegacyEmittedDiag(): void {
+  legacyEmittedCount = 0;
+  legacyLastEmittedFrameHex = '';
+}
 
 function scheduleLegacyDrain(): void {
   if (legacyWriteTimer != null) return;
@@ -76,7 +100,9 @@ function scheduleLegacyDrain(): void {
       return;
     }
     try {
-      next();
+      next.fn();
+      legacyEmittedCount += 1;
+      legacyLastEmittedFrameHex = next.hex;
     } catch {
       // post 자체는 실패해도 큐 진행 보장
     }
@@ -94,8 +120,8 @@ function scheduleLegacyDrain(): void {
   legacyWriteTimer = setTimeout(drain, delay);
 }
 
-function enqueueLegacyWrite(fn: () => void): void {
-  legacyWriteQueue.push(fn);
+function enqueueLegacyWrite(bytes: Uint8Array, fn: () => void): void {
+  legacyWriteQueue.push({ fn, hex: bytesToHex(bytes) });
   scheduleLegacyDrain();
 }
 
@@ -105,9 +131,9 @@ function enqueueLegacyWrite(fn: () => void): void {
  * 쌓인 LED ON 들이 STOP 보다 먼저 송신되면 펌웨어가 한 박자 더 켜진 채로 멈춘다.
  * STOP 을 우선 처리하면 그 느낌을 없앨 수 있다.
  */
-function enqueueLegacyWritePriority(fn: () => void): void {
+function enqueueLegacyWritePriority(bytes: Uint8Array, fn: () => void): void {
   // 펜딩된 일반 LED write 는 어차피 STOP 이후 무의미하므로 비운다.
-  legacyWriteQueue = [fn];
+  legacyWriteQueue = [{ fn, hex: bytesToHex(bytes) }];
   scheduleLegacyDrain();
 }
 
@@ -210,7 +236,7 @@ export function bleWriteLed(payload: {
       // 으로 누적되어 트레이닝 박자에 맞춘 빠른 연속 LED 가 silent drop 된다.
       // 큐화: 같은 JS turn 의 연속 송신을 50ms 간격으로 흩뿌려야 ble-plx GATT 큐가
       // 안 막힌다. 자세한 사유는 enqueueLegacyWrite 의 주석 참조.
-      enqueueLegacyWrite(() => {
+      enqueueLegacyWrite(bytes, () => {
         bleWriteCharacteristic('write', b64, 'withoutResponse');
       });
     } catch {
@@ -250,15 +276,17 @@ export function bleWriteControl(cmd: ControlCmd): void {
   // LED 와 동일한 이유로 NUS 펌웨어에는 'withoutResponse' 로 명시 송신.
   if (getLegacyBleMode()) {
     if (cmd === CTRL_START) {
-      const b64 = uint8ArrayToBase64(encodeLegacyControlStartFrame());
-      enqueueLegacyWrite(() => {
+      const bytes = encodeLegacyControlStartFrame();
+      const b64 = uint8ArrayToBase64(bytes);
+      enqueueLegacyWrite(bytes, () => {
         bleWriteCharacteristic('write', b64, 'withoutResponse');
       });
     } else if (cmd === CTRL_STOP) {
-      const b64 = uint8ArrayToBase64(encodeLegacyControlStopFrame());
+      const bytes = encodeLegacyControlStopFrame();
+      const b64 = uint8ArrayToBase64(bytes);
       // STOP 은 우선 큐 — 펜딩 LED write 를 모두 비우고 즉시 송신해야 사용자가
       // 일시정지/취소 시 본체가 한 박자 더 깜박이지 않는다.
-      enqueueLegacyWritePriority(() => {
+      enqueueLegacyWritePriority(bytes, () => {
         bleWriteCharacteristic('write', b64, 'withoutResponse');
       });
     }

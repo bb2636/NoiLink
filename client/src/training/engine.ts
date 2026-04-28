@@ -586,6 +586,9 @@ export class TrainingEngine {
       // 명세 A.MEMORY: Lv1~2 는 연속 동일 Pod 금지 (학습 진입 부담 완화)
       const banConsecutive = this.cfg.level <= 2;
       let prevPod = -1;
+      // 첫 점등은 START(aa 55) 이후 FIRST_TICK_DELAY_MS 만큼 기다린다 — 다른 모드의
+      // fireTick 첫 호출과 같은 마진을 부여해, NUS 계열 펌웨어가 START 처리 도중
+      // 들어온 LED 프레임을 잃어버리지 않도록 한다(handleTestBlink 와 동일 정책).
       for (let i = 0; i < seqLen; i++) {
         let podId = Math.floor(Math.random() * this.cfg.podCount);
         if (banConsecutive && this.cfg.podCount > 1 && podId === prevPod) {
@@ -595,10 +598,10 @@ export class TrainingEngine {
         this.memoryQueue.push(podId);
         this.schedule(() => {
           this.lightSinglePod(podId, 'GREEN', tickInterval * 0.6);
-        }, i * tickInterval);
+        }, FIRST_TICK_DELAY_MS + i * tickInterval);
       }
       // SHOW 끝나면 RECALL로 전환 (모든 Pod WHITE 신호)
-      const showEnd = seqLen * tickInterval;
+      const showEnd = FIRST_TICK_DELAY_MS + seqLen * tickInterval;
       this.schedule(() => {
         this.memoryPhase = 'RECALL';
         this.memoryRecallStartedAt = Date.now();

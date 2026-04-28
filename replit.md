@@ -252,6 +252,16 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
   마지막 송신 이후 50ms 가 지나 있으면 즉시 실행, 아니면 남은 시간만큼만
   대기. STOP 은 `enqueueLegacyWritePriority` 로 펜딩 LED 큐를 비우고 즉시
   송신해 일시정지/취소 시 본체가 한 박자 더 깜박이지 않게 한다.
+  `getLegacyEmittedCount`/`getLegacyLastEmittedFrameHex`/`resetLegacyEmittedDiag`
+  를 export 해 트레이닝 화면이 "엔진 onPodStates 콜백 횟수" 와 "큐가 native
+  bridge 로 실제 송신한 횟수/직전 frame hex" 를 분리해 노출한다 — 두 값이
+  같이 올라가는데 본체 LED 만 안 바뀌면 펌웨어/하드웨어, 큐 카운터만 멈추면
+  큐 자체 문제로 좁힐 수 있다.
+- **MEMORY SHOW 첫 점등 마진** (`client/src/training/engine.ts`): MEMORY 모드의
+  SHOW 시퀀스 첫 LED 는 `FIRST_TICK_DELAY_MS=500` 만큼 늦게 발사한다. 다른
+  모드의 `fireTick` 첫 호출 마진(handleTestBlink 의 START→sleep(500)→LED 와
+  같은 정책) 과 일치시켜 NUS 펌웨어가 START(`aa 55`) 를 처리하는 동안 들어온
+  LED 프레임을 잃어버리지 않게 한다.
 
 ## 점등-전용 트레이닝 (현재 펌웨어 한정)
 

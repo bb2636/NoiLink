@@ -16,12 +16,16 @@ import { motion } from 'framer-motion';
 import { MobileLayout } from '../components/Layout';
 import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import type { NativeToWebMessage } from '@noilink/shared';
-import { CTRL_START, SESSION_MAX_MS } from '@noilink/shared';
+import { SESSION_MAX_MS } from '@noilink/shared';
 import { STORAGE_KEYS } from '../utils/constants';
 import { TrainingEngine, type EnginePhaseInfo } from '../training/engine';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { getBleFirmwareReady } from '../native/bleFirmwareReady';
-import { bleWriteControl } from '../native/bleBridge';
+import {
+  getLegacyEmittedCount,
+  getLegacyLastEmittedFrameHex,
+  resetLegacyEmittedDiag,
+} from '../native/bleBridge';
 import { getLegacyBleMode } from '../native/legacyBleMode';
 import type { TrainingRunState } from './TrainingSessionPlay';
 
@@ -82,6 +86,12 @@ export default function TrainingBlinkPlay() {
   // 이 값이 디바이스 점등 테스트와 동일한 형태로 흐르면 트레이닝과 테스트의
   // 송신 경로가 정말 같다는 시각적 증거가 된다.
   const [lastFrameHex, setLastFrameHex] = useState<string>('-');
+  // 진단용 — bleBridge 의 레거시 큐가 실제로 native bridge 로 BLE write 를 보낸
+  // 횟수와 직전 hex. `송신 N회` 는 엔진 onPodStates 호출 횟수일 뿐 실제 BLE
+  // 전송과 무관하므로, 이 두 값을 따로 보여 줘야 "엔진은 점등 시도했지만 BLE
+  // write 가 발사되지 않았다" 시나리오를 구별할 수 있다.
+  const [bleEmitted, setBleEmitted] = useState(0);
+  const [bleLastHex, setBleLastHex] = useState<string>('-');
   const legacyOn = getLegacyBleMode();
 
   const engineRef = useRef<TrainingEngine | null>(null);
@@ -106,14 +116,8 @@ export default function TrainingBlinkPlay() {
   // ── 엔진 lifecycle ──
   useEffect(() => {
     if (!state) return;
-    // 사용자 보고: "기기관리 점등 테스트는 잘 되는데 트레이닝 시작 후 본체 LED 가 안 바뀐다."
-    // 펌웨어가 직전 STOP(`ff`) 또는 idle 상태에서 첫 START(`aa 55`) 한 번을 놓치는
-    // 가설을 검증하기 위해, engine.start() 의 정식 START 직전에 한 번 더 START 를 보내
-    // 펌웨어를 강제로 깨운다. START 가 idempotent 가 아닐 위험을 줄이기 위해 native shell
-    // 안에서 BLE 가 연결돼 있을 때만 추가 송신 (미연결 시 ack 누적/오동작 방지).
-    if (isNoiLinkNativeShell() && readConnectedDeviceId() !== null) {
-      bleWriteControl(CTRL_START);
-    }
+    // 매 진입마다 큐 진단 카운터 리셋 — 한 trial 안에서만 누적된 값을 본다.
+    resetLegacyEmittedDiag();
     const engine = new TrainingEngine({
       mode: state.apiMode,
       bpm: state.bpm,
@@ -158,6 +162,20 @@ export default function TrainingBlinkPlay() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 진단 폴링 — 레거시 큐 드레인 카운터/hex 를 250ms 마다 화면에 반영.
+  // 폴링이라는 비효율을 감수하더라도, 큐가 native bridge 로 실제 송신했는지를
+  // 외부에서 확인하기 위한 가장 단순한 경로다(이벤트 발신을 추가하지 않는다).
+  useEffect(() => {
+    if (!state) return;
+    const id = setInterval(() => {
+      const c = getLegacyEmittedCount();
+      const h = getLegacyLastEmittedFrameHex();
+      setBleEmitted((prev) => (prev === c ? prev : c));
+      setBleLastHex((prev) => (prev === h || h === '' ? prev : h));
+    }, 250);
+    return () => clearInterval(id);
+  }, [state]);
 
   // 자연 종료 후 결과 화면 이동 — completed flag 가 켜진 다음 turn 에서 navigate.
   useEffect(() => {
@@ -376,14 +394,18 @@ export default function TrainingBlinkPlay() {
             style={{ color: '#6B7280' }}
             data-testid="blink-diag-counter"
           >
-            <div>진단 · 송신 {stateUpdates}회 / 점등 {lightCount}회</div>
+            <div>엔진 · 콜백 {stateUpdates}회 / 점등 {lightCount}회</div>
+            <div data-testid="blink-diag-ble-emitted">
+              BLE 실송신: {bleEmitted}회
+            </div>
             <div>
-              BLE:{' '}
+              연결:{' '}
               {bleConnected === null ? '웹모드' : bleConnected ? '연결됨' : '끊김'}
               {' · '}
               모드: {legacyOn ? '레거시(4e XX 0d)' : '차세대(12바이트)'}
             </div>
-            <div data-testid="blink-diag-last-hex">마지막 송신: {lastFrameHex}</div>
+            <div data-testid="blink-diag-last-hex">엔진 마지막 lit: {lastFrameHex}</div>
+            <div data-testid="blink-diag-ble-last-hex">BLE 마지막 frame: {bleLastHex}</div>
           </div>
         </div>
 

@@ -80,11 +80,14 @@ vi.mock('../native/bleFirmwareReady', () => ({
   getBleFirmwareReady: () => true,
 }));
 
-// 펌웨어 강제 깨우기 START 송신은 native shell 안에서만 의미가 있고,
-// 단위 테스트에서는 ReactNativeWebView 가 없어 직접 호출하면 throw 한다.
-// 화면이 호출하는 export 만 stub 해 silent no-op 으로 만든다.
+// bleBridge 의 export 들은 native shell 안에서만 의미가 있고, 단위 테스트에서는
+// ReactNativeWebView 가 없어 직접 호출하면 throw 한다. 화면이 import 하는 export
+// 만 stub 해 silent no-op 으로 만든다.
 vi.mock('../native/bleBridge', () => ({
   bleWriteControl: vi.fn(),
+  getLegacyEmittedCount: () => 0,
+  getLegacyLastEmittedFrameHex: () => '',
+  resetLegacyEmittedDiag: vi.fn(),
 }));
 
 // 진단 표시("모드: 레거시/차세대")가 localStorage 의존 없이 결정 가능하도록 stub.
