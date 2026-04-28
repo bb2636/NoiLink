@@ -16,12 +16,14 @@ import { motion } from 'framer-motion';
 import { MobileLayout } from '../components/Layout';
 import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import type { NativeToWebMessage } from '@noilink/shared';
-import { SESSION_MAX_MS } from '@noilink/shared';
+import { COLOR_CODE, CTRL_START, CTRL_STOP, SESSION_MAX_MS } from '@noilink/shared';
 import { STORAGE_KEYS } from '../utils/constants';
 import { TrainingEngine, type EnginePhaseInfo } from '../training/engine';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { getBleFirmwareReady } from '../native/bleFirmwareReady';
 import {
+  bleWriteControl,
+  bleWriteLed,
   getLegacyEmittedCount,
   getLegacyLastEmittedFrameHex,
   resetLegacyEmittedDiag,
@@ -92,6 +94,14 @@ export default function TrainingBlinkPlay() {
   // write 가 발사되지 않았다" 시나리오를 구별할 수 있다.
   const [bleEmitted, setBleEmitted] = useState(0);
   const [bleLastHex, setBleLastHex] = useState<string>('-');
+  // 진단용 — 트레이닝 화면 자체의 BLE 환경(연결/구독/큐)이 정상인지 갈라내기 위한
+  // 임시 디버그 버튼 상태. 누르면 진행 중인 엔진을 destroy(STOP 송신) 한 뒤,
+  // Device 화면의 testBlink 와 정확히 같은 시퀀스(START → LED1~4 1초 간격 → STOP)
+  // 를 이 화면 컨텍스트에서 직접 송신한다. 본체 LED 가 점등되면 페이지 환경은
+  // 정상 → engine 의 LED 호출 패턴이 진짜 원인. 점등 안 되면 페이지 진입 자체가
+  // BLE 를 깨뜨림 → 다른 가설로 좁혀진다.
+  const [debugBlinkRunning, setDebugBlinkRunning] = useState(false);
+  const [debugBlinkResult, setDebugBlinkResult] = useState<string>('-');
   const legacyOn = getLegacyBleMode();
 
   const engineRef = useRef<TrainingEngine | null>(null);
@@ -284,6 +294,41 @@ export default function TrainingBlinkPlay() {
     // 사용자가 취소를 철회 — 일시정지 상태는 그대로 둔다(사용자가 직접 재개 누르도록).
   }, []);
 
+  // 진단용 — Device 화면의 testBlink 와 정확히 같은 시퀀스를 이 화면에서 직접 송신.
+  // 진행 중인 트레이닝 엔진은 destroy(STOP 송신) 후 800ms 대기하여 펌웨어 상태를
+  // 정리한 뒤 START → LED 1~4 (1초 간격) → STOP. 결과는 화면에 노출.
+  const handleDebugTestBlink = useCallback(async () => {
+    if (debugBlinkRunning) return;
+    setDebugBlinkRunning(true);
+    setDebugBlinkResult('진행 중…');
+    try {
+      const eng = engineRef.current;
+      if (eng) {
+        eng.destroy();
+        engineRef.current = null;
+      }
+      // 펌웨어 STOP 처리 + native 큐 비우기 시간 확보
+      await new Promise((r) => setTimeout(r, 800));
+      bleWriteControl(CTRL_START);
+      await new Promise((r) => setTimeout(r, 500));
+      for (let pod = 0; pod < 4; pod++) {
+        bleWriteLed({
+          tickId: pod + 1,
+          pod,
+          colorCode: COLOR_CODE.RED,
+          onMs: 800,
+        });
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      bleWriteControl(CTRL_STOP);
+      setDebugBlinkResult('완료 — 본체 LED 가 1~4번 순서로 점등되었나요?');
+    } catch (err) {
+      setDebugBlinkResult(`실패: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setDebugBlinkRunning(false);
+    }
+  }, [debugBlinkRunning]);
+
   if (!state) return null;
 
   const elapsedSec = Math.floor(elapsedMs / 1000);
@@ -406,6 +451,27 @@ export default function TrainingBlinkPlay() {
             </div>
             <div data-testid="blink-diag-last-hex">엔진 마지막 lit: {lastFrameHex}</div>
             <div data-testid="blink-diag-ble-last-hex">BLE 마지막 frame: {bleLastHex}</div>
+          </div>
+
+          {/* 진단용 디버그 버튼 — 트레이닝 화면 환경에서 testBlink 동일 시퀀스 실행.
+              누르면 진행 중 엔진 destroy → 800ms 대기 → START → LED1~4 (1초 간격) → STOP.
+              본체 LED 점등 여부로 페이지 환경(정상) vs engine 호출 패턴(원인) 분리. */}
+          <button
+            type="button"
+            onClick={handleDebugTestBlink}
+            disabled={debugBlinkRunning}
+            data-testid="debug-testblink-button"
+            className="mt-3 px-4 py-2 rounded-lg text-xs"
+            style={{
+              backgroundColor: COLOR_CARD,
+              border: `1px solid ${COLOR_GRAY}`,
+              color: debugBlinkRunning ? '#6B7280' : COLOR_LIME,
+            }}
+          >
+            {debugBlinkRunning ? '진단 점등 중…' : '🔧 이 화면에서 testBlink 시퀀스 실행'}
+          </button>
+          <div className="mt-1 text-xs text-center" style={{ color: '#6B7280', maxWidth: 280 }}>
+            {debugBlinkResult}
           </div>
         </div>
 
