@@ -187,10 +187,13 @@ export default function TrainingSetup() {
       yieldsScore: !isFree,
       isComposite: isComposite || info.apiMode === 'COMPOSITE',
     };
-    // 현재 펌웨어 사양(앱은 입력을 받지 않고 점등 신호 전달만)에 맞춰 모든 트레이닝을
-    // 점등-전용 화면으로 보낸다. 향후 펌웨어가 입력 모드를 지원하면 `/training/session`
-    // (TrainingSessionPlay) 라우트가 그대로 살아 있어 분기를 한 줄만 바꿔 복귀할 수 있다.
-    navigate('/training/blink-session', { state: run });
+    // 펌웨어가 11바이트 TOUCH notify (A5 81 + tickId + pod + channel + deltaMs + flags) 로
+    // 입력 신호를 보내고, mobile dispatcher 가 이를 ble.touch 로 변환해 트레이닝 엔진이
+    // deltaMs(deviceDeltaValid 일 때 기기 측정 오차)를 그대로 채점에 사용한다.
+    // 결과는 POST /sessions + POST /metrics/session/:id 로 서버에 저장되어 개인 리포트
+    // (`/report`), 랭킹(`/ranking`), 기업 인사이트 리포트(`/organization-report`) 에 자동
+    // 연동된다. 점등-전용 화면(`/training/blink-session`)은 펌웨어 회귀 대비용으로 보존.
+    navigate('/training/session', { state: run });
   };
 
   return (

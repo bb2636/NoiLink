@@ -276,13 +276,32 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
   포함 모든 write 경로에 일괄 적용. 한 write 실패가 이후 write 를 막지 않도록
   `writeChain` 은 catch 로 흡수하고, public promise 만 reject 한다.
 
-## 점등-전용 트레이닝 (현재 펌웨어 한정)
+## 트레이닝 입력 채점 + 리포트/랭킹/기업 연동 (현행 정책)
 
-NINA-B1-FB55CE 펌웨어는 IR/TOUCH 입력의 정확도/안정성이 채점에 필요한
-수준에 미치지 못해, 앱은 입력을 일체 받지 않고 점등 신호만 BPM 타이밍에
-맞춰 자동 송신한다. 트레이닝 시작 시 모든 흐름이 점등-전용 화면으로
-진입하고, 결과 화면도 점수 대신 단순 "완료"만 표시한다.
+펌웨어가 보내는 11바이트 TOUCH notify (`A5 81 + tickId(4 LE) + pod + channel
++ deltaMs(int16 LE) + flags`) 를 그대로 채점에 사용하고, 결과를 서버에
+저장해 개인 리포트·전체/조직 랭킹·기업 인사이트 리포트에 자동 연동한다.
 
+- **입력 디코딩** (`shared/ble-protocol.ts`)
+  - `SYNC_BYTE = 0xa5`, `OP_TOUCH = 0x81`, `TOUCH_FRAME_BYTES = 11`.
+  - `tryParseTouchBytes` / `tryParseTouchHex` / `tryParseTouchBase64` →
+    `TouchEvent { tickId, pod, channel, deltaMs, deviceDeltaValid }`.
+    `flags & 0x01 === 1` 이면 `deviceDeltaValid = true` → `deltaMs` 를 기기
+    측정 오차로 그대로 사용한다. 아니면 앱 수신 시각 기준으로 판정.
+  - `judgeRhythmError(errMs)`: `|err| ≤ 45 → PERFECT`, `≤ 110 → GOOD`,
+    `≤ 200 → BAD`, 그 외 → `MISS`. (펌웨어와 동일 임계값)
+  - 회귀 테스트: `shared/ble-protocol.test.ts` 의 TOUCH 디코딩 케이스
+    (정상/wrong sync/wrong op/길이 부족/flags edge/scale 등).
+- **Native → Web 전달** (`mobile/src/bridge/NativeBridgeDispatcher.ts`)
+  - `notify` 채널의 base64 값을 매 콜백마다 `tryParseTouchBase64` 로 파싱
+    하고, 파싱 성공 시 `ble.touch` 메시지 (`{ touch: TouchEvent }`) 를 web
+    으로 push. 파싱 실패해도 raw `ble.notify` 는 그대로 전달.
+- **Web 채점 진입점** (`client/src/pages/TrainingSessionPlay.tsx:485-503`)
+  - 마운트 즉시 `bleSubscribeCharacteristic('notify')` 등록 (RX-keepalive
+    겸 입력 수신). `noilink-native-bridge` 이벤트에서 `ble.touch` 를 받아
+    `engine.handleTap(pod, { deltaMs: deviceDeltaValid ? deltaMs : undefined,
+    tickId })` 호출. 엔진은 `consumedTickIds` 로 동일 자극에 대한 UI 탭과
+    BLE 터치 중복을 1회 입력으로 합친다.
 - **TrainingEngine.pause()/resume()** (`client/src/training/engine.ts`)
   - `pause()`: 회복 윈도우 마감 + `allOff()` + RAF/setTimeout/회복 grace 모두
     cancel + `bleWriteControl(CTRL_STOP)` + `pausedAt`/`isPaused=true` 기록.
@@ -293,31 +312,47 @@ NINA-B1-FB55CE 펌웨어는 IR/TOUCH 입력의 정확도/안정성이 채점에 
     남은 phase 시간만큼 `currentTickFire` 를 setTimeout 으로 다시 예약.
     남은 시간이 0 이하이면 즉시 `currentPhaseOnEnd()` 호출.
   - 회귀 테스트: `client/src/training/engine.pauseResume.test.ts` (6 통과).
-- **TrainingBlinkPlay.tsx** (`client/src/pages/TrainingBlinkPlay.tsx`)
-  - 입력 무시: `handleTap`/`handleBleTouch`/`PodGrid` 전부 미사용. 들어오는
-    notify 데이터는 처리하지 않는다.
-  - **RX-keepalive notify 구독**: 점등-전용이라도 마운트 동안
-    `bleSubscribeCharacteristic('notify')` 를 한 번 등록한다. 근거: NINA-B1
-    NUS 펌웨어는 TX(notify) CCCD 가 활성 구독 상태일 때만 RX(write) 로
-    들어온 LED frame 을 처리한다. Device 화면(`testBlink`)이 작동하는
-    이유는 그 화면이 마운트 동안 notify 를 구독하기 때문이고, 구독 없는
-    트레이닝 화면 진입 시 펌웨어가 LED frame 을 silent 무시하던 증상을
-    이 한 줄로 해결한다 (실제 데이터는 사용하지 않음).
-  - UI: 헤더 + BPM 카드 (라임 테두리) + 원형 SVG progress (라임 stroke,
-    중앙 총 시간/경과 mm:ss) + 하단 취소(회색)/일시정지·재개(오렌지).
-  - BLE 단절 회복 그레이스 (8s) 정책은 기존 `TrainingSessionPlay` 와 동일.
-  - 자연 종료 시 `navigate('/result', { state: { blinkOnly: true, title } })`.
-  - 회귀 테스트: `client/src/pages/TrainingBlinkPlay.test.tsx` (7 통과).
-- **Result.tsx — blinkOnly 분기**: `state.blinkOnly === true` 면 점수/회복/
-  비교/부분-결과 카드를 모두 숨기고 단순 "트레이닝 완료" + 확인 버튼만
-  렌더한다. 회귀 테스트: `Result.test.tsx` 의 "점등-전용 완료 분기"
-  describe (2 통과).
+- **결과 제출 → 점수 산출 → 저장**
+  - `TrainingSessionPlay` 의 `submitCompletedTrainingWithRetry` 가
+    `POST /sessions` (세션 헤더) + `POST /metrics/session/:id` (RawMetrics)
+    를 백오프 재시도로 전송. 실패 시 `pending` 큐에 적재 후 다음 진입
+    시 자동 drain.
+  - 서버 `score-calculator.ts` 가 RawMetrics → 6대 지표(기억력/이해력/
+    집중력/판단력/순발력/지구력) + 종합점수(0~100) 산출 후 `sessions`
+    + `metricsScores` 에 저장.
+- **개인 리포트 / 랭킹 / 기업 인사이트 연동**
+  - 개인 리포트 (`/report` → `client/src/pages/Report.tsx`)
+    - `GET /api/reports/user/:userId` 로 최근 리포트 목록, `POST
+      /api/reports/generate` 로 신규 리포트 생성 (충분한 세션 누적 시),
+      `GET /api/reports/:reportId` 로 상세. 6대 지표 방사형 차트 + 브레이니멀
+      타입 + 분석 문구.
+  - 랭킹 (`/ranking` → `client/src/pages/Ranking.tsx`)
+    - `GET /api/rankings?type={type}&organizationId={orgId}` — 종합 점수 /
+      합계 시간 / 연속 트레이닝 일수 3종. 사용자가 조직 소속이면 `users`
+      테이블의 `organizationId` 가 자동으로 필터에 들어가 조직 내 랭킹과
+      전체 랭킹을 함께 노출. `GET /api/rankings/user/:userId/card` 로
+      현재 순위 카드 요약.
+  - 기업 인사이트 (`/organization-report` → `OrganizationReport.tsx`)
+    - `GET /api/reports/organization/:organizationId` (최신 집계),
+      `POST /api/reports/organization/generate` (재집계),
+      `GET /api/sessions/organization/:organizationId/trend` (트렌드).
+      해당 조직 소속 사용자들의 `sessions`/`metricsScores` 합산 →
+      `orgReports` 테이블 저장. 참여율, 팀 평균 점수, 리스크 멤버 등.
+- **결과 화면** (`client/src/pages/Result.tsx`)
+  - 정상 분기: 서버 산출 점수, 직전 세션 대비 향상도, 회복 안내,
+    맞춤 코칭 등 풀 리포트 표시.
+  - `state.blinkOnly === true` 분기: 점등-전용 회귀 화면용 — 점수/회복/
+    비교/부분-결과 카드를 모두 숨기고 "트레이닝 완료" 한 줄만. 회귀
+    테스트: `Result.test.tsx` 의 "점등-전용 완료 분기" describe (2 통과).
 - **라우팅**:
-  - 신규: `/training/blink-session` → `<TrainingBlinkPlay />`. `TrainingSetup`
-    이 모든 트레이닝을 이 라우트로 보낸다.
-  - 보존: `/training/session` → `<TrainingSessionPlay />`. 향후 펌웨어가
-    입력 모드를 지원하면 `TrainingSetup` 의 navigate 한 줄만 바꿔 복귀할
-    수 있도록 화면/테스트를 그대로 유지한다.
+  - 기본: `/training/session` → `<TrainingSessionPlay />` (입력 채점 + 리포트
+    연동). `TrainingSetup` 의 모든 트레이닝이 이 라우트로 진입.
+  - 보존(회귀 대비): `/training/blink-session` → `<TrainingBlinkPlay />`.
+    펌웨어 RX 가 또 다시 신뢰 불가 상태가 될 경우 `TrainingSetup` 의
+    navigate 한 줄만 되돌리면 점등-전용으로 전환된다. 화면 자체는 마운트
+    동안 `bleSubscribeCharacteristic('notify')` 로 RX-keepalive 를 유지해
+    LED frame 이 silent 무시되지 않도록 한다 (실제 데이터는 사용하지 않음).
+    회귀 테스트: `client/src/pages/TrainingBlinkPlay.test.tsx` (7 통과).
 
 ## Deployment
 

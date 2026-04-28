@@ -243,11 +243,12 @@ function AppRoutes() {
                   }
                 />
                 {/*
-                  점등-전용 트레이닝 진행 화면(TrainingBlinkPlay).
-                  현재 NINA-B1-FB55CE 펌웨어 사양상 앱은 입력을 받지 않고
-                  타이머/신호 전달만 하므로, TrainingSetup 이 모든 트레이닝을
-                  이 라우트로 보낸다. 기존 `/training/session` 라우트는 미래에
-                  펌웨어가 입력 모드를 지원하면 다시 활성화하기 위해 보존.
+                  점등-전용 트레이닝 진행 화면(TrainingBlinkPlay) — 회귀 대비 보존.
+                  기본 트레이닝은 `/training/session` (TrainingSessionPlay) 가 펌웨어
+                  11바이트 TOUCH notify 입력을 받아 채점 + 리포트/랭킹/기업 연동을
+                  수행한다. 펌웨어 RX 가 다시 신뢰 불가 상태가 될 경우 TrainingSetup
+                  의 navigate 한 줄만 이 라우트로 되돌려 점등-전용 모드로 전환할 수
+                  있도록 화면/테스트를 그대로 유지한다.
                 */}
                 <Route
                   path="/training/blink-session"
