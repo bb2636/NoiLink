@@ -294,8 +294,15 @@ NINA-B1-FB55CE 펌웨어는 IR/TOUCH 입력의 정확도/안정성이 채점에 
     남은 시간이 0 이하이면 즉시 `currentPhaseOnEnd()` 호출.
   - 회귀 테스트: `client/src/training/engine.pauseResume.test.ts` (6 통과).
 - **TrainingBlinkPlay.tsx** (`client/src/pages/TrainingBlinkPlay.tsx`)
-  - 입력 무시: `handleTap`/`handleBleTouch`/`PodGrid` 전부 미사용. 진단용
-    notify 구독도 등록하지 않는다 (Device 화면이 별도로 담당).
+  - 입력 무시: `handleTap`/`handleBleTouch`/`PodGrid` 전부 미사용. 들어오는
+    notify 데이터는 처리하지 않는다.
+  - **RX-keepalive notify 구독**: 점등-전용이라도 마운트 동안
+    `bleSubscribeCharacteristic('notify')` 를 한 번 등록한다. 근거: NINA-B1
+    NUS 펌웨어는 TX(notify) CCCD 가 활성 구독 상태일 때만 RX(write) 로
+    들어온 LED frame 을 처리한다. Device 화면(`testBlink`)이 작동하는
+    이유는 그 화면이 마운트 동안 notify 를 구독하기 때문이고, 구독 없는
+    트레이닝 화면 진입 시 펌웨어가 LED frame 을 silent 무시하던 증상을
+    이 한 줄로 해결한다 (실제 데이터는 사용하지 않음).
   - UI: 헤더 + BPM 카드 (라임 테두리) + 원형 SVG progress (라임 stroke,
     중앙 총 시간/경과 mm:ss) + 하단 취소(회색)/일시정지·재개(오렌지).
   - BLE 단절 회복 그레이스 (8s) 정책은 기존 `TrainingSessionPlay` 와 동일.
