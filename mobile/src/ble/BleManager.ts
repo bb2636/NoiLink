@@ -109,8 +109,17 @@ export class NoiLinkBleController {
    * 것과 같은 효과를, 모든 write 경로(트레이닝/테스트/세션 등)에 일괄 적용.
    */
   private writeChain: Promise<unknown> = Promise.resolve();
-  /** 각 write 사이의 최소 간격 — NUS 펌웨어가 직전 frame 을 처리할 시간을 확보. */
-  private static readonly WRITE_GAP_MS = 30;
+  /**
+   * 각 write 사이의 최소 간격 — NUS 펌웨어가 직전 frame 을 처리할 시간을 확보.
+   *
+   * 근거: handleTestBlink 가 1000ms 간격으로 LED 를 보낼 때 100% 점등됐다.
+   * 30ms 로 시작했지만 일부 NUS 펌웨어는 그것도 부족해 frame 을 silent drop
+   * 한다는 보고가 있어 100ms 로 보강. BPM 200 (=300ms 비트) 도 비트당 2~3 개
+   * frame 만 들어가니 100ms × 3 = 300ms 로 빡빡하게 들어맞는다. 더 빠른
+   * BPM 이 필요해지면 이 값을 줄이고 native diag (legacyWriteDiag) 로 펌웨어
+   * drop 여부를 다시 확인할 것.
+   */
+  private static readonly WRITE_GAP_MS = 100;
   private lastWriteFinishedAt = 0;
 
   /** dispatcher가 재연결 이벤트를 web으로 push하기 위해 등록 */
