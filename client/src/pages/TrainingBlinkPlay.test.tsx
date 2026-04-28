@@ -80,6 +80,13 @@ vi.mock('../native/bleFirmwareReady', () => ({
   getBleFirmwareReady: () => true,
 }));
 
+// 펌웨어 강제 깨우기 START 송신은 native shell 안에서만 의미가 있고,
+// 단위 테스트에서는 ReactNativeWebView 가 없어 직접 호출하면 throw 한다.
+// 화면이 호출하는 export 만 stub 해 silent no-op 으로 만든다.
+vi.mock('../native/bleBridge', () => ({
+  bleWriteControl: vi.fn(),
+}));
+
 // MobileLayout 은 useAuth 등 컨텍스트가 무거우므로 간단한 더미로 대체.
 vi.mock('../components/Layout', () => ({
   MobileLayout: ({ children }: { children: React.ReactNode }) => (

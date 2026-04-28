@@ -16,11 +16,24 @@ import { motion } from 'framer-motion';
 import { MobileLayout } from '../components/Layout';
 import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import type { NativeToWebMessage } from '@noilink/shared';
-import { SESSION_MAX_MS } from '@noilink/shared';
+import { CTRL_START, SESSION_MAX_MS } from '@noilink/shared';
+import { STORAGE_KEYS } from '../utils/constants';
 import { TrainingEngine, type EnginePhaseInfo } from '../training/engine';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { getBleFirmwareReady } from '../native/bleFirmwareReady';
+import { bleWriteControl } from '../native/bleBridge';
 import type { TrainingRunState } from './TrainingSessionPlay';
+
+/** 연결된 기기 ID — 진단 표시용. localStorage 의 CONNECTED_DEVICE 키를 읽는다. */
+function readConnectedDeviceId(): string | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.CONNECTED_DEVICE);
+    if (!raw) return null;
+    return (JSON.parse(raw) as { id?: string })?.id ?? null;
+  } catch {
+    return null;
+  }
+}
 
 const COLOR_BG = '#0A0A0A';
 const COLOR_CARD = '#1A1A1A';
@@ -59,6 +72,11 @@ export default function TrainingBlinkPlay() {
   //                 카운터가 0 에서 멈추면 엔진의 fireTick 자체가 돌지 않는다는 의미.
   const [stateUpdates, setStateUpdates] = useState(0);
   const [lightCount, setLightCount] = useState(0);
+  // 진단용 — 트레이닝 화면이 'native shell' 안에서 돌아가고 BLE 가 살아있는지 확인.
+  // 송신/점등 카운터는 올라가는데 본체가 안 바뀐다는 보고를 쪼개기 위해 노출한다.
+  const [bleConnected, setBleConnected] = useState<boolean | null>(() =>
+    isNoiLinkNativeShell() ? readConnectedDeviceId() !== null : null,
+  );
 
   const engineRef = useRef<TrainingEngine | null>(null);
   const completedRef = useRef(false);
@@ -82,6 +100,14 @@ export default function TrainingBlinkPlay() {
   // ── 엔진 lifecycle ──
   useEffect(() => {
     if (!state) return;
+    // 사용자 보고: "기기관리 점등 테스트는 잘 되는데 트레이닝 시작 후 본체 LED 가 안 바뀐다."
+    // 펌웨어가 직전 STOP(`ff`) 또는 idle 상태에서 첫 START(`aa 55`) 한 번을 놓치는
+    // 가설을 검증하기 위해, engine.start() 의 정식 START 직전에 한 번 더 START 를 보내
+    // 펌웨어를 강제로 깨운다. START 가 idempotent 가 아닐 위험을 줄이기 위해 native shell
+    // 안에서 BLE 가 연결돼 있을 때만 추가 송신 (미연결 시 ack 누적/오동작 방지).
+    if (isNoiLinkNativeShell() && readConnectedDeviceId() !== null) {
+      bleWriteControl(CTRL_START);
+    }
     const engine = new TrainingEngine({
       mode: state.apiMode,
       bpm: state.bpm,
@@ -140,6 +166,8 @@ export default function TrainingBlinkPlay() {
       const detail = (e as CustomEvent<NativeToWebMessage>).detail;
       if (!detail) return;
       if (detail.type === 'ble.connection') {
+        // 진단 표시 동기화 — 펌웨어 ready 여부와 무관하게 항상 갱신.
+        setBleConnected(detail.payload.connected !== null);
         // 펌웨어 미탑재 기기는 idle 단절이 빈번 — 본 화면은 점등 신호만 보내므로
         // 단절 알림을 무시하고 진행을 그대로 둔다(기존 화면과 동일 정책).
         if (getBleFirmwareReady() === false) return;
@@ -328,11 +356,15 @@ export default function TrainingBlinkPlay() {
 
           {/* 진단 카운터 — 본체 LED 가 안 바뀌는 문제를 좁히기 위한 임시 표시 */}
           <div
-            className="mt-2 text-xs"
+            className="mt-2 text-xs leading-5 text-center"
             style={{ color: '#6B7280' }}
             data-testid="blink-diag-counter"
           >
-            진단 · 송신 {stateUpdates}회 / 점등 {lightCount}회
+            <div>진단 · 송신 {stateUpdates}회 / 점등 {lightCount}회</div>
+            <div>
+              BLE:{' '}
+              {bleConnected === null ? '웹모드' : bleConnected ? '연결됨' : '끊김'}
+            </div>
           </div>
         </div>
 
