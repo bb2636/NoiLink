@@ -48,6 +48,69 @@ function post(message: WebToNativeMessage): void {
   window.ReactNativeWebView!.postMessage(JSON.stringify(message));
 }
 
+// ─── 레거시 모드 BLE write 직렬화 큐 ─────────────────────────────────────────
+// 트레이닝 엔진이 같은 JS turn 에 여러 LED/CONTROL 프레임을 post 하면 (예:
+// `flashAll`, `lightTwoPods`, MEMORY RECALL, START 중복 송신), native shell 의
+// `dispatchWebMessage` 가 메시지마다 별도 promise 로 처리하기 때문에 ble-plx
+// 의 GATT 큐가 동시 N 개 write 를 받게 된다. NUS 계열 (NINA-B1) 펌웨어는
+// withoutResponse 동시 폭주를 못 따라가서 일부 write 가 'operation was
+// cancelled' 로 drop 되거나 펌웨어가 LED 출력을 통째로 무시한다.
+//
+// 사용자 보고 ("진단 송신 카운터는 올라가는데 본체 LED 변화 없음") 의 직접적
+// 원인. 테스트 점등(`Device.handleTestBlink`) 은 매 송신 사이 `await sleep(1000)`
+// 으로 자연스럽게 직렬화돼 잘 동작했다.
+//
+// 본 큐는 레거시 분기에서 `bleWriteCharacteristic` 호출을 50ms 간격으로 흩뿌려,
+// 가장 빠른 박자 (BPM 200 = 300ms 간격) 에서도 안정적으로 들어가게 만든다.
+const LEGACY_WRITE_INTERVAL_MS = 50;
+let legacyWriteQueue: Array<() => void> = [];
+let legacyWriteTimer: ReturnType<typeof setTimeout> | null = null;
+let legacyLastWriteAt = 0;
+
+function scheduleLegacyDrain(): void {
+  if (legacyWriteTimer != null) return;
+  const drain = (): void => {
+    const next = legacyWriteQueue.shift();
+    if (!next) {
+      legacyWriteTimer = null;
+      return;
+    }
+    try {
+      next();
+    } catch {
+      // post 자체는 실패해도 큐 진행 보장
+    }
+    legacyLastWriteAt = Date.now();
+    if (legacyWriteQueue.length > 0) {
+      legacyWriteTimer = setTimeout(drain, LEGACY_WRITE_INTERVAL_MS);
+    } else {
+      legacyWriteTimer = null;
+    }
+  };
+  // 이전 송신 직후라면 LEGACY_WRITE_INTERVAL_MS 만큼 기다리고, 충분히 비어있다면
+  // 즉시 처리(첫 송신에서 불필요한 50ms 지연을 피한다).
+  const since = Date.now() - legacyLastWriteAt;
+  const delay = Math.max(0, LEGACY_WRITE_INTERVAL_MS - since);
+  legacyWriteTimer = setTimeout(drain, delay);
+}
+
+function enqueueLegacyWrite(fn: () => void): void {
+  legacyWriteQueue.push(fn);
+  scheduleLegacyDrain();
+}
+
+/**
+ * STOP / PAUSE 같은 우선 송신: 펜딩 LED write 를 모두 버리고 큐 맨 앞으로 보낸다.
+ * 트레이닝 종료/일시정지/백그라운드 시 사용자가 즉시 LED OFF 를 기대하는데, 큐에
+ * 쌓인 LED ON 들이 STOP 보다 먼저 송신되면 펌웨어가 한 박자 더 켜진 채로 멈춘다.
+ * STOP 을 우선 처리하면 그 느낌을 없앨 수 있다.
+ */
+function enqueueLegacyWritePriority(fn: () => void): void {
+  // 펜딩된 일반 LED write 는 어차피 STOP 이후 무의미하므로 비운다.
+  legacyWriteQueue = [fn];
+  scheduleLegacyDrain();
+}
+
 export function bleEnsureReady(): void {
   post({ v: NATIVE_BRIDGE_VERSION, id: newRequestId(), type: 'ble.ensureReady' });
 }
@@ -141,10 +204,15 @@ export function bleWriteLed(payload: {
     if (isOff) return;
     try {
       const bytes = encodeLegacyLedFrame({ pod: payload.pod });
+      const b64 = uint8ArrayToBase64(bytes);
       // NUS 펌웨어는 응답을 보내지 않으므로 명시적으로 'withoutResponse' 로 송신.
       // 'auto' 폴백이 `withResponse` 로 넘어가면 ble-plx 가 응답을 기다리다 timeout
       // 으로 누적되어 트레이닝 박자에 맞춘 빠른 연속 LED 가 silent drop 된다.
-      bleWriteCharacteristic('write', uint8ArrayToBase64(bytes), 'withoutResponse');
+      // 큐화: 같은 JS turn 의 연속 송신을 50ms 간격으로 흩뿌려야 ble-plx GATT 큐가
+      // 안 막힌다. 자세한 사유는 enqueueLegacyWrite 의 주석 참조.
+      enqueueLegacyWrite(() => {
+        bleWriteCharacteristic('write', b64, 'withoutResponse');
+      });
     } catch {
       // pod 범위 초과 등 인코딩 실패는 silent skip (트레이닝 흐름 보호)
     }
@@ -182,17 +250,17 @@ export function bleWriteControl(cmd: ControlCmd): void {
   // LED 와 동일한 이유로 NUS 펌웨어에는 'withoutResponse' 로 명시 송신.
   if (getLegacyBleMode()) {
     if (cmd === CTRL_START) {
-      bleWriteCharacteristic(
-        'write',
-        uint8ArrayToBase64(encodeLegacyControlStartFrame()),
-        'withoutResponse',
-      );
+      const b64 = uint8ArrayToBase64(encodeLegacyControlStartFrame());
+      enqueueLegacyWrite(() => {
+        bleWriteCharacteristic('write', b64, 'withoutResponse');
+      });
     } else if (cmd === CTRL_STOP) {
-      bleWriteCharacteristic(
-        'write',
-        uint8ArrayToBase64(encodeLegacyControlStopFrame()),
-        'withoutResponse',
-      );
+      const b64 = uint8ArrayToBase64(encodeLegacyControlStopFrame());
+      // STOP 은 우선 큐 — 펜딩 LED write 를 모두 비우고 즉시 송신해야 사용자가
+      // 일시정지/취소 시 본체가 한 박자 더 깜박이지 않는다.
+      enqueueLegacyWritePriority(() => {
+        bleWriteCharacteristic('write', b64, 'withoutResponse');
+      });
     }
     return;
   }

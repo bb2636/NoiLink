@@ -240,6 +240,18 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
   notify 구독 → 분류기로 디코드 → 진단 로그에 표시. 다른 구독 스트림 오염
   방지를 위해 `payload.subscriptionId === subId && payload.key === 'notify'`
   로 필터. IR 패킷은 throttle (count 변화 즉시 / distance 1.5초당 1회).
+- **레거시 write 직렬화 큐** (`client/src/native/bleBridge.ts`): 트레이닝 엔진이
+  같은 JS turn 에서 여러 LED/CONTROL 프레임을 post 하면 (`flashAll`,
+  `lightTwoPods`, MEMORY RECALL, START 중복 송신 등), native shell 의
+  `dispatchWebMessage` 가 메시지마다 별도 promise 로 처리해 ble-plx GATT 큐가
+  동시 N 개 write 를 받게 된다. NUS 계열 펌웨어는 `withoutResponse` 동시
+  폭주를 못 따라가서 일부 write 가 'operation was cancelled' 로 drop 되거나
+  펌웨어가 LED 출력을 통째로 무시한다 (증상: 진단 송신 카운터는 올라가는데
+  본체 LED 변화 없음). `enqueueLegacyWrite` 가 레거시 분기의
+  `bleWriteCharacteristic` 호출을 50ms 간격으로 흩뿌려 직렬화한다. 첫 호출은
+  마지막 송신 이후 50ms 가 지나 있으면 즉시 실행, 아니면 남은 시간만큼만
+  대기. STOP 은 `enqueueLegacyWritePriority` 로 펜딩 LED 큐를 비우고 즉시
+  송신해 일시정지/취소 시 본체가 한 박자 더 깜박이지 않게 한다.
 
 ## 점등-전용 트레이닝 (현재 펌웨어 한정)
 
