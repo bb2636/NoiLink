@@ -84,7 +84,10 @@ vi.mock('../native/bleFirmwareReady', () => ({
 // ReactNativeWebView 가 없어 직접 호출하면 throw 한다. 화면이 import 하는 export
 // 만 stub 해 silent no-op 으로 만든다.
 vi.mock('../native/bleBridge', () => ({
+  bleSubscribeCharacteristic: vi.fn(),
+  bleUnsubscribeCharacteristic: vi.fn(),
   bleWriteControl: vi.fn(),
+  bleWriteLed: vi.fn(),
   getLegacyEmittedCount: () => 0,
   getLegacyLastEmittedFrameHex: () => '',
   resetLegacyEmittedDiag: vi.fn(),

@@ -22,6 +22,8 @@ import { TrainingEngine, type EnginePhaseInfo } from '../training/engine';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { getBleFirmwareReady } from '../native/bleFirmwareReady';
 import {
+  bleSubscribeCharacteristic,
+  bleUnsubscribeCharacteristic,
   bleWriteControl,
   bleWriteLed,
   getLegacyEmittedCount,
@@ -199,6 +201,22 @@ export default function TrainingBlinkPlay() {
       },
     });
   }, [completed, state, navigate]);
+
+  // ── BLE notify 구독 (점등-전용이라도 펌웨어 RX 활성용) ──
+  // NINA-B1 NUS 계열 일부 펌웨어는 TX(notify) 가 활성 구독 상태여야 RX(write) 로
+  // 들어온 LED frame 을 처리한다. Device 화면(testBlink)이 작동하는 이유는 그
+  // 화면이 마운트 동안 notify 를 구독하기 때문이고, 트레이닝 화면이 작동하지
+  // 않는 이유는 Device 를 떠나면서 unsubscribe → 펌웨어 RX 비활성 → LED frame
+  // 무시 가설. 점등-전용 트레이닝은 들어오는 데이터를 사용하지 않지만, 구독
+  // 자체로 펌웨어 GATT CCCD 를 활성 상태로 유지한다.
+  useEffect(() => {
+    if (!isNoiLinkNativeShell()) return;
+    const subscriptionId = `blink-rxkeepalive-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    bleSubscribeCharacteristic(subscriptionId, 'notify');
+    return () => {
+      bleUnsubscribeCharacteristic(subscriptionId);
+    };
+  }, []);
 
   // ── BLE 단절 → 회복 그레이스 (네이티브 셸에서만) ──
   // 짧은 단절은 자동 재연결을 기다리고, 최종 실패('retry-failed') 또는 그레이스 만료에서만
