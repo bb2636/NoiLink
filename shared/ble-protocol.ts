@@ -477,3 +477,134 @@ export function encodeLegacyControlStartFrame(): Uint8Array {
 export function encodeLegacyControlStopFrame(): Uint8Array {
   return new Uint8Array([0xff]);
 }
+
+// ---------------------------------------------------------------------------
+// 레거시 모드 디코더 — Notify (기기 → 앱)
+//
+// 현행 펌웨어가 200ms 마다 보내는 5바이트 IR/터치 패킷, 그리고 NFC 리더가
+// 태그를 읽었을 때 토해내는 NFC NDEF Text Record 를 파싱한다.
+//
+// IR 패킷 (5바이트, big-endian):
+//   [0] IR 거리 상위 8비트
+//   [1] IR 거리 하위 8비트   → distanceMm = (b0 << 8) | b1   (예: 0x069C = 1692)
+//   [2] 터치 카운트 (펌웨어 누적, u8 wrap)
+//   [3] 0x0D
+//   [4] 0x0A
+//
+// NFC NDEF Text Record (RFC 3986/NFC Forum NDEF Text RTD):
+//   [0]    0xD1   (NDEF header: MB=1 ME=1 SR=1 TNF=001)
+//   [1]    0x01   (type length = 1)
+//   [2]    PAYLOAD_LEN
+//   [3]    0x54   ('T' = Text RTD)
+//   [4]    STATUS (bit7=enc UTF-16, bits0..5=lang code length L)
+//   [5..]  lang code L bytes (예: 'en' = 0x65 0x6E)
+//   [..]   text bytes (PAYLOAD_LEN - 1 - L)
+//   [..]   선택적 종료자 0x0A
+// ---------------------------------------------------------------------------
+
+export const LEGACY_IR_FRAME_BYTES = 5;
+export const LEGACY_IR_TERMINATOR_0 = 0x0d;
+export const LEGACY_IR_TERMINATOR_1 = 0x0a;
+
+export interface LegacyIrEvent {
+  type: 'IR';
+  /** IR 센서 거리 (mm). big-endian 16-bit. */
+  distanceMm: number;
+  /** 펌웨어가 누적해서 보내는 터치 카운트 (u8, wrap-around). */
+  touchCount: number;
+}
+
+/** 5바이트 IR 패킷 파싱. 종료자(0x0D 0x0A) 불일치/길이 부족이면 null */
+export function tryParseLegacyIrBytes(bytes: Uint8Array): LegacyIrEvent | null {
+  if (bytes.length < LEGACY_IR_FRAME_BYTES) return null;
+  if (bytes[3] !== LEGACY_IR_TERMINATOR_0) return null;
+  if (bytes[4] !== LEGACY_IR_TERMINATOR_1) return null;
+  const distanceMm = ((bytes[0]! << 8) | bytes[1]!) & 0xffff;
+  const touchCount = bytes[2]!;
+  return { type: 'IR', distanceMm, touchCount };
+}
+
+export function tryParseLegacyIrBase64(b64: string): LegacyIrEvent | null {
+  try {
+    return tryParseLegacyIrBytes(base64ToBytes(b64));
+  } catch {
+    return null;
+  }
+}
+
+export interface LegacyNdefTextEvent {
+  type: 'NFC_TEXT';
+  /** 디코딩된 텍스트 페이로드 (예: "left", "right", "1", "2"). */
+  text: string;
+  /** ISO 639-1 언어 코드 (예: "en", "ko"). 비어있을 수 있음. */
+  language: string;
+}
+
+/**
+ * NFC NDEF Text Record(시작 0xD1 0x01) 파싱. ASCII/UTF-8 만 디코드.
+ * 헤더 불일치/payload 길이 모자람 / UTF-16 인코딩 / 잘못된 status 면 null.
+ */
+export function tryParseLegacyNdefTextBytes(bytes: Uint8Array): LegacyNdefTextEvent | null {
+  if (bytes.length < 5) return null;
+  if (bytes[0] !== 0xd1) return null;
+  const typeLen = bytes[1]!;
+  if (typeLen !== 0x01) return null;
+  const payloadLen = bytes[2]!;
+  if (bytes[3] !== 0x54) return null; // 'T' = Text RTD
+  const status = bytes[4]!;
+  // 우리가 지원하는 건 UTF-8 만 (high bit 0).
+  if ((status & 0x80) !== 0) return null;
+  const langLen = status & 0x3f;
+  // 4(header) + 1(status) + langLen + textLen = 4 + payloadLen 가 되어야 함.
+  // 즉 textLen = payloadLen - 1 - langLen.
+  const textLen = payloadLen - 1 - langLen;
+  if (textLen < 0) return null;
+  if (bytes.length < 5 + langLen + textLen) return null;
+  let language = '';
+  for (let i = 0; i < langLen; i++) {
+    const c = bytes[5 + i]!;
+    if (c < 0x20 || c > 0x7e) return null; // ASCII printable 만
+    language += String.fromCharCode(c);
+  }
+  let text = '';
+  for (let i = 0; i < textLen; i++) {
+    const c = bytes[5 + langLen + i]!;
+    // UTF-8 1바이트 ASCII 범위만 처리. 2+ 바이트 멀티바이트는 그대로 코드포인트로
+    // 옮기지 않고 ASCII 가 아닌 경우 일단 그대로 String.fromCharCode 로 노출.
+    text += String.fromCharCode(c);
+  }
+  // 종료 0x0A 가 텍스트 마지막에 들어와있으면 제거 (펌웨어 컨벤션).
+  if (text.endsWith('\n')) text = text.slice(0, -1);
+  return { type: 'NFC_TEXT', text, language };
+}
+
+export function tryParseLegacyNdefTextBase64(b64: string): LegacyNdefTextEvent | null {
+  try {
+    return tryParseLegacyNdefTextBytes(base64ToBytes(b64));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 현행 펌웨어가 보낸 notify 페이로드를 한 번에 분류한다.
+ * 시도 순서: TOUCH(0xa5/0x81) → IR(5B + 0x0D 0x0A) → NDEF Text(0xD1 0x01 …).
+ * 어떤 패턴에도 안 맞으면 null.
+ */
+export type LegacyNotifyEvent = TouchEvent | LegacyIrEvent | LegacyNdefTextEvent;
+
+export function tryParseAnyNotifyBytes(bytes: Uint8Array): LegacyNotifyEvent | null {
+  return (
+    tryParseTouchBytes(bytes) ??
+    tryParseLegacyIrBytes(bytes) ??
+    tryParseLegacyNdefTextBytes(bytes)
+  );
+}
+
+export function tryParseAnyNotifyBase64(b64: string): LegacyNotifyEvent | null {
+  try {
+    return tryParseAnyNotifyBytes(base64ToBytes(b64));
+  } catch {
+    return null;
+  }
+}

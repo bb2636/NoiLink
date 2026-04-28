@@ -212,6 +212,106 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
     시뮬레이션(`process.env.TZ='UTC'`) 하에서 `checkedDays` 가 KST 요일 칸에 떨어지는지
     (Task #144).
 
+## BLE 펌웨어 모드 — 현행 NINA-B1 vs 차세대 NoiPod
+
+사용자 기기(NINA-B1-FB55CE)는 단순 펌웨어를 사용한다. 차세대 NoiPod 정식
+사양(0xA5 12B SYNC 프레임)과 별개이므로 **`legacyBleMode` 토글**로 분기한다.
+
+- **현행(레거시) 모드 — 기본값 ON**
+  - 송신: 점등 `4E XX 0D` (3B, XX = 1<<pod), START `AA 55`, STOP `FF`
+  - 수신: 5B IR 패킷 `[hi][lo][touchCount][0D][0A]` (200ms 간격) 또는
+    NFC NDEF Text Record `D1 01 ?? 54 [status] [lang...] [text...]`
+  - 인코더: `encodeLegacyLedFrame` / `encodeLegacyControlStartFrame` /
+    `encodeLegacyControlStopFrame` (`shared/ble-protocol.ts`)
+  - 디코더: `tryParseLegacyIrBytes` / `tryParseLegacyNdefTextBytes` /
+    `tryParseAnyNotifyBytes` (TOUCH→IR→NDEF 분류기). base64 entry point 도 동일.
+- **차세대 NoiPod 모드 — 토글 OFF 시**
+  - 송신: 0xA5 12B LED/SESSION/CONTROL 프레임 (`encodeLedFrame` 등)
+  - 수신: 11B TOUCH 프레임 (`tryParseTouchBytes`)
+- **토글 위치**: Device 화면 카드. 변경 즉시 `bleWriteLed/bleWriteControl`
+  분기와 진단 로그가 모드 전환된다.
+- **마이그레이션 (m1.cleanForcedOff)**: 어제 빌드의 강제 OFF useEffect 가
+  storage 에 `'0'` 을 박아둔 사용자가 있다. `getLegacyBleMode()` 첫 호출 시
+  마이그레이션 키가 없으면 잔여 `'0'` 을 1회 청소해서 기본값(ON)으로 복귀시킨다.
+  사용자가 그 후 OFF 를 명시적으로 누른 결과(`'0'`)는 마이그레이션 키 존재로
+  보호된다 (`client/src/native/legacyBleMode.ts`,
+  `client/src/native/__tests__/legacyBleMode.test.ts`).
+- **Device 진단 notify 구독**: 화면에 머무는 동안 `device-diag-*` subId 로
+  notify 구독 → 분류기로 디코드 → 진단 로그에 표시. 다른 구독 스트림 오염
+  방지를 위해 `payload.subscriptionId === subId && payload.key === 'notify'`
+  로 필터. IR 패킷은 throttle (count 변화 즉시 / distance 1.5초당 1회).
+- **레거시 write 직렬화 큐** (`client/src/native/bleBridge.ts`): 트레이닝 엔진이
+  같은 JS turn 에서 여러 LED/CONTROL 프레임을 post 하면 (`flashAll`,
+  `lightTwoPods`, MEMORY RECALL, START 중복 송신 등), native shell 의
+  `dispatchWebMessage` 가 메시지마다 별도 promise 로 처리해 ble-plx GATT 큐가
+  동시 N 개 write 를 받게 된다. NUS 계열 펌웨어는 `withoutResponse` 동시
+  폭주를 못 따라가서 일부 write 가 'operation was cancelled' 로 drop 되거나
+  펌웨어가 LED 출력을 통째로 무시한다 (증상: 진단 송신 카운터는 올라가는데
+  본체 LED 변화 없음). `enqueueLegacyWrite` 가 레거시 분기의
+  `bleWriteCharacteristic` 호출을 50ms 간격으로 흩뿌려 직렬화한다. 첫 호출은
+  마지막 송신 이후 50ms 가 지나 있으면 즉시 실행, 아니면 남은 시간만큼만
+  대기. STOP 은 `enqueueLegacyWritePriority` 로 펜딩 LED 큐를 비우고 즉시
+  송신해 일시정지/취소 시 본체가 한 박자 더 깜박이지 않게 한다.
+  `getLegacyEmittedCount`/`getLegacyLastEmittedFrameHex`/`resetLegacyEmittedDiag`
+  를 export 해 트레이닝 화면이 "엔진 onPodStates 콜백 횟수" 와 "큐가 native
+  bridge 로 실제 송신한 횟수/직전 frame hex" 를 분리해 노출한다 — 두 값이
+  같이 올라가는데 본체 LED 만 안 바뀌면 펌웨어/하드웨어, 큐 카운터만 멈추면
+  큐 자체 문제로 좁힐 수 있다.
+- **MEMORY SHOW 첫 점등 마진** (`client/src/training/engine.ts`): MEMORY 모드의
+  SHOW 시퀀스 첫 LED 는 `FIRST_TICK_DELAY_MS=500` 만큼 늦게 발사한다. 다른
+  모드의 `fireTick` 첫 호출 마진(handleTestBlink 의 START→sleep(500)→LED 와
+  같은 정책) 과 일치시켜 NUS 펌웨어가 START(`aa 55`) 를 처리하는 동안 들어온
+  LED 프레임을 잃어버리지 않게 한다.
+- **Native-side write 직렬화** (`mobile/src/ble/BleManager.ts`):
+  `WebAppWebView.onMessage` 가 매 메시지마다 `void dispatchWebMessage(...)` 로
+  fire-and-forget 호출하고 dispatcher 가 각 메시지를 독립 promise chain 으로
+  처리하기 때문에, JS 의 `enqueueLegacyWrite` 가 50ms 간격으로 N 개 postMessage
+  를 띄워도 native 측에는 N 개의 `writeCharacteristic` 호출이 동시 in-flight 가
+  된다. ble-plx 의 `writeCharacteristicWithoutResponseForService` 는 OS GATT 큐에
+  enqueue 하고 즉시 리턴하므로 NUS 펌웨어가 동시 폭주 frame 일부를 silent drop
+  한다(증상: JS/native 카운터는 올라가는데 본체 LED 미점등). `writeChain`
+  (Promise chain mutex) 으로 모든 write 호출을 직렬로 묶고, 직전 write 종료 후
+  `WRITE_GAP_MS=30` 만큼 갭을 둬서 펌웨어가 frame 을 처리할 시간을 확보한다.
+  handleTestBlink 가 1초 sleep 으로 자연 직렬화하던 것과 같은 효과를 트레이닝
+  포함 모든 write 경로에 일괄 적용. 한 write 실패가 이후 write 를 막지 않도록
+  `writeChain` 은 catch 로 흡수하고, public promise 만 reject 한다.
+
+## 점등-전용 트레이닝 (현재 펌웨어 한정)
+
+NINA-B1-FB55CE 펌웨어는 IR/TOUCH 입력의 정확도/안정성이 채점에 필요한
+수준에 미치지 못해, 앱은 입력을 일체 받지 않고 점등 신호만 BPM 타이밍에
+맞춰 자동 송신한다. 트레이닝 시작 시 모든 흐름이 점등-전용 화면으로
+진입하고, 결과 화면도 점수 대신 단순 "완료"만 표시한다.
+
+- **TrainingEngine.pause()/resume()** (`client/src/training/engine.ts`)
+  - `pause()`: 회복 윈도우 마감 + `allOff()` + RAF/setTimeout/회복 grace 모두
+    cancel + `bleWriteControl(CTRL_STOP)` + `pausedAt`/`isPaused=true` 기록.
+  - `resume()`: `dt = Date.now() - pausedAt` 만큼 시간 기준점들
+    (`startedAt`, `currentPhaseStartedAt`, `memoryRecallStartedAt`,
+    `memoryLastTapAt`, `switchedAt`, `lastTapAt.ts`) 을 일제히 +dt 보정 →
+    `bleWriteControl(CTRL_START)` 재송신 → `startElapsedRaf()` 재시작 →
+    남은 phase 시간만큼 `currentTickFire` 를 setTimeout 으로 다시 예약.
+    남은 시간이 0 이하이면 즉시 `currentPhaseOnEnd()` 호출.
+  - 회귀 테스트: `client/src/training/engine.pauseResume.test.ts` (6 통과).
+- **TrainingBlinkPlay.tsx** (`client/src/pages/TrainingBlinkPlay.tsx`)
+  - 입력 무시: `handleTap`/`handleBleTouch`/`PodGrid` 전부 미사용. 진단용
+    notify 구독도 등록하지 않는다 (Device 화면이 별도로 담당).
+  - UI: 헤더 + BPM 카드 (라임 테두리) + 원형 SVG progress (라임 stroke,
+    중앙 총 시간/경과 mm:ss) + 하단 취소(회색)/일시정지·재개(오렌지).
+  - BLE 단절 회복 그레이스 (8s) 정책은 기존 `TrainingSessionPlay` 와 동일.
+  - 자연 종료 시 `navigate('/result', { state: { blinkOnly: true, title } })`.
+  - 회귀 테스트: `client/src/pages/TrainingBlinkPlay.test.tsx` (7 통과).
+- **Result.tsx — blinkOnly 분기**: `state.blinkOnly === true` 면 점수/회복/
+  비교/부분-결과 카드를 모두 숨기고 단순 "트레이닝 완료" + 확인 버튼만
+  렌더한다. 회귀 테스트: `Result.test.tsx` 의 "점등-전용 완료 분기"
+  describe (2 통과).
+- **라우팅**:
+  - 신규: `/training/blink-session` → `<TrainingBlinkPlay />`. `TrainingSetup`
+    이 모든 트레이닝을 이 라우트로 보낸다.
+  - 보존: `/training/session` → `<TrainingSessionPlay />`. 향후 펌웨어가
+    입력 모드를 지원하면 `TrainingSetup` 의 navigate 한 줄만 바꿔 복귀할
+    수 있도록 화면/테스트를 그대로 유지한다.
+
 ## Deployment
 
 - Target: autoscale

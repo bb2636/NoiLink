@@ -30,9 +30,13 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   };
 
   return (
-    <div className="min-h-screen flex" style={{ backgroundColor: '#F5F5F5' }}>
+    // 화면 전체 높이를 고정하고 main 안에서만 세로 스크롤이 동작하도록 한다.
+    // (이전에는 `min-h-screen` 이라 children 만큼 컨테이너 자체가 늘어나서
+    // `<main className="overflow-auto">` 가 절대 트리거되지 않았다 — 결과적으로
+    // 페이지가 길어져도 마우스 휠이 안 먹히는 증상으로 보였다.)
+    <div className="h-screen flex overflow-hidden" style={{ backgroundColor: '#F5F5F5' }}>
       {/* 사이드바 */}
-      <aside className="w-64 flex-shrink-0 border-r" style={{ backgroundColor: '#FFFFFF', borderColor: '#E5E5E5' }}>
+      <aside className="w-64 flex-shrink-0 border-r overflow-y-auto" style={{ backgroundColor: '#FFFFFF', borderColor: '#E5E5E5' }}>
         <div className="p-6">
           <h1 className="text-xl font-bold" style={{ color: '#000000' }}>NoiLink</h1>
           <p 

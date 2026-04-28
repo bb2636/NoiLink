@@ -35,6 +35,19 @@ import {
 
 import { bleWriteControl, bleWriteLed, bleWriteSession } from '../native/bleBridge';
 
+/**
+ * START(`aa 55`) 송신 직후 첫 LED 명령까지의 마진(ms).
+ *
+ * 사용자 NINA-B1 펌웨어 같은 NUS 계열은 START 처리에 시간이 필요한데, 이 마진이
+ * 너무 짧으면 첫 LED 명령을 통째로 무시하고 본체가 멈춰 보일 수 있다. 디바이스
+ * 화면의 점등 진단(`Device.tsx#handleTestBlink`)이 사용자 기기에서 정상 동작하는
+ * 500ms 마진과 동일하게 둔다.
+ *
+ * 변경 시 `engine.test.ts` / `engine.pauseResume.test.ts` 의 첫 tick 대기 시간도
+ * 함께 갱신해야 한다 — 두 곳 모두 본 상수를 import 해 사용한다.
+ */
+export const FIRST_TICK_DELAY_MS = 500;
+
 // BLE 송신용 BPM 안전벨트.
 // 사용자가 0~59 같은 범위 밖 값으로 시작하더라도 펌웨어 스키마(60~200)를
 // 위반해 native 가 ack 거부 → "내부 오류" 토스트가 뜨는 사고를 막는다.
@@ -260,6 +273,42 @@ export class TrainingEngine {
   /** 현재 회복 구간의 시작 시각(Date.now). 종료 시 누적해 acc.recoveryMs 에 더한다. */
   private recoveryEnteredAt = 0;
 
+  // ── 일시정지(pause/resume) 지원 ──
+  // 점등-전용 트레이닝 화면(TrainingBlinkPlay)이 사용자의 명시적 "일시정지" 요청을
+  // 처리하기 위한 진입점. 회복 구간(beginRecoveryWindow)과는 의미가 달라 분리:
+  //   - 회복: BLE 끊김으로 채점 제외 시간을 누적하지만 phase clock 은 계속 흐른다.
+  //   - 일시정지: phase clock 자체가 멈추고, 재개 시 같은 지점에서 이어진다.
+  /** 사용자 일시정지 중 여부. true 일 때는 모든 timer/RAF 가 멈춰 있다. */
+  private isPaused = false;
+  /** 일시정지 진입 시각(Date.now). resume 시 dt 계산에 사용. */
+  private pausedAt = 0;
+  /** 현재 진행 중인 phase(또는 단일 모드의 전체 세션) 시작 시각(Date.now). resume 시 dt 만큼 보정. */
+  private currentPhaseStartedAt = 0;
+  /** 현재 phase 의 총 길이 ms. resume 시 남은 시간을 계산해 fireTick 을 다시 발사. */
+  private currentPhaseDurationMs = 0;
+  /** 현재 phase 가 자연 종료될 때 호출할 콜백(다음 plan 진입). 단일 모드는 null. */
+  private currentPhaseOnEnd: (() => void) | null = null;
+  /** 현재 phase 의 fireTick 함수 — pause 후 resume 시 다시 setTimeout 으로 발사한다. */
+  private currentTickFire: (() => void) | null = null;
+  /** 현재 phase 의 beat 간격(ms). resume 시 다음 fireTick 까지의 setTimeout 지연. */
+  private currentBeatMs = 0;
+  /**
+   * 현재 phase 가 schedule 기반 자극(MEMORY SHOW/RECALL 시퀀스)에 의존하는지 여부.
+   *
+   * - FOCUS/JUDGMENT/AGILITY/COMPREHENSION/RHYTHM 은 매 박자마다 호출되는
+   *   `fireTick` 안에서 자극을 점등하므로, pause 가 `pendingTimers` 를 비워도
+   *   resume 시 `currentTickFire` 만 setTimeout 으로 다시 예약하면 다음 박자부터
+   *   정상 자극이 이어진다.
+   * - MEMORY phase 는 SHOW/RECALL 의 모든 점등·전환 콜백이 `schedule()` →
+   *   `pendingTimers` 에 등록되며 `fireTick` 자체는 점등을 만들지 않는다.
+   *   pause 가 그 timer 들을 일괄 cancel 하면 resume 시 SHOW/RECALL 자극이 통째로
+   *   사라진다(현재 사이클이 phase 종료까지 무자극으로 흐른다).
+   *   → resume 에서 이 플래그가 true 면 잔여시간만큼 `startTickLoop` 를 다시
+   *     호출해 phase 자체를 재시작한다 (시퀀스가 새로 뽑히되 phase 종료 시각은
+   *     원래대로 유지).
+   */
+  private currentPhaseScheduleBased = false;
+
   constructor(cfg: EngineConfig) {
     this.cfg = cfg;
     this.pods = Array.from({ length: cfg.podCount }, (_, i) => ({
@@ -317,8 +366,22 @@ export class TrainingEngine {
     }
 
     // elapsed 표시용 RAF
+    this.startElapsedRaf();
+  }
+
+  /**
+   * 전체 세션 elapsed RAF 루프를 시작한다. start() 와 resume() 둘 다에서 호출되며,
+   * 일시정지 중(isPaused=true) 또는 destroyed 면 즉시 멈춘다.
+   * - elapsed = Date.now() - this.startedAt (resume 이 startedAt 을 dt 만큼 뒤로 미루면
+   *   진행률이 일시정지 시간만큼 멈춘 것처럼 보인다)
+   * - elapsed >= totalDurationMs 도달 시 complete() 호출.
+   */
+  private startElapsedRaf(): void {
     const tickElapsed = () => {
-      if (this.destroyed) return;
+      if (this.destroyed || this.isPaused) {
+        this.rafId = null;
+        return;
+      }
       const e = Date.now() - this.startedAt;
       this.cfg.onElapsedMs(Math.min(this.cfg.totalDurationMs, e));
       if (e >= this.cfg.totalDurationMs) {
@@ -498,10 +561,18 @@ export class TrainingEngine {
     // 단계에서 clamp 해 두는 것이 안전.
     const beatMs = Math.max(120, Math.round(60_000 / clampBpmForBle(this.cfg.bpm)));
     const tickInterval = beatMs; // 1 beat = 1 tick
-    const phaseStart = Date.now();
+    // pause/resume 시 보정/재시작에 사용 — 클로저 const 가 아닌 인스턴스 필드로 보존.
+    this.currentPhaseStartedAt = Date.now();
+    this.currentPhaseDurationMs = durationMs;
+    this.currentPhaseOnEnd = onPhaseEnd ?? null;
+    this.currentBeatMs = beatMs;
     const segIsRhythm =
       (this.cfg.isComposite || this.cfg.mode === 'COMPOSITE') &&
       this.compositePlan[this.currentPlanIdx]?.type === 'RHYTHM';
+    // pause/resume 정합성 — MEMORY phase 만 schedule 기반(SHOW/RECALL 콜백이
+    // pendingTimers 에 모두 들어간다). 그 외는 fireTick 안에서 매 박자 점등.
+    this.currentPhaseScheduleBased =
+      !segIsRhythm && this.currentCognitiveMode === 'MEMORY';
 
     // MEMORY는 SHOW 단계 먼저 → RECALL
     if (!segIsRhythm && this.currentCognitiveMode === 'MEMORY') {
@@ -515,6 +586,9 @@ export class TrainingEngine {
       // 명세 A.MEMORY: Lv1~2 는 연속 동일 Pod 금지 (학습 진입 부담 완화)
       const banConsecutive = this.cfg.level <= 2;
       let prevPod = -1;
+      // 첫 점등은 START(aa 55) 이후 FIRST_TICK_DELAY_MS 만큼 기다린다 — 다른 모드의
+      // fireTick 첫 호출과 같은 마진을 부여해, NUS 계열 펌웨어가 START 처리 도중
+      // 들어온 LED 프레임을 잃어버리지 않도록 한다(handleTestBlink 와 동일 정책).
       for (let i = 0; i < seqLen; i++) {
         let podId = Math.floor(Math.random() * this.cfg.podCount);
         if (banConsecutive && this.cfg.podCount > 1 && podId === prevPod) {
@@ -524,10 +598,10 @@ export class TrainingEngine {
         this.memoryQueue.push(podId);
         this.schedule(() => {
           this.lightSinglePod(podId, 'GREEN', tickInterval * 0.6);
-        }, i * tickInterval);
+        }, FIRST_TICK_DELAY_MS + i * tickInterval);
       }
       // SHOW 끝나면 RECALL로 전환 (모든 Pod WHITE 신호)
-      const showEnd = seqLen * tickInterval;
+      const showEnd = FIRST_TICK_DELAY_MS + seqLen * tickInterval;
       this.schedule(() => {
         this.memoryPhase = 'RECALL';
         this.memoryRecallStartedAt = Date.now();
@@ -554,10 +628,12 @@ export class TrainingEngine {
 
     const fireTick = () => {
       if (this.destroyed) return;
-      const elapsedInPhase = Date.now() - phaseStart;
-      if (elapsedInPhase >= durationMs) {
+      // phaseStart/durationMs/onPhaseEnd 는 인스턴스 필드를 사용한다 — pause/resume 가
+      // currentPhaseStartedAt 을 dt 만큼 뒤로 미루면 elapsedInPhase 가 자연스럽게 보정된다.
+      const elapsedInPhase = Date.now() - this.currentPhaseStartedAt;
+      if (elapsedInPhase >= this.currentPhaseDurationMs) {
         this.allOff();
-        if (onPhaseEnd) onPhaseEnd();
+        if (this.currentPhaseOnEnd) this.currentPhaseOnEnd();
         return;
       }
       // BLE 단절 회복 중에는 새 자극을 점등하지 않는다 (Task #27).
@@ -597,8 +673,102 @@ export class TrainingEngine {
 
       this.tickTimer = window.setTimeout(fireTick, tickInterval);
     };
-    // 첫 tick은 살짝 딜레이(준비)
-    this.tickTimer = window.setTimeout(fireTick, 350);
+    // pause 후 resume 시 같은 fireTick 을 재호출할 수 있도록 인스턴스 필드에 보존.
+    this.currentTickFire = fireTick;
+    // 첫 tick은 살짝 딜레이(준비). 디바이스 점등 진단의 START→LED 마진과 동일하게 두어
+    // NUS 계열 펌웨어가 START(`aa 55`) 를 처리할 충분한 시간을 보장한다.
+    this.tickTimer = window.setTimeout(fireTick, FIRST_TICK_DELAY_MS);
+  }
+
+  // ───── 일시정지 / 재개 ────────────────────────────────────────────────
+  /**
+   * 사용자의 명시적 "일시정지" 요청. 점등을 즉시 멈추고 모든 timer/RAF 를 cancel 한다.
+   * - LED OFF 프레임 송신 후 CONTROL_STOP 으로 펌웨어에도 정지를 알린다.
+   * - phase clock 은 멈추므로 재개 시 같은 지점에서 이어진다.
+   * - 회복 구간이 열려 있었다면 누적을 마감한다(채점 제외 시간 정합성 유지).
+   * - 이미 destroyed/isPaused 면 no-op (멱등).
+   */
+  pause(): void {
+    if (this.destroyed || this.isPaused) return;
+    if (this.inRecoveryWindow) this.endRecoveryWindow();
+    // 켜져 있던 LED 모두 OFF (BLE OFF 프레임 송신 포함).
+    this.allOff();
+    // 모든 timer/RAF cancel — destroy 와 달리 destroyed=true 로 만들지 않는다.
+    if (this.rafId) {
+      window.cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+    if (this.tickTimer) {
+      window.clearTimeout(this.tickTimer);
+      this.tickTimer = null;
+    }
+    if (this.phaseTimer) {
+      window.clearTimeout(this.phaseTimer);
+      this.phaseTimer = null;
+    }
+    this.pendingTimers.forEach((t) => window.clearTimeout(t));
+    this.pendingTimers = [];
+    // 펌웨어에 정지 통보 — 재개 시 다시 START 를 보낼 것이다.
+    bleWriteControl(CTRL_STOP);
+    this.pausedAt = Date.now();
+    this.isPaused = true;
+  }
+
+  /**
+   * 일시정지에서 복귀. pause 동안 흐른 시간(dt)만큼 시간 기준점들을 뒤로 미뤄
+   * 마치 그 시간이 흐르지 않은 것처럼 보이게 한다.
+   * - startedAt, currentPhaseStartedAt, memoryRecallStartedAt, memoryLastTapAt,
+   *   switchedAt, lastTapAt.ts 모두 +dt.
+   * - 펌웨어에 START 재송신, RAF/tick 루프 재시작.
+   * - 남은 phase 시간이 0 이하이면 즉시 onPhaseEnd 또는 complete 호출.
+   * - 호출 전 destroyed/!isPaused 이면 no-op.
+   */
+  resume(): void {
+    if (this.destroyed || !this.isPaused) return;
+    const dt = Math.max(0, Date.now() - this.pausedAt);
+    this.startedAt += dt;
+    if (this.currentPhaseStartedAt > 0) this.currentPhaseStartedAt += dt;
+    if (this.memoryRecallStartedAt > 0) this.memoryRecallStartedAt += dt;
+    if (this.memoryLastTapAt > 0) this.memoryLastTapAt += dt;
+    if (this.switchedAt > 0) this.switchedAt += dt;
+    if (this.lastTapAt) this.lastTapAt.ts += dt;
+    this.isPaused = false;
+    this.pausedAt = 0;
+    // 펌웨어 재시작 — pause 시점에 STOP 을 보냈으므로 다시 START 가 필요하다.
+    bleWriteControl(CTRL_START);
+    // elapsed RAF 재시작.
+    this.startElapsedRaf();
+    // 자극 루프 재개 — 남은 phase 시간이 양수면 다음 fireTick 을 setTimeout 으로 발사.
+    if (this.currentTickFire && this.currentPhaseDurationMs > 0) {
+      const elapsedInPhase = Date.now() - this.currentPhaseStartedAt;
+      const remaining = this.currentPhaseDurationMs - elapsedInPhase;
+      if (remaining <= 0) {
+        // 일시정지 사이에 phase 가 자연 종료될 시간(= dt 가 매우 클 때)에 도달.
+        // onPhaseEnd 가 등록돼 있으면 다음 plan 으로, 아니면 complete.
+        const onEnd = this.currentPhaseOnEnd;
+        if (onEnd) onEnd();
+        else this.complete();
+        return;
+      }
+      // MEMORY 처럼 schedule 기반 phase 는 pendingTimers 가 통째로 끊겨 SHOW/RECALL
+      // 자극이 사라진 상태이므로, 단순 fireTick 재예약으로는 자극이 복구되지 않는다.
+      // → 잔여시간만큼 phase 자체를 재시작해 SHOW 시퀀스부터 다시 흘려보낸다.
+      //   phase 종료 시각은 그대로 유지되고, MEMORY 카운트 누적은 점등-전용 모드에서
+      //   채점 의미가 없으므로 무시한다.
+      if (this.currentPhaseScheduleBased) {
+        const onEnd = this.currentPhaseOnEnd ?? undefined;
+        this.startTickLoop(remaining, onEnd);
+        return;
+      }
+      // 다음 fireTick 까지의 지연은 한 박자 정도로 두어 즉시 깜박이지 않게 한다.
+      const delay = Math.max(120, Math.min(this.currentBeatMs || 350, 350));
+      this.tickTimer = window.setTimeout(this.currentTickFire, delay);
+    }
+  }
+
+  /** 외부 화면(테스트/디버그용)에서 현재 일시정지 상태를 조회. */
+  getIsPaused(): boolean {
+    return this.isPaused;
   }
 
   // ───── 모드별 tick 점등 ─────────────────────────────────────────────

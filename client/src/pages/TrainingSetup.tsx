@@ -41,7 +41,37 @@ const COLOR_OPTIONS = [
   { id: 'green',  color: '#7FE65B' },
   { id: 'yellow', color: '#F1C232' },
   { id: 'blue',   color: '#3D6BFF' },
+  // 화이트 — 기억력의 "입력 신호", 이해력의 "전환 경고" 등 신호 색상으로 사용.
+  // 어두운 배경 위에서 식별되도록 매우 옅은 회색 테두리로 그려질 것이다.
+  { id: 'white',  color: '#FFFFFF' },
 ] as const;
+
+/**
+ * 트레이닝별 "기본 선택 색상".
+ *
+ * 사용자가 트레이닝 화면에 들어왔을 때 5개 색상 동그라미 중 어느 것이 미리
+ * 선택돼 있어야 하는지를 정의한다. 사용자는 동그라미를 눌러 다른 색으로
+ * 자유롭게 변경할 수 있다 (이전 fixed/잠금 동작은 제거됨).
+ *
+ * 각 트레이닝의 "주 색상" (펌웨어 점등 사양과 일관 — 자극/타겟/정답 등):
+ *  - 기억력(MEMORY)        : 초록 (자극)
+ *  - 이해력(COMPREHENSION) : 초록 (정답 — GREEN/BLUE 중 기본)
+ *  - 집중력(FOCUS)         : 파랑 (타겟)
+ *  - 판단력(JUDGMENT)      : 초록 (1회 터치 = GO)
+ *  - 지구력(ENDURANCE)     : 초록 (사용자 자유 선택, 디폴트만)
+ *  - 멀티태스킹(AGILITY)   : 초록 (앵커 = 손)
+ *
+ * NOTE: catalog id 'AGILITY' 는 "순발력(기존 멀티태스킹)" 으로 매핑되어 있어
+ * 사용자가 말하는 "멀티태스킹" 트레이닝이 곧 AGILITY 다 (`shared/types.ts` 참조).
+ */
+const TRAINING_DEFAULT_COLOR: Record<string, string> = {
+  MEMORY:        'green',
+  COMPREHENSION: 'green',
+  FOCUS:         'blue',
+  JUDGMENT:      'green',
+  AGILITY:       'green',
+  ENDURANCE:     'green',
+};
 
 export default function TrainingSetup() {
   const navigate = useNavigate();
@@ -101,10 +131,25 @@ export default function TrainingSetup() {
   const isPrimaryConnected = registered.length > 0;
 
   // ─── BPM (per-user) ─────────────────────────────────────────
-  const [bpm, setBpm] = useState(0);
+  // 기본값 60 — 디바이스 점등 테스트(`Device.handleTestBlink`)가 쓰는 1초 간격
+  // (= 60 BPM)과 동일하게 시작해, 사용자가 다이얼을 돌리지 않아도 곧바로
+  // 펌웨어가 안정적으로 처리하는 박자에서 트레이닝을 시작할 수 있게 한다.
+  const [bpm, setBpm] = useState(60);
 
-  // ─── 색상 (enterprise only) ──────────────────────────────────
-  const [color, setColor] = useState<string>('green');
+  // ─── 색상 ────────────────────────────────────────────────────
+  // 모든 트레이닝이 동일한 5개 색상 동그라미 UI 를 사용한다 (이전 fixed 분기 제거).
+  // 트레이닝마다 그 트레이닝의 "주 색상" 이 디폴트로 미리 선택된 채로 화면이
+  // 뜨고 (`TRAINING_DEFAULT_COLOR`), 사용자는 동그라미를 눌러 다른 색으로
+  // 자유롭게 변경할 수 있다.
+  const [color, setColor] = useState<string>(
+    () => (mode && TRAINING_DEFAULT_COLOR[mode]) || 'green'
+  );
+  // mode 가 바뀌면(다른 트레이닝 화면 진입) 그 트레이닝의 디폴트 색으로 초기화.
+  useEffect(() => {
+    if (mode && TRAINING_DEFAULT_COLOR[mode]) {
+      setColor(TRAINING_DEFAULT_COLOR[mode]);
+    }
+  }, [mode]);
 
   // ─── 세션 설정 (간소화) ──────────────────────────────────────
   const [level] = useState<Level>(3);
@@ -142,7 +187,10 @@ export default function TrainingSetup() {
       yieldsScore: !isFree,
       isComposite: isComposite || info.apiMode === 'COMPOSITE',
     };
-    navigate('/training/session', { state: run });
+    // 현재 펌웨어 사양(앱은 입력을 받지 않고 점등 신호 전달만)에 맞춰 모든 트레이닝을
+    // 점등-전용 화면으로 보낸다. 향후 펌웨어가 입력 모드를 지원하면 `/training/session`
+    // (TrainingSessionPlay) 라우트가 그대로 살아 있어 분기를 한 줄만 바꿔 복귀할 수 있다.
+    navigate('/training/blink-session', { state: run });
   };
 
   return (
@@ -295,27 +343,29 @@ export default function TrainingSetup() {
           )}
         </section>
 
-        {/* 색상 — 진행 회원과 동일하게 기업 소속(관리자 + 승인된 개인) 전체에 노출.
-              (이전에는 isEnterprise(관리자만)로 게이트되어 있어 조직 소속 일반 회원에게는 안 보였음) */}
-        {hasOrganization && (
-          <section className="mb-6">
-            <h2 className="text-sm font-semibold text-white mb-3">색상</h2>
-            <div className="flex items-center gap-3">
-              {COLOR_OPTIONS.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => setColor(c.id)}
-                  className="w-8 h-8 rounded-full transition-all"
-                  style={{
-                    backgroundColor: c.color,
-                    boxShadow: color === c.id ? '0 0 0 2px #fff' : 'none',
-                    transform: color === c.id ? 'scale(1.1)' : 'scale(1)',
-                  }}
-                />
-              ))}
-            </div>
-          </section>
-        )}
+        {/* 색상 — 모든 트레이닝이 동일한 5개 동그라미 UI.
+              트레이닝마다 그 트레이닝의 "주 색상" 이 디폴트로 선택되어 있으며
+              사용자는 동그라미를 눌러 자유롭게 변경 가능. */}
+        <section className="mb-6">
+          <h2 className="text-sm font-semibold text-white mb-3">색상</h2>
+          <div className="flex items-center gap-3">
+            {COLOR_OPTIONS.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setColor(c.id)}
+                aria-label={`${c.id} 색상 선택`}
+                className="w-8 h-8 rounded-full transition-all"
+                style={{
+                  backgroundColor: c.color,
+                  // 흰색 칩이 어두운 배경에서 사라지지 않도록 옅은 회색 테두리.
+                  border: c.id === 'white' ? '1px solid #3A3A3A' : 'none',
+                  boxShadow: color === c.id ? '0 0 0 2px #AAED10' : 'none',
+                  transform: color === c.id ? 'scale(1.1)' : 'scale(1)',
+                }}
+              />
+            ))}
+          </div>
+        </section>
 
         {/* 시작하기 */}
         <button

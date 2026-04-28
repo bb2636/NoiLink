@@ -1,24 +1,30 @@
 /**
- * 레거시 BLE 모드 토글
+ * 현행 펌웨어(레거시) BLE 모드 토글
  *
- * NoiPod 정식 펌웨어가 아직 탑재되지 않은 NINA-B1 모듈(예: 광고명
- * 'NINA-B1-XXXXXX') 처럼 12바이트 NoiPod 프레임을 못 알아듣는 펌웨어에 대해,
- * savexx 명세 §11/§12.5 의 짧은 명령으로 BLE write 를 보낸다.
+ * 사용자 기기(NINA-B1-FB55CE 등)의 현행 펌웨어 사양:
+ *   - 송신(LED): `4e <pod+1> 0d`  (3바이트, "N" + idx + CR)
+ *   - 송신(START): `aa 55`
+ *   - 송신(STOP): `ff`
+ *   - 수신: 5바이트 IR 패킷 또는 NFC NDEF Text Record
  *
- *   - LED  : `4e <pod+1> 0d`  (3바이트)
- *   - START: `aa 55`
- *   - STOP : `ff`
- *
- * 토글이 ON 일 때만 위 변환이 적용되며, OFF 면 정식 12바이트 프레임을 그대로
- * 보낸다. 정식 펌웨어가 들어오면 토글을 OFF 로 두고 정상 사용한다.
+ * 차세대(NoiPod 정식) 펌웨어 사양은 SYNC=0xa5 12바이트 프레임이지만, 현재
+ * 사용자 기기에 들어가있지 않으므로 **기본값을 ON(레거시 모드)** 로 둔다.
+ * 차세대 펌웨어가 들어간 기기를 시험할 때만 토글을 OFF 로 한다.
  *
  * - storage key: `noilink:ble:legacyMode`
- * - 기본값: false (정식 모드)
+ * - 명시적 '0' 만 OFF, 그 외(없거나 '1' 또는 다른 값)는 모두 ON.
  * - 값 변경 시 `legacy-ble-mode-change` CustomEvent 가 발사되고,
  *   다른 탭/창은 표준 `storage` 이벤트로 동기화된다.
  */
 
 const STORAGE_KEY = 'noilink:ble:legacyMode';
+// 어제 빌드에서는 진입 시 강제로 setLegacyBleMode(false) 가 호출돼 storage 에
+// '0' 이 박혀버린 사용자가 있다. 오늘부터 기본값을 ON 으로 되돌렸지만 그 사용자는
+// '0' 그대로라 OFF 가 유지되어 화면에서 직접 토글하지 않는 한 점등이 안 된다.
+// 1회성 마이그레이션 키로 그 잔여 '0' 을 청소해 기본값(ON)으로 복귀시킨다.
+// 마이그레이션 후 사용자가 명시적으로 OFF 를 누르면 다시 '0' 이 저장되며,
+// 그 값은 (마이그레이션 키가 이미 있으므로) 다시는 청소되지 않는다.
+const MIGRATION_KEY = 'noilink:ble:legacyMode:m1.cleanForcedOff';
 const EVENT_NAME = 'legacy-ble-mode-change';
 
 function safeStorage(): Storage | null {
@@ -29,11 +35,28 @@ function safeStorage(): Storage | null {
   }
 }
 
+function runMigrationOnce(s: Storage): void {
+  try {
+    if (s.getItem(MIGRATION_KEY) === '1') return;
+    if (s.getItem(STORAGE_KEY) === '0') {
+      // 어제 빌드의 잔여 강제-OFF 값. 제거해서 기본값(ON)으로 복귀.
+      s.removeItem(STORAGE_KEY);
+    }
+    s.setItem(MIGRATION_KEY, '1');
+  } catch {
+    /* ignore */
+  }
+}
+
 export function getLegacyBleMode(): boolean {
   try {
-    return safeStorage()?.getItem(STORAGE_KEY) === '1';
+    const s = safeStorage();
+    if (!s) return true;
+    runMigrationOnce(s);
+    // 명시적으로 '0' 이 저장돼 있을 때만 OFF. 미설정/'1'/기타는 ON (기본값).
+    return s.getItem(STORAGE_KEY) !== '0';
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -41,8 +64,8 @@ export function setLegacyBleMode(on: boolean): void {
   try {
     const s = safeStorage();
     if (!s) return;
-    if (on) s.setItem(STORAGE_KEY, '1');
-    else s.removeItem(STORAGE_KEY);
+    // OFF 도 명시적으로 저장해야 기본값(ON)을 덮어쓸 수 있다.
+    s.setItem(STORAGE_KEY, on ? '1' : '0');
   } catch {
     /* ignore */
   }
