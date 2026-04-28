@@ -339,20 +339,14 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
       해당 조직 소속 사용자들의 `sessions`/`metricsScores` 합산 →
       `orgReports` 테이블 저장. 참여율, 팀 평균 점수, 리스크 멤버 등.
 - **결과 화면** (`client/src/pages/Result.tsx`)
-  - 정상 분기: 서버 산출 점수, 직전 세션 대비 향상도, 회복 안내,
-    맞춤 코칭 등 풀 리포트 표시.
-  - `state.blinkOnly === true` 분기: 점등-전용 회귀 화면용 — 점수/회복/
-    비교/부분-결과 카드를 모두 숨기고 "트레이닝 완료" 한 줄만. 회귀
-    테스트: `Result.test.tsx` 의 "점등-전용 완료 분기" describe (2 통과).
-- **라우팅**:
-  - 기본: `/training/session` → `<TrainingSessionPlay />` (입력 채점 + 리포트
-    연동). `TrainingSetup` 의 모든 트레이닝이 이 라우트로 진입.
-  - 보존(회귀 대비): `/training/blink-session` → `<TrainingBlinkPlay />`.
-    펌웨어 RX 가 또 다시 신뢰 불가 상태가 될 경우 `TrainingSetup` 의
-    navigate 한 줄만 되돌리면 점등-전용으로 전환된다. 화면 자체는 마운트
-    동안 `bleSubscribeCharacteristic('notify')` 로 RX-keepalive 를 유지해
-    LED frame 이 silent 무시되지 않도록 한다 (실제 데이터는 사용하지 않음).
-    회귀 테스트: `client/src/pages/TrainingBlinkPlay.test.tsx` (7 통과).
+  - 서버 산출 점수, 직전 세션 대비 향상도, 회복 안내, 맞춤 코칭 등 풀
+    리포트 표시. 자유 트레이닝(`yieldsScore=false`) 은 별도 분기로 점수 없이
+    "수고했어요" 화면.
+- **라우팅**: `/training/session` → `<TrainingSessionPlay />` 가 유일한 트레
+  이닝 진행 라우트. `TrainingSetup` 의 모든 트레이닝이 이 라우트로 진입.
+  점등-전용 화면(`TrainingBlinkPlay`) 과 `Result.tsx` 의 `blinkOnly` 분기는
+  데드 코드 노출 위험(=서버 제출 누락 → 리포트 미연동)을 막기 위해 완전히
+  제거되었다. 펌웨어 회귀 시에는 git history 에서 복구한다.
 
 ## Deployment
 

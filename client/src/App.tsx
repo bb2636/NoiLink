@@ -7,11 +7,9 @@ import { useLocation } from 'react-router-dom';
  * (해당 페이지가 자체 MobileLayout을 사용하더라도 외곽 탭바 중복 렌더를 방지)
  *
  * 탭바를 숨길 경로는 export 해서 회귀 테스트가 정합성을 잠글 수 있게 한다.
- * 점등-전용 진행 화면(`/training/blink-session`)도 몰입형이므로 반드시 포함.
  */
 export const HIDE_BOTTOM_NAV_ROUTES: readonly string[] = [
   '/training/session',
-  '/training/blink-session',
   '/result',
 ];
 
@@ -43,7 +41,6 @@ import OrganizationMembers from './pages/OrganizationMembers';
 import Record from './pages/Record';
 import TrainingSetup from './pages/TrainingSetup';
 import TrainingSessionPlay from './pages/TrainingSessionPlay';
-import TrainingBlinkPlay from './pages/TrainingBlinkPlay';
 import Splash from './pages/Splash';
 import Device from './pages/Device';
 import DeviceAdd from './pages/DeviceAdd';
@@ -239,22 +236,6 @@ function AppRoutes() {
                   element={
                     <ProtectedRoute>
                       <TrainingSessionPlay />
-                    </ProtectedRoute>
-                  }
-                />
-                {/*
-                  점등-전용 트레이닝 진행 화면(TrainingBlinkPlay) — 회귀 대비 보존.
-                  기본 트레이닝은 `/training/session` (TrainingSessionPlay) 가 펌웨어
-                  11바이트 TOUCH notify 입력을 받아 채점 + 리포트/랭킹/기업 연동을
-                  수행한다. 펌웨어 RX 가 다시 신뢰 불가 상태가 될 경우 TrainingSetup
-                  의 navigate 한 줄만 이 라우트로 되돌려 점등-전용 모드로 전환할 수
-                  있도록 화면/테스트를 그대로 유지한다.
-                */}
-                <Route
-                  path="/training/blink-session"
-                  element={
-                    <ProtectedRoute>
-                      <TrainingBlinkPlay />
                     </ProtectedRoute>
                   }
                 />

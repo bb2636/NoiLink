@@ -192,7 +192,7 @@ export default function TrainingSetup() {
     // deltaMs(deviceDeltaValid 일 때 기기 측정 오차)를 그대로 채점에 사용한다.
     // 결과는 POST /sessions + POST /metrics/session/:id 로 서버에 저장되어 개인 리포트
     // (`/report`), 랭킹(`/ranking`), 기업 인사이트 리포트(`/organization-report`) 에 자동
-    // 연동된다. 점등-전용 화면(`/training/blink-session`)은 펌웨어 회귀 대비용으로 보존.
+    // 연동된다.
     navigate('/training/session', { state: run });
   };
 
