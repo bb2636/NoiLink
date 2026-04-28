@@ -22,6 +22,7 @@ import { TrainingEngine, type EnginePhaseInfo } from '../training/engine';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { getBleFirmwareReady } from '../native/bleFirmwareReady';
 import { bleWriteControl } from '../native/bleBridge';
+import { getLegacyBleMode } from '../native/legacyBleMode';
 import type { TrainingRunState } from './TrainingSessionPlay';
 
 /** 연결된 기기 ID — 진단 표시용. localStorage 의 CONNECTED_DEVICE 키를 읽는다. */
@@ -77,6 +78,11 @@ export default function TrainingBlinkPlay() {
   const [bleConnected, setBleConnected] = useState<boolean | null>(() =>
     isNoiLinkNativeShell() ? readConnectedDeviceId() !== null : null,
   );
+  // 진단용 — 마지막 송신 frame hex. lit pod 의 ID 로 산출 (`4e (id+1) 0d`).
+  // 이 값이 디바이스 점등 테스트와 동일한 형태로 흐르면 트레이닝과 테스트의
+  // 송신 경로가 정말 같다는 시각적 증거가 된다.
+  const [lastFrameHex, setLastFrameHex] = useState<string>('-');
+  const legacyOn = getLegacyBleMode();
 
   const engineRef = useRef<TrainingEngine | null>(null);
   const completedRef = useRef(false);
@@ -116,12 +122,22 @@ export default function TrainingBlinkPlay() {
       podCount: 4,
       isComposite: state.isComposite || state.apiMode === 'COMPOSITE',
       // 점등-전용 모드는 PodGrid 를 노출하지 않으므로 화면 표시는 안 하지만, 진단용으로
-      // 호출 횟수와 OFF→ON 전이 횟수를 누적해 화면 하단에 노출한다.
+      // 호출 횟수와 OFF→ON 전이 횟수, 마지막 송신 hex 를 누적해 화면 하단에 노출한다.
       onPodStates: (s) => {
         setStateUpdates((c) => c + 1);
-        const isLit = s.some((p) => p.fill !== 'OFF');
+        const litIds = s.filter((p) => p.fill !== 'OFF').map((p) => p.id);
+        const isLit = litIds.length > 0;
         if (isLit && !prevLitRef.current) {
           setLightCount((c) => c + 1);
+        }
+        if (isLit) {
+          // 레거시 분기와 동일한 인코딩(`4e (id+1) 0d`)을 화면용으로 재구성.
+          // 실제 송신은 `bleWriteLed` → `encodeLegacyLedFrame` 가 담당하며 여기서는
+          // 표시만을 위해 같은 식을 쓴다 (id 0..7 → 01..08).
+          const hex = litIds
+            .map((id) => `4e ${(id + 1).toString(16).padStart(2, '0')} 0d`)
+            .join(' / ');
+          setLastFrameHex(hex);
         }
         prevLitRef.current = isLit;
       },
@@ -364,7 +380,10 @@ export default function TrainingBlinkPlay() {
             <div>
               BLE:{' '}
               {bleConnected === null ? '웹모드' : bleConnected ? '연결됨' : '끊김'}
+              {' · '}
+              모드: {legacyOn ? '레거시(4e XX 0d)' : '차세대(12바이트)'}
             </div>
+            <div data-testid="blink-diag-last-hex">마지막 송신: {lastFrameHex}</div>
           </div>
         </div>
 

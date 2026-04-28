@@ -87,6 +87,11 @@ vi.mock('../native/bleBridge', () => ({
   bleWriteControl: vi.fn(),
 }));
 
+// 진단 표시("모드: 레거시/차세대")가 localStorage 의존 없이 결정 가능하도록 stub.
+vi.mock('../native/legacyBleMode', () => ({
+  getLegacyBleMode: () => true,
+}));
+
 // MobileLayout 은 useAuth 등 컨텍스트가 무거우므로 간단한 더미로 대체.
 vi.mock('../components/Layout', () => ({
   MobileLayout: ({ children }: { children: React.ReactNode }) => (
