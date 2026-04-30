@@ -77,7 +77,7 @@ export interface PodState {
   litAt: number | null;
   /** 입력 마감 시각 */
   expiresAt: number | null;
-  /** 현재 점등을 식별하는 monotonic id — BLE TOUCH/UI 입력 중복 처리 방지 */
+  /** 현재 점등을 식별하는 monotonic id — 동일 BLE TOUCH 가 중복 도착해도 1회만 처리 */
   tickId: number;
 }
 
@@ -264,7 +264,7 @@ export class TrainingEngine {
   private destroyed = false;
   /** monotonic tick id — BLE LED/TOUCH 매칭과 중복 입력 차단에 사용 */
   private tickIdCounter = 0;
-  /** 이미 처리된 (pod, tickId) — UI tap과 BLE TOUCH가 모두 와도 1회만 */
+  /** 이미 처리된 (pod, tickId) — BLE notify 중복 콜백 등에서 1회만 채점 반영 */
   private consumedTickIds = new Set<string>();
   /** -1: 아직 한 번도 송신 안 됨 (첫 세그먼트에서 무조건 writeSession 보내기 위함) */
   private currentBlePhase: -1 | 0 | 1 = -1;
@@ -969,8 +969,14 @@ export class TrainingEngine {
 
   // ───── 입력 처리 ────────────────────────────────────────────────────
   /**
-   * 입력 처리. opts.deltaMs는 펌웨어가 측정한 (실제 입력 시각 - 점등 목표 시각) 값.
-   * 동일한 (pod, tickId) 입력이 UI tap과 BLE TOUCH 양쪽에서 와도 1회만 처리한다.
+   * 입력 처리. opts.deltaMs 는 펌웨어가 측정한 (실제 입력 시각 - 점등 목표 시각) 값.
+   *
+   * 정책상 production 호출은 BLE TOUCH notify (`ble.touch` 이벤트) 단일 소스에서만
+   * 들어오며, 앱 화면 클릭은 채점 입력으로 인정하지 않는다. 본 메서드는 그 외에도
+   * 단위 테스트가 직접 호출하는 진입점이라 opts 인자를 옵셔널로 둔다.
+   *
+   * 동일한 (pod, tickId) 가 BLE 재전송/native notify 중복 콜백 등으로 두 번 와도
+   * 1회만 채점에 반영한다.
    * @returns true: 입력이 실제로 채점에 반영됨 / false: stale/중복/소등 상태로 무시됨
    *          (UI 카운터 증분 여부 판단용)
    */
@@ -981,11 +987,11 @@ export class TrainingEngine {
     if (!pod || pod.fill === 'OFF') return false;
 
     // BLE에서 명시 tickId가 왔는데 현재 pod의 점등 tickId와 다르면 stale (구 tick의 지연 입력) → drop.
-    // UI tap은 tickId 미지정이므로 항상 현재 pod.tickId 기준으로 처리.
+    // tickId 미지정 호출(예: 단위 테스트)은 항상 현재 pod.tickId 기준으로 처리.
     if (opts?.tickId && opts.tickId > 0 && pod.tickId > 0 && opts.tickId !== pod.tickId) {
       return false; // stale BLE TOUCH
     }
-    // 중복 처리 차단 — UI(브릿지된 클릭) + BLE TOUCH 동시 도착 케이스
+    // 중복 처리 차단 — 동일 (pod, tickId) 가 BLE notify 중복 도착하는 케이스 보호
     const expectedTickId = pod.tickId > 0 ? pod.tickId : (opts?.tickId ?? 0);
     if (expectedTickId > 0) {
       const key = `${podId}:${expectedTickId}`;

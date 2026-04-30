@@ -14,7 +14,9 @@
  * 따라서 "펌웨어 미탑재" 로 판단되면 웹 측이 다음을 자동으로 적용한다:
  *  1) `bleBridge.post()` 가 BLE write 메시지를 silent no-op 처리 (실패도 안 일어남).
  *  2) `TrainingSessionPlay` 가 BLE 단절을 트레이닝 종료 사유로 보지 않음.
- *  3) 트레이닝은 화면 PodGrid + 화면 탭만으로 정상 완주된다.
+ *  3) 트레이닝 진행 자체는 막지 않고 타이머/페이즈는 정상 흘러간다. 단, 모든
+ *     채점 입력은 기기 BLE TOUCH 신호 단일 소스이므로, 펌웨어 미탑재 기기에서는
+ *     채점 입력이 0건이 될 수 있다 (기기 펌웨어 정식 탑재가 필요).
  *
  * 이 모듈의 상태는 native bridge 의 `ble.connection` 이벤트가 도착할 때마다
  * `setBleConnectedDeviceName()` 으로 갱신된다(`initNativeBridge.ts` 에서 호출).

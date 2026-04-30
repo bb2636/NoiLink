@@ -1,8 +1,13 @@
 /**
- * 가상 Pod 4개 그리드 (2×2 배치)
+ * 가상 Pod 4개 그리드 (2×2 배치) — **시각 표시 전용 컴포넌트**.
  *
+ * 정책: 모든 채점 입력은 기기(NoiPod) 의 11바이트 BLE TOUCH notify
+ * (`A5 81 + tickId(4 LE) + pod + channel + deltaMs(int16 LE) + flags`) 단일
+ * 소스에서만 들어온다. 앱 화면의 PodGrid 는 점등 LED 의 시각적 동조 역할만
+ * 하며 클릭/터치는 채점 입력으로 인정하지 않는다 (button 대신 div 사용).
+ *
+ * 렌더링:
  * - 색상에 따라 글로우 효과
- * - 탭 핸들러
  * - 트레이닝 엔진의 PodState 배열을 그대로 받아 시각화
  *
  * 시각 보강(빠른 BPM 박자 가독성):
@@ -10,7 +15,6 @@
  *   각 점등(=새 tickId) 직후, pointer-events:none 인 잔상(after-glow) 레이어와
  *   둘레 펄스 링을 ~420~520ms 동안 재생해 박자감을 살린다.
  *   - 잔상은 onPodStates의 tickId 변화로만 트리거되고
- *   - 입력 판정(handleTap/handleRhythmTap)에는 영향이 없으며
  *   - 점등이 끝나도(isTarget=false, fill=OFF) 잔상 애니메이션은 계속 fade-out 한다.
  */
 import { useEffect, useRef, useState } from 'react';
@@ -41,10 +45,9 @@ function glowBgFor(color: PodFill): string {
 
 interface PodCellProps {
   pod: PodState;
-  onTap: (podId: number) => void;
 }
 
-function PodCell({ pod, onTap }: PodCellProps) {
+function PodCell({ pod }: PodCellProps) {
   const cm = COLOR_MAP[pod.fill];
   const isLit = pod.fill !== 'OFF';
 
@@ -81,15 +84,20 @@ function PodCell({ pod, onTap }: PodCellProps) {
         />
       )}
 
-      <button
-        type="button"
-        onClick={() => onTap(pod.id)}
-        className="relative w-full h-full rounded-full border-2 transition-all active:scale-95 overflow-hidden"
+      {/*
+        시각 표시 전용 div — 화면 클릭은 채점 입력으로 인정하지 않는다.
+        모든 채점 입력은 기기(NoiPod) 의 BLE TOUCH notify 로만 들어온다.
+        button 대신 div 를 쓰는 이유: 사용자가 화면을 누르면 입력으로 받아들여진다는
+        잘못된 기대를 만들지 않기 위함 (포커스/active scale 효과도 제거).
+      */}
+      <div
+        className="relative w-full h-full rounded-full border-2 overflow-hidden"
         style={{
           backgroundColor: cm.bg,
           borderColor: isLit ? '#fff' : '#2A2A2A',
           boxShadow: isLit ? `0 0 28px 4px ${cm.glow}` : 'none',
         }}
+        role="img"
         aria-label={`Pod ${pod.id + 1} ${cm.label}`}
       >
         {/* 색상 잔상(after-glow) — 점등이 끝나도 ~420ms 동안 fade-out 으로 박자감 보강. */}
@@ -105,27 +113,26 @@ function PodCell({ pod, onTap }: PodCellProps) {
           />
         )}
         <span
-          className="absolute inset-0 flex items-center justify-center text-xs font-semibold"
+          className="absolute inset-0 flex items-center justify-center text-xs font-semibold pointer-events-none"
           style={{ color: isLit && pod.fill !== 'WHITE' && pod.fill !== 'YELLOW' ? '#fff' : '#1A1A1A' }}
         >
           P{pod.id}
         </span>
-      </button>
+      </div>
     </div>
   );
 }
 
-export default function PodGrid({
-  pods,
-  onTap,
-}: {
-  pods: PodState[];
-  onTap: (podId: number) => void;
-}) {
+/**
+ * Pod 점등 상태 시각화 그리드 (시각 표시 전용).
+ * 화면 클릭은 채점 입력으로 인정하지 않는다. 모든 채점 입력은 기기(NoiPod) 의
+ * BLE TOUCH notify 단일 소스로만 들어온다.
+ */
+export default function PodGrid({ pods }: { pods: PodState[] }) {
   return (
     <div className="grid grid-cols-2 gap-4 max-w-xs mx-auto">
       {pods.map((p) => (
-        <PodCell key={p.id} pod={p} onTap={onTap} />
+        <PodCell key={p.id} pod={p} />
       ))}
     </div>
   );

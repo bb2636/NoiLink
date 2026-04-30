@@ -354,9 +354,10 @@ export default function TrainingSessionPlay() {
       const detail = (e as CustomEvent<NativeToWebMessage>).detail;
       if (!detail) return;
       if (detail.type === 'ble.connection') {
-        // 펌웨어 미탑재 기기(예: NINA-B1 디폴트)는 idle 단절이 빈번하고
-        // 트레이닝 흐름과 무관하게 화면 PodGrid + 화면 탭만으로 완주되어야 한다.
-        // 따라서 단절 알림 자체를 무시하고 트레이닝을 그대로 진행시킨다.
+        // 펌웨어 미탑재 기기(예: NINA-B1 디폴트)는 idle 단절이 빈번하다.
+        // 단절 알림 자체를 무시하고 트레이닝을 그대로 진행시킨다 — 그 사이의
+        // 입력은 채점에서 빠질 수 있으나, 단절이 끝나면 다시 BLE TOUCH 가
+        // 정상 수신되어 트레이닝이 끊김 없이 이어진다.
         if (getBleFirmwareReady() === false) return;
         if (detail.payload.connected !== null) {
           // 재연결 성공 — 그레이스 중이면 배너/타이머/진행정보를 정리하고 트레이닝을 계속 진행한다.
@@ -455,7 +456,9 @@ export default function TrainingSessionPlay() {
     return () => clearInterval(id);
   }, [bleReconnecting, reconnectInfo]);
 
-  // 동일 자극(pod, tickId)에 UI tap과 BLE TOUCH가 둘 다 와도 카운트는 1회만.
+  // BLE TOUCH 는 단일 입력 소스이지만, 네이티브 측 재전송/notify 중복 콜백으로
+  // 동일 (pod, tickId) 가 두 번 도착해도 카운트는 1회만 증가하도록 dedup 한다.
+  // (엔진 단의 `consumedTickIds` 와 별개로 UI 카운터 보호용.)
   const tapDedupRef = useRef<Set<string>>(new Set());
   const bumpTapCount = useCallback((podId: number, tickId: number | undefined) => {
     if (tickId && tickId > 0) {
@@ -471,16 +474,10 @@ export default function TrainingSessionPlay() {
     setTapCount((n) => n + 1);
   }, []);
 
-  const handleTap = useCallback((podId: number) => {
-    // UI tap 시점의 현재 점등 tickId를 dedup 키로 사용
-    const currentTickId = pods.find((p) => p.id === podId)?.tickId ?? 0;
-    // 엔진이 실제로 채점에 반영한 경우만 카운트 (stale/중복/소등 입력은 미반영)
-    const accepted = engineRef.current?.handleTap(podId) ?? false;
-    if (accepted) bumpTapCount(podId, currentTickId);
-  }, [pods, bumpTapCount]);
-
   // ── BLE TOUCH notify 구독 + 이벤트 수신 ──
-  // 트레이닝 화면이 떠 있는 동안에만 디바이스 입력을 받는다.
+  // 모든 채점 입력의 단일 소스 — 기기(NoiPod) 의 11바이트 TOUCH notify
+  // (A5 81 + tickId u32 + pod + channel + deltaMs i16 + flags) 만 채점에 반영한다.
+  // 앱 화면 클릭/터치는 채점 입력으로 인정하지 않는다 (PodGrid 는 시각 표시 전용).
   // 네이티브 셸이 아니거나 디바이스 미연결이면 ble.subscribeCharacteristic은 자동 no-op.
   useEffect(() => {
     const subscriptionId = `training-touch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -814,7 +811,7 @@ export default function TrainingSessionPlay() {
 
         {/* 가상 Pod 그리드 */}
         <div className="my-6">
-          <PodGrid pods={pods} onTap={handleTap} />
+          <PodGrid pods={pods} />
         </div>
 
         {/* 안내 문구 */}
