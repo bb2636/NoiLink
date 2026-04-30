@@ -1,22 +1,30 @@
 /**
- * 트레이닝 진행 화면 — 가상 Pod 게임 엔진 기반
+ * 트레이닝 진행 화면 — 점등 신호 송신 + 타이머 + 결과 수집의 단일 진입점.
  *
- * - 4개 가상 Pod 그리드, BPM 박자에 맞춰 점등
- * - 모드별 룰(FOCUS/MEMORY/COMPREHENSION/JUDGMENT/AGILITY/ENDURANCE/COMPOSITE/RHYTHM/FREE) 실시간 진행
- * - 종료 시 엔진이 산출한 원시 메트릭을 서버로 제출
+ * 정책(사용자 결정):
+ * - 화면에 4개 패널 시각화는 그리지 않는다. 점등 표시는 기기(NoiPod) LED 가
+ *   단독으로 담당한다 (앱 → BLE LED frame).
+ * - 화면은 큰 타이머 + 페이즈/모드 안내 + 일시정지/재개/취소/뒤로 버튼만 노출.
+ * - 모든 채점 입력은 기기의 11바이트 BLE TOUCH notify 단일 소스로 들어온다
+ *   (`ble.touch` → `engine.handleTap`). 화면 클릭은 입력으로 인정하지 않는다.
+ * - 트레이닝 시간이 끝나면 자동으로 결과 화면(`/result`) 으로 넘어간다.
+ *
+ * 동작:
+ * - 모드별 룰(FOCUS/MEMORY/COMPREHENSION/JUDGMENT/AGILITY/ENDURANCE/COMPOSITE/RHYTHM/FREE)
+ *   을 `TrainingEngine` 이 실시간 진행하며, 점등 시점마다 BLE LED frame 을 직접 송신.
+ * - 종료 시 엔진이 산출한 원시 메트릭을 서버로 제출 → 개인 리포트/랭킹/기업 리포트 자동 연동.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
 import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
-import PodGrid from '../components/PodGrid/PodGrid';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noilink/shared';
 import { SESSION_MAX_MS, partialThresholdForMode, resolveBleStabilityThresholds } from '@noilink/shared';
 import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
 import { createPendingLocalId, enqueuePendingRun } from '../utils/pendingTrainingRuns';
 import { reportBleAbortFireAndForget } from '../utils/reportBleAbort';
-import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
+import { TrainingEngine, type EnginePhaseInfo } from '../training/engine';
 import { bleReconnectNow, bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
 import { getBleFirmwareReady } from '../native/bleFirmwareReady';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
@@ -106,14 +114,15 @@ export default function TrainingSessionPlay() {
   const totalSec = state ? Math.min(state.totalDurationSec, SESSION_MAX_MS / 1000) : 0;
   const totalMs = totalSec * 1000;
 
-  const [pods, setPods] = useState<PodState[]>(
-    Array.from({ length: 4 }, (_, i) => ({
-      id: i, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null, tickId: 0,
-    }))
-  );
+  // 화면에 점등 시각화를 그리지 않는다 (정책: 점등 표시는 기기 LED 가 단독으로
+  // 담당, 화면은 큰 타이머/안내/결과만). 엔진의 onPodStates 콜백은 LED 신호 송신
+  // 용도로 내부에서만 쓰이므로 React 상태로 보관할 필요가 없다.
   const [elapsedMs, setElapsedMs] = useState(0);
   const [phaseInfo, setPhaseInfo] = useState<EnginePhaseInfo>({ phase: 'IDLE', cycleIndex: 0 });
   const [tapCount, setTapCount] = useState(0);
+  // 사용자가 일시정지/재개를 화면에서 직접 토글할 수 있도록 상태로 들고 간다.
+  // 엔진의 pause()/resume() 와 동기화 (자동 백그라운드 일시정지 분기는 동일 메서드를 호출).
+  const [isPaused, setIsPaused] = useState(false);
   const [engineMetrics, setEngineMetrics] = useState<Omit<RawMetrics, 'sessionId' | 'userId'> | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -209,7 +218,7 @@ export default function TrainingSessionPlay() {
       totalDurationMs: totalMs,
       podCount: 4,
       isComposite: state.isComposite || state.apiMode === 'COMPOSITE',
-      onPodStates: (s) => setPods(s),
+      onPodStates: () => {/* 화면에 그리지 않음 — LED 송신은 엔진 내부에서 BLE 로 직접 처리 */},
       onElapsedMs: (ms) => {
         elapsedMsRef.current = ms;
         setElapsedMs(ms);
@@ -477,7 +486,8 @@ export default function TrainingSessionPlay() {
   // ── BLE TOUCH notify 구독 + 이벤트 수신 ──
   // 모든 채점 입력의 단일 소스 — 기기(NoiPod) 의 11바이트 TOUCH notify
   // (A5 81 + tickId u32 + pod + channel + deltaMs i16 + flags) 만 채점에 반영한다.
-  // 앱 화면 클릭/터치는 채점 입력으로 인정하지 않는다 (PodGrid 는 시각 표시 전용).
+  // 앱 화면에는 4개 패널 시각화 자체를 그리지 않으므로 화면 클릭으로 인한
+  // 잘못된 채점 입력 가능성도 원천 차단된다.
   // 네이티브 셸이 아니거나 디바이스 미연결이면 ble.subscribeCharacteristic은 자동 no-op.
   useEffect(() => {
     const subscriptionId = `training-touch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -691,6 +701,7 @@ export default function TrainingSessionPlay() {
   return (
     <MobileLayout hideBottomNav>
       <div
+        data-testid="training-session-play"
         className="max-w-md mx-auto px-4 pb-6 flex flex-col min-h-screen"
         style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '40px', color: '#fff' }}
       >
@@ -791,11 +802,11 @@ export default function TrainingSessionPlay() {
           )}
         </div>
 
-        {/* 진행 바 */}
-        <div className="mb-4">
+        {/* 진행 바 (BPM/레벨 + 진행률만 표시 — 작은 타이머는 큰 타이머와 중복돼 제거) */}
+        <div className="mb-6">
           <div className="flex justify-between text-xs mb-1" style={{ color: '#888' }}>
             <span>BPM {state.bpm} · Lv {state.level}</span>
-            <span className="tabular-nums">{mm}:{ss} / {totalSec}초</span>
+            <span className="tabular-nums">{Math.round(progress * 100)}%</span>
           </div>
           <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: '#2A2A2A' }}>
             <div
@@ -809,15 +820,36 @@ export default function TrainingSessionPlay() {
           </div>
         </div>
 
-        {/* 가상 Pod 그리드 */}
-        <div className="my-6">
-          <PodGrid pods={pods} />
+        {/*
+          큰 타이머 — 화면의 메인 콘텐츠.
+          정책: 트레이닝 진행 중 화면은 "기기에 점등 신호를 보내고, 시간을 보여주고,
+          끝나면 결과로 넘어가는" 역할만 한다. 4개 패널(PodGrid) 같은 시각 동조는
+          사용자가 화면을 누르고 싶게 만들기 때문에 노출하지 않는다 — 점등 표시는
+          기기(NoiPod) 의 LED 가 담당하고, 모든 입력은 기기 BLE TOUCH 단일 소스로 받는다.
+        */}
+        <div className="my-8 flex flex-col items-center justify-center">
+          <div
+            className="text-7xl font-bold tabular-nums tracking-tight"
+            style={{ color: isPaused ? '#666' : '#AAED10' }}
+            aria-live="off"
+            aria-label={`경과 ${mm}분 ${ss}초 / 총 ${totalSec}초`}
+          >
+            {mm}:{ss}
+          </div>
+          <div className="mt-2 text-xs" style={{ color: '#666' }}>
+            총 {totalSec}초
+          </div>
+          {isPaused && (
+            <div className="mt-3 text-sm font-semibold" style={{ color: '#FFD66B' }}>
+              일시정지됨
+            </div>
+          )}
         </div>
 
-        {/* 안내 문구 */}
+        {/* 안내 문구 — 현재 모드의 트레이닝 방법 (기기에서 어떻게 입력해야 하는지) */}
         <ModeHint mode={phaseInfo.phase === 'RHYTHM' ? 'RHYTHM' : (phaseInfo.cognitiveMode ?? state.apiMode)} />
 
-        {/* 카운트 */}
+        {/* 입력 카운트 — 기기에서 들어온 채점 입력 수를 사용자가 시각으로 확인 */}
         <div className="mt-4 text-center text-xs" style={{ color: '#666' }}>
           입력 {tapCount}회
         </div>
@@ -836,12 +868,37 @@ export default function TrainingSessionPlay() {
           </div>
         )}
 
-        {/* 하단 버튼: 종료 */}
-        <div className="mt-auto pt-6">
+        {/* 하단 버튼: 일시정지/재개 + 취소 */}
+        <div className="mt-auto pt-6 flex gap-3">
           <button
+            type="button"
+            onClick={() => {
+              const eng = engineRef.current;
+              if (!eng) return;
+              if (isPaused) {
+                eng.resume();
+                setIsPaused(false);
+              } else {
+                eng.pause();
+                setIsPaused(true);
+              }
+            }}
+            disabled={submitting || !!engineMetrics}
+            className="flex-1 py-3 rounded-xl font-semibold"
+            style={{
+              backgroundColor: isPaused ? '#AAED10' : '#2A2A2A',
+              color: isPaused ? '#000' : '#fff',
+              opacity: (submitting || !!engineMetrics) ? 0.5 : 1,
+            }}
+            aria-label={isPaused ? '재개' : '일시정지'}
+          >
+            {isPaused ? '재개' : '일시정지'}
+          </button>
+          <button
+            type="button"
             onClick={leaveToList}
             disabled={submitting}
-            className="w-full py-3 rounded-xl font-semibold text-white"
+            className="flex-1 py-3 rounded-xl font-semibold text-white"
             style={{ backgroundColor: '#2A2A2A' }}
           >
             취소

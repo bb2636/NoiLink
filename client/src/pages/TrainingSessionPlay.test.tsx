@@ -73,6 +73,9 @@ vi.mock('../training/engine', () => {
     handleTap() {
       return false;
     }
+    // 일시정지/재개 — UI 토글 회귀 테스트가 호출 횟수를 검증한다.
+    pause = vi.fn();
+    resume = vi.fn();
     // Task #27: BLE 회복 구간 알림 — 실제 채점 누적은 하지 않는 no-op stub.
     beginRecoveryWindow() {}
     endRecoveryWindow() {}
@@ -140,9 +143,6 @@ vi.mock('../components/Layout', () => ({
   MobileLayout: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="mobile-layout">{children}</div>
   ),
-}));
-vi.mock('../components/PodGrid/PodGrid', () => ({
-  default: () => <div data-testid="pod-grid" />,
 }));
 // 부분 결과 저장 모달의 isOpen / 핸들러 호출을 검증할 수 있도록 가벼운 더미를 둔다.
 // isOpen=false 일 때는 null 을 그대로 반환해 BLE 분기 테스트 동작에 영향이 없다.
@@ -288,6 +288,8 @@ function renderApp(override?: Partial<TrainingRunState>) {
 type FakeEngineHandle = {
   emitElapsed: (ms: number) => void;
   setRecoveryStats: (stats: { windows: number; totalMs: number }) => void;
+  pause: ReturnType<typeof vi.fn>;
+  resume: ReturnType<typeof vi.fn>;
 };
 function getFakeEngine(): FakeEngineHandle {
   const inst = (globalThis as { __fakeEngineInstance__?: FakeEngineHandle })
@@ -368,7 +370,7 @@ describe('TrainingSessionPlay — BLE 단절/재연결 분기', () => {
     renderApp();
 
     // 진행 화면이 마운트되었고 아직 배너는 없다.
-    expect(container?.querySelector('[data-testid="pod-grid"]')).toBeTruthy();
+    expect(container?.querySelector("[data-testid=\"training-session-play\"]")).toBeTruthy();
     expect(reconnectingBannerVisible()).toBe(false);
 
     // 단절 통보 → "기기 연결 회복 중" 배너 노출.
@@ -390,7 +392,7 @@ describe('TrainingSessionPlay — BLE 단절/재연결 분기', () => {
       vi.advanceTimersByTime(10_000);
     });
     expect(lastLocation).toBeNull();
-    expect(container?.querySelector('[data-testid="pod-grid"]')).toBeTruthy();
+    expect(container?.querySelector("[data-testid=\"training-session-play\"]")).toBeTruthy();
   });
 
   it('그레이스 기간 안에 재연결이 없으면 ble-disconnect 사유로 목록으로 돌아간다', () => {
@@ -437,7 +439,7 @@ describe('TrainingSessionPlay — BLE 단절/재연결 분기', () => {
       vi.advanceTimersByTime(20_000);
     });
     expect(lastLocation).toBeNull();
-    expect(container?.querySelector('[data-testid="pod-grid"]')).toBeTruthy();
+    expect(container?.querySelector("[data-testid=\"training-session-play\"]")).toBeTruthy();
   });
 });
 
@@ -1174,5 +1176,63 @@ describe('TrainingSessionPlay — 브릿지 거부 토스트 (Task #77 / #104)',
       expect.objectContaining({ reason: 'user-dismiss' }),
     );
     expect(ackBannerText()).toBeNull();
+  });
+});
+
+// ───────────────────────────────────────────────────────────
+// 일시정지/재개 버튼 회귀 테스트 (사용자 정책: 트레이닝 화면 = 타이머 + 버튼)
+//
+// 보호 대상:
+//   - 일시정지 버튼 클릭 시 engine.pause() 가 정확히 1회 호출되고 라벨이 "재개" 로 바뀐다.
+//   - "재개" 버튼 클릭 시 engine.resume() 가 정확히 1회 호출되고 라벨이 다시 "일시정지" 로 돌아온다.
+//   - "일시정지됨" 인디케이터가 일시정지 상태에서만 노출된다.
+// ───────────────────────────────────────────────────────────
+describe('TrainingSessionPlay — 일시정지/재개 버튼', () => {
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.useFakeTimers();
+    (window as unknown as { ReactNativeWebView?: { postMessage: (s: string) => void } })
+      .ReactNativeWebView = { postMessage: () => {} };
+  });
+
+  afterEach(() => {
+    unmountApp();
+    delete (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView;
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it('버튼 토글로 engine.pause()/resume() 가 호출되고 라벨이 바뀐다', () => {
+    renderApp();
+    expect(container?.querySelector('[data-testid="training-session-play"]')).toBeTruthy();
+
+    const findToggle = () =>
+      Array.from(container!.querySelectorAll('button')).find(
+        (b) => b.textContent === '일시정지' || b.textContent === '재개',
+      ) as HTMLButtonElement | undefined;
+
+    const initial = findToggle();
+    expect(initial?.textContent).toBe('일시정지');
+    expect(container?.textContent ?? '').not.toContain('일시정지됨');
+
+    const eng = getFakeEngine();
+    act(() => {
+      initial!.click();
+    });
+    expect(eng.pause).toHaveBeenCalledTimes(1);
+
+    const afterPause = findToggle();
+    expect(afterPause?.textContent).toBe('재개');
+    expect(container?.textContent ?? '').toContain('일시정지됨');
+
+    act(() => {
+      afterPause!.click();
+    });
+    expect(eng.resume).toHaveBeenCalledTimes(1);
+
+    const afterResume = findToggle();
+    expect(afterResume?.textContent).toBe('일시정지');
+    expect(container?.textContent ?? '').not.toContain('일시정지됨');
   });
 });

@@ -301,12 +301,14 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
     겸 입력 수신). `noilink-native-bridge` 이벤트에서 `ble.touch` 를 받아
     `engine.handleTap(pod, { deltaMs: deviceDeltaValid ? deltaMs : undefined,
     tickId })` 호출.
-  - **앱 화면 클릭/터치는 채점 입력으로 인정하지 않는다.** `PodGrid`
-    (`client/src/components/PodGrid/PodGrid.tsx`) 는 button 이 아닌
-    `<div role="img">` 시각 표시 전용이며, 점등 LED 의 시각적 동조 역할만
-    한다. 모든 입력(터치/NFC) 은 기기(NoiPod) 의 11바이트 BLE TOUCH notify
-    단일 소스에서만 들어온다 — 앱 측에서 입력 채널이 두 개로 갈라져
-    중복 채점/잘못된 시간 측정이 발생할 가능성을 원천 차단.
+  - **앱 화면 클릭/터치는 채점 입력으로 인정하지 않는다.** 트레이닝 진행
+    화면에는 4개 패널 시각화(이전의 `PodGrid` 컴포넌트) 자체를 그리지
+    않는다 — 점등 표시는 기기(NoiPod) 의 LED 가 단독으로 담당한다. 화면은
+    큰 타이머 + 페이즈/모드 안내 + 일시정지·재개·취소·뒤로 버튼만 노출하며,
+    트레이닝 시간이 끝나면 자동으로 결과 화면(`/result`) 으로 진입한다.
+    모든 입력(터치/NFC) 은 기기 BLE TOUCH notify 11바이트 단일 소스에서만
+    들어오므로, 앱 측에서 입력 채널이 두 개로 갈라져 중복 채점/잘못된
+    시간 측정이 발생할 가능성을 원천 차단한다.
   - 앱이 기기로 보내는 것: 점등 신호(LED frame), 세션 시작/종료
     (CONTROL_START/STOP), 메타데이터. 앱이 담당하는 것: 타이머/페이즈
     스케줄링 + 기기에서 받은 입력 채점 + 결과 서버 제출.
