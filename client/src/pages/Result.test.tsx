@@ -315,53 +315,6 @@ describe('Result — 부분 결과 배지 (Task #23 / Task #63)', () => {
   });
 });
 
-describe('Result — 점등-전용 완료 분기 (blinkOnly)', () => {
-  afterEach(() => {
-    unmountResult();
-    vi.clearAllMocks();
-  });
-
-  it('blinkOnly=true + yieldsScore=false 조합에서도 자유-트레이닝 화면이 아니라 점등-전용 완료 화면이 노출된다', () => {
-    // 점등-전용 화면(TrainingBlinkPlay)은 항상 yieldsScore=false 로 navigate 하므로,
-    // 분기 우선순위가 잘못되면 "수고했어요!" 자유-트레이닝 카드로 잘못 빠진다.
-    renderResult({
-      blinkOnly: true,
-      yieldsScore: false,
-      title: '집중력 트레이닝',
-    });
-    expect(container?.querySelector('[data-testid="blink-only-result"]')).toBeTruthy();
-    const text = container?.textContent ?? '';
-    expect(text).toContain('트레이닝 완료');
-    expect(text).not.toContain('자유 트레이닝은 점수를 산출하지 않습니다');
-  });
-
-  it('blinkOnly=true 면 단순 완료 화면(체크 + "트레이닝 완료")만 노출되고 회복/점수 카드는 숨겨진다', () => {
-    renderResult({
-      blinkOnly: true,
-      // 일부러 점수/회복/세션 ID 를 채워 넣어도 blinkOnly 분기에서는 모두 무시되어야 한다.
-      displayScore: 80,
-      previousScore: 70,
-      sessionId: 'sess-test',
-      recoverySegments: [{ startedAt: 0, durationMs: 1500 }],
-    });
-
-    const blinkScreen = container?.querySelector('[data-testid="blink-only-result"]');
-    expect(blinkScreen).toBeTruthy();
-    const text = container?.textContent ?? '';
-    expect(text).toContain('트레이닝 완료');
-    expect(text).toContain('점등 신호를 모두 보냈어요');
-    // 점수 분기에서만 그려지는 회복/부분-결과 카드가 노출되지 않아야 한다.
-    expect(container?.querySelector('[data-testid="recovery-card"]')).toBeNull();
-    expect(text).not.toContain('부분 결과');
-    expect(text).not.toContain('직전 대비');
-  });
-
-  it('blinkOnly 가 없으면 기존 점수 분기가 정상 동작한다 (회귀 보호)', () => {
-    renderResult({});
-    expect(container?.querySelector('[data-testid="blink-only-result"]')).toBeNull();
-  });
-});
-
 // ───────────────────────────────────────────────────────────
 // Task #75 — 결과 화면 재진입 시 서버에서 끊김 타임라인 다시 불러오기
 // ───────────────────────────────────────────────────────────

@@ -274,8 +274,8 @@ export class TrainingEngine {
   private recoveryEnteredAt = 0;
 
   // ── 일시정지(pause/resume) 지원 ──
-  // 점등-전용 트레이닝 화면(TrainingBlinkPlay)이 사용자의 명시적 "일시정지" 요청을
-  // 처리하기 위한 진입점. 회복 구간(beginRecoveryWindow)과는 의미가 달라 분리:
+  // 트레이닝 진행 화면이 사용자의 명시적 "일시정지" 요청을 처리하기 위한 진입점.
+  // 회복 구간(beginRecoveryWindow)과는 의미가 달라 분리:
   //   - 회복: BLE 끊김으로 채점 제외 시간을 누적하지만 phase clock 은 계속 흐른다.
   //   - 일시정지: phase clock 자체가 멈추고, 재개 시 같은 지점에서 이어진다.
   /** 사용자 일시정지 중 여부. true 일 때는 모든 timer/RAF 가 멈춰 있다. */
@@ -753,8 +753,7 @@ export class TrainingEngine {
       // MEMORY 처럼 schedule 기반 phase 는 pendingTimers 가 통째로 끊겨 SHOW/RECALL
       // 자극이 사라진 상태이므로, 단순 fireTick 재예약으로는 자극이 복구되지 않는다.
       // → 잔여시간만큼 phase 자체를 재시작해 SHOW 시퀀스부터 다시 흘려보낸다.
-      //   phase 종료 시각은 그대로 유지되고, MEMORY 카운트 누적은 점등-전용 모드에서
-      //   채점 의미가 없으므로 무시한다.
+      //   phase 종료 시각은 그대로 유지된다.
       if (this.currentPhaseScheduleBased) {
         const onEnd = this.currentPhaseOnEnd ?? undefined;
         this.startTickLoop(remaining, onEnd);
