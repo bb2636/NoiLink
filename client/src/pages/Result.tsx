@@ -411,7 +411,9 @@ export default function Result() {
           minHeight: '100vh',
           background: 'radial-gradient(ellipse at top, #1a3a1a 0%, #0A0A0A 60%)',
           paddingTop: 'env(safe-area-inset-top)',
-          paddingBottom: 'env(safe-area-inset-bottom)',
+          // iOS 홈 인디케이터 / 안드로이드 제스처 바에 "완료" 버튼이 가려지지 않도록
+          // safe-area + 여유 마진을 함께 둔다.
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)',
         }}
       >
         {/* 반짝이 입자 */}

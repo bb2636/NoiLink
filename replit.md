@@ -370,6 +370,16 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
   - 서버 산출 점수, 직전 세션 대비 향상도, 회복 안내, 맞춤 코칭 등 풀
     리포트 표시. 자유 트레이닝(`yieldsScore=false`) 은 별도 분기로 점수 없이
     "수고했어요" 화면.
+- **진행 화면 디자인** (`TrainingSessionPlay.tsx` JSX): 헤더 "< 트레이닝 진행"
+  → 라임 테두리 BPM 라운드 박스(종합 모드는 "· 사이클 N" 병기) → 280px 원형
+  SVG 진행 게이지(라임 #AAED10, 트랙 #2A2A2A, `stroke-dashoffset = C·(1-progress)`,
+  일시정지 시 라임/타이머 회색 + "일시정지됨" 노란 텍스트) → 하단 양끝 원형
+  버튼(좌 회색 "취소" / 우 주황 #B8782A "일시정지", 일시정지 상태에선 라임으로
+  토글되어 라벨 "재개"). 페이즈 배지/사이클 pill/가로 진행 바/ModeHint/입력
+  카운트는 LED 가 같은 정보를 시각화하므로 화면 중복을 피해 제거. 컨테이너
+  `paddingBottom: calc(env(safe-area-inset-bottom) + 2rem)` 으로 iOS 홈 인디
+  케이터 가림 방지(`Result.tsx` 의 "완료" 버튼도 동일 패치). BLE 재연결 배너 ·
+  저장 재시도 · ConfirmModal 등 시스템 안내는 새 레이아웃 안에서 그대로 유지.
 - **라우팅**: `/training/session` → `<TrainingSessionPlay />` 가 유일한 트레
   이닝 진행 라우트. `TrainingSetup` 의 모든 트레이닝이 이 라우트로 진입.
   점등-전용 화면(`TrainingBlinkPlay`) 과 `Result.tsx` 의 `blinkOnly` 분기는

@@ -95,23 +95,8 @@ export type TrainingRunState = {
   isComposite: boolean;
 };
 
-const PHASE_LABEL: Record<string, string> = {
-  IDLE: '준비',
-  RHYTHM: '리듬 유지',
-  COGNITIVE: '인지 과제',
-  DONE: '완료',
-};
-
-const COG_LABEL: Record<TrainingMode, string> = {
-  MEMORY: '기억력',
-  COMPREHENSION: '이해력',
-  FOCUS: '집중력',
-  JUDGMENT: '판단력',
-  AGILITY: '순발력',
-  ENDURANCE: '지구력',
-  COMPOSITE: '종합',
-  FREE: '자유',
-};
+// 기존 PHASE_LABEL/COG_LABEL 라벨 맵은 큰 원형 게이지 디자인에서 화면에 노출되지 않게
+// 정리되어 함께 제거됨 — 페이즈/모드 정보는 LED + BPM 배지로 통합 표현한다.
 
 export default function TrainingSessionPlay() {
   const navigate = useNavigate();
@@ -725,8 +710,8 @@ export default function TrainingSessionPlay() {
   const ss = String(elapsedSec % 60).padStart(2, '0');
   const progress = totalMs > 0 ? Math.min(1, elapsedMs / totalMs) : 0;
 
-  const phaseLabel = PHASE_LABEL[phaseInfo.phase] ?? '진행';
-  const cogLabel = phaseInfo.cognitiveMode ? COG_LABEL[phaseInfo.cognitiveMode] : '';
+  // 페이즈/모드 라벨은 큰 원형 게이지 디자인에서 화면에 노출하지 않는다 — 진행 정보는
+  // 원형 게이지(시간) + BPM 배지(난이도/사이클) 로 통합. 페이즈 전환은 LED 가 시각화한다.
   const isComposite = state.isComposite || state.apiMode === 'COMPOSITE';
 
   // 사용자가 명시적으로 화면을 떠날 때(뒤로/취소) 사용할 핸들러.
@@ -769,21 +754,34 @@ export default function TrainingSessionPlay() {
     }
   };
 
+  // 원형 진행 게이지 — 이미지 디자인의 큰 라임색 원. SVG stroke-dashoffset 으로 진행률 표시.
+  const RING_SIZE = 280;
+  const RING_STROKE = 14;
+  const RING_R = (RING_SIZE - RING_STROKE) / 2;
+  const RING_C = 2 * Math.PI * RING_R;
+  const ringDashOffset = RING_C * (1 - progress);
+
   return (
     <MobileLayout hideBottomNav>
       <div
         data-testid="training-session-play"
-        className="max-w-md mx-auto px-4 pb-6 flex flex-col min-h-screen"
-        style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '40px', color: '#fff' }}
+        className="max-w-md mx-auto px-5 flex flex-col min-h-screen"
+        style={{
+          paddingTop: 'calc(1rem + env(safe-area-inset-top))',
+          // 하단 버튼이 iOS 홈 인디케이터/안드로이드 제스처 바에 가리지 않도록 safe-area + 여유.
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 2rem)',
+          color: '#fff',
+          backgroundColor: '#0A0A0A',
+        }}
       >
-        {/* 헤더 */}
-        <div className="flex items-center gap-3 mb-4">
-          <button onClick={leaveToList} className="text-white" aria-label="뒤로">
+        {/* 헤더 — "< 트레이닝 진행" */}
+        <div className="flex items-center gap-3 mb-2">
+          <button onClick={leaveToList} className="text-white -ml-1 p-1" aria-label="뒤로">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <h1 className="text-lg font-semibold">{state.title}</h1>
+          <h1 className="text-base font-semibold">트레이닝 진행</h1>
         </div>
 
         {/* BLE 재연결 회복 중 임시 안내 — 그레이스 기간 동안만 노출.
@@ -853,76 +851,82 @@ export default function TrainingSessionPlay() {
           );
         })()}
 
-        {/* 페이즈/모드 표시 */}
-        <div className="flex items-center justify-center gap-2 mb-4">
-          <span
-            className="px-3 py-1 rounded-full text-xs font-semibold"
-            style={{ backgroundColor: phaseInfo.phase === 'RHYTHM' ? '#3B82F6' : '#AAED10', color: '#000' }}
+        {/* BPM 배지 — 라임 테두리 라운드 박스. 종합 모드는 사이클 정보를 함께 보여준다. */}
+        <div className="flex items-center justify-center mt-6 mb-10">
+          <div
+            className="px-8 py-2.5 rounded-full text-base font-semibold tabular-nums"
+            style={{ border: '1.5px solid #AAED10', color: '#AAED10' }}
+            aria-label={`BPM ${state.bpm}`}
           >
-            {phaseLabel}
-          </span>
-          {phaseInfo.phase === 'COGNITIVE' && cogLabel && (
-            <span className="px-3 py-1 rounded-full text-xs font-semibold border" style={{ borderColor: '#2A2A2A' }}>
-              {cogLabel}
-            </span>
-          )}
-          {isComposite && (
-            <span className="px-3 py-1 rounded-full text-xs" style={{ color: '#888' }}>
-              사이클 {phaseInfo.cycleIndex + 1}
-            </span>
-          )}
-        </div>
-
-        {/* 진행 바 (BPM/레벨 + 진행률만 표시 — 작은 타이머는 큰 타이머와 중복돼 제거) */}
-        <div className="mb-6">
-          <div className="flex justify-between text-xs mb-1" style={{ color: '#888' }}>
-            <span>BPM {state.bpm} · Lv {state.level}</span>
-            <span className="tabular-nums">{Math.round(progress * 100)}%</span>
-          </div>
-          <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: '#2A2A2A' }}>
-            <div
-              className="h-full"
-              style={{
-                width: `${progress * 100}%`,
-                backgroundColor: '#AAED10',
-                transition: 'width 0.2s linear',
-              }}
-            />
+            BPM&nbsp;&nbsp;{state.bpm}
+            {isComposite && (
+              <span className="ml-3 text-xs font-normal" style={{ color: '#7BA80B' }}>
+                · 사이클 {phaseInfo.cycleIndex + 1}
+              </span>
+            )}
           </div>
         </div>
 
         {/*
-          큰 타이머 — 화면의 메인 콘텐츠.
+          큰 원형 진행 게이지 — 화면의 메인 콘텐츠.
           정책: 트레이닝 진행 중 화면은 "기기에 점등 신호를 보내고, 시간을 보여주고,
           끝나면 결과로 넘어가는" 역할만 한다. 4개 패널(PodGrid) 같은 시각 동조는
           사용자가 화면을 누르고 싶게 만들기 때문에 노출하지 않는다 — 점등 표시는
-          기기(NoiPod) 의 LED 가 담당하고, 모든 입력은 기기 BLE TOUCH 단일 소스로 받는다.
+          기기(NoiPod) 의 LED 가 담당하고, 모든 입력은 기기 BLE notify 단일 소스로 받는다.
+          원 안: "총 N초" 작은 회색 + "MM:SS" 큰 흰색.
         */}
-        <div className="my-8 flex flex-col items-center justify-center">
-          <div
-            className="text-7xl font-bold tabular-nums tracking-tight"
-            style={{ color: isPaused ? '#666' : '#AAED10' }}
-            aria-live="off"
-            aria-label={`경과 ${mm}분 ${ss}초 / 총 ${totalSec}초`}
-          >
-            {mm}:{ss}
-          </div>
-          <div className="mt-2 text-xs" style={{ color: '#666' }}>
-            총 {totalSec}초
-          </div>
-          {isPaused && (
-            <div className="mt-3 text-sm font-semibold" style={{ color: '#FFD66B' }}>
-              일시정지됨
+        <div className="flex flex-1 flex-col items-center justify-center">
+          <div className="relative" style={{ width: RING_SIZE, height: RING_SIZE }}>
+            <svg
+              width={RING_SIZE}
+              height={RING_SIZE}
+              className="-rotate-90"
+              aria-hidden="true"
+            >
+              {/* 배경 트랙 */}
+              <circle
+                cx={RING_SIZE / 2}
+                cy={RING_SIZE / 2}
+                r={RING_R}
+                stroke="#2A2A2A"
+                strokeWidth={RING_STROKE}
+                fill="none"
+              />
+              {/* 진행 라임 */}
+              <circle
+                cx={RING_SIZE / 2}
+                cy={RING_SIZE / 2}
+                r={RING_R}
+                stroke={isPaused ? '#666' : '#AAED10'}
+                strokeWidth={RING_STROKE}
+                fill="none"
+                strokeLinecap="round"
+                strokeDasharray={RING_C}
+                strokeDashoffset={ringDashOffset}
+                style={{ transition: 'stroke-dashoffset 0.2s linear' }}
+              />
+            </svg>
+            <div
+              className="absolute inset-0 flex flex-col items-center justify-center"
+              aria-live="off"
+              aria-label={`총 ${totalSec}초 중 ${mm}분 ${ss}초 경과`}
+            >
+              <div className="text-sm" style={{ color: '#888' }}>
+                총 {totalSec}초
+              </div>
+              <div
+                className="text-6xl font-semibold tabular-nums tracking-tight mt-1"
+                style={{ color: '#FFFFFF' }}
+              >
+                {mm}:{ss}
+              </div>
+              {isPaused && (
+                <div className="mt-2 text-xs font-semibold" style={{ color: '#FFD66B' }}>
+                  일시정지됨
+                </div>
+              )}
             </div>
-          )}
-        </div>
-
-        {/* 안내 문구 — 현재 모드의 트레이닝 방법 (기기에서 어떻게 입력해야 하는지) */}
-        <ModeHint mode={phaseInfo.phase === 'RHYTHM' ? 'RHYTHM' : (phaseInfo.cognitiveMode ?? state.apiMode)} />
-
-        {/* 입력 카운트 — 기기에서 들어온 채점 입력 수를 사용자가 시각으로 확인 */}
-        <div className="mt-4 text-center text-xs" style={{ color: '#666' }}>
-          입력 {tapCount}회
+          </div>
         </div>
 
         {err && (
@@ -939,8 +943,25 @@ export default function TrainingSessionPlay() {
           </div>
         )}
 
-        {/* 하단 버튼: 일시정지/재개 + 취소 */}
-        <div className="mt-auto pt-6 flex gap-3">
+        {/* 하단 원형 버튼: 좌 취소(회색) + 우 일시정지/재개(주황). 이미지 디자인 일치. */}
+        <div className="mt-8 flex items-center justify-between px-4">
+          <button
+            type="button"
+            onClick={leaveToList}
+            disabled={submitting}
+            className="rounded-full font-semibold flex items-center justify-center"
+            style={{
+              width: 72,
+              height: 72,
+              backgroundColor: '#2A2A2A',
+              color: '#fff',
+              fontSize: 15,
+              opacity: submitting ? 0.5 : 1,
+            }}
+            aria-label="취소"
+          >
+            취소
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -955,24 +976,18 @@ export default function TrainingSessionPlay() {
               }
             }}
             disabled={submitting || !!engineMetrics}
-            className="flex-1 py-3 rounded-xl font-semibold"
+            className="rounded-full font-semibold flex items-center justify-center"
             style={{
-              backgroundColor: isPaused ? '#AAED10' : '#2A2A2A',
+              width: 72,
+              height: 72,
+              backgroundColor: isPaused ? '#AAED10' : '#B8782A',
               color: isPaused ? '#000' : '#fff',
+              fontSize: 15,
               opacity: (submitting || !!engineMetrics) ? 0.5 : 1,
             }}
             aria-label={isPaused ? '재개' : '일시정지'}
           >
             {isPaused ? '재개' : '일시정지'}
-          </button>
-          <button
-            type="button"
-            onClick={leaveToList}
-            disabled={submitting}
-            className="flex-1 py-3 rounded-xl font-semibold text-white"
-            style={{ backgroundColor: '#2A2A2A' }}
-          >
-            취소
           </button>
         </div>
 
@@ -1034,22 +1049,3 @@ export default function TrainingSessionPlay() {
   );
 }
 
-function ModeHint({ mode }: { mode: string }) {
-  const text = (() => {
-    switch (mode) {
-      case 'RHYTHM':       return '점등되는 순간에 정확히 탭! P0 → P1 → P2 → P3';
-      case 'FOCUS':        return '🔵 파랑(BLUE)만 탭. 빨강·노랑은 무시.';
-      case 'MEMORY':       return '초록 순서를 외우고, 흰 신호 후 같은 순서로 탭.';
-      case 'COMPREHENSION':return '현재 규칙 색만 탭. 흰색 신호 후 규칙이 바뀝니다.';
-      case 'JUDGMENT':     return '🟢 초록=1탭, 🔴 빨강=참기, 🟡 노랑=2탭(더블탭)';
-      case 'AGILITY':      return '🟢 초록=손, 🔵 파랑/🟡 노랑=발. Lv4부터 동시 자극.';
-      case 'ENDURANCE':    return '파랑(BLUE) 타겟을 끝까지 일정한 속도로 탭.';
-      case 'FREE':         return '자유롭게 탭. 점수는 기록되지 않습니다.';
-      default:             return '';
-    }
-  })();
-  if (!text) return null;
-  return (
-    <p className="text-center text-sm mt-2" style={{ color: '#AAED10' }}>{text}</p>
-  );
-}
