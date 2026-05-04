@@ -20,7 +20,14 @@ import { MobileLayout } from '../components/Layout';
 import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noilink/shared';
-import { SESSION_MAX_MS, partialThresholdForMode, resolveBleStabilityThresholds } from '@noilink/shared';
+import {
+  SESSION_MAX_MS,
+  partialThresholdForMode,
+  resolveBleStabilityThresholds,
+  tryParseAnyNotifyBase64,
+  nfcTextToPod,
+  irTouchCountDelta,
+} from '@noilink/shared';
 import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
 import { createPendingLocalId, enqueuePendingRun } from '../utils/pendingTrainingRuns';
 import { reportBleAbortFireAndForget } from '../utils/reportBleAbort';
@@ -133,6 +140,13 @@ export default function TrainingSessionPlay() {
   const [partialProgressPct, setPartialProgressPct] = useState(0);
 
   const engineRef = useRef<TrainingEngine | null>(null);
+  // 현재 점등 중인 pod 인덱스(엔진 onPodStates 콜백이 매 점등마다 갱신).
+  // 5바이트 IR 진동 패킷은 어느 pod 인지 정보가 없으므로 이 ref 의 첫 항목으로
+  // 매핑해 engine.handleTap 에 흘려보낸다 — 사용자 정책 1=A.
+  const litPodIdsRef = useRef<number[]>([]);
+  // 현행 펌웨어 IR 5바이트 패킷의 누적 touchCount 직전 값 (u8 wrap).
+  // 첫 패킷은 baseline 만 잡고 입력으로 인정하지 않는다 (irTouchCountDelta).
+  const prevIrTouchCountRef = useRef<number | null>(null);
   const submitLock = useRef(false);
   // finalizeNow는 visibilitychange/pagehide 콜백 안에서 호출되므로 React 클로저가
   // 캡처한 elapsedMs가 stale할 수 있다. 가장 최근 진행 시간을 ref로 동기 추적해
@@ -218,7 +232,16 @@ export default function TrainingSessionPlay() {
       totalDurationMs: totalMs,
       podCount: 4,
       isComposite: state.isComposite || state.apiMode === 'COMPOSITE',
-      onPodStates: () => {/* 화면에 그리지 않음 — LED 송신은 엔진 내부에서 BLE 로 직접 처리 */},
+      onPodStates: (states) => {
+        // 화면에 그리지 않는다 — LED 송신은 엔진 내부에서 BLE 로 직접 처리.
+        // 다만 현행 NINA-B1 펌웨어가 보내는 5바이트 IR 진동 패킷은 어느 pod 가
+        // 눌렸는지 정보를 싣지 않으므로(touchCount 만 증가), "현재 점등된 pod"
+        // 를 ref 에 저장해 두었다가 진동 입력을 받을 때 그 첫 점등 pod 로 매핑한다
+        // (사용자 정책 1=A: 현재 점등 pod 자동 매핑).
+        litPodIdsRef.current = states
+          .filter((p) => p.fill !== 'OFF' && p.litAt !== null)
+          .map((p) => p.id);
+      },
       onElapsedMs: (ms) => {
         elapsedMsRef.current = ms;
         setElapsedMs(ms);
@@ -495,12 +518,60 @@ export default function TrainingSessionPlay() {
 
     const onBridge = (e: Event) => {
       const detail = (e as CustomEvent<NativeToWebMessage>).detail;
-      if (!detail || detail.type !== 'ble.touch') return;
-      const t = detail.payload.touch;
-      const useDelta = t.deviceDeltaValid ? t.deltaMs : undefined;
-      // 엔진이 실제로 채점에 반영한 경우만 카운트 (stale 등 거부 입력 제외)
-      const accepted = engineRef.current?.handleTap(t.pod, { deltaMs: useDelta, tickId: t.tickId }) ?? false;
-      if (accepted) bumpTapCount(t.pod, t.tickId);
+      if (!detail) return;
+
+      // (1) 차세대 NoiPod 11바이트 TOUCH 프레임 — 네이티브 디스패처가 미리 파싱해
+      //     `ble.touch` 메시지로 보낸다. pod/deltaMs/tickId 가 모두 들어있어 그대로 사용.
+      if (detail.type === 'ble.touch') {
+        const t = detail.payload.touch;
+        const useDelta = t.deviceDeltaValid ? t.deltaMs : undefined;
+        const accepted = engineRef.current?.handleTap(t.pod, { deltaMs: useDelta, tickId: t.tickId }) ?? false;
+        if (accepted) bumpTapCount(t.pod, t.tickId);
+        return;
+      }
+
+      // (2) 현행 NINA-B1-FB55CE 펌웨어의 raw notify (`ble.notify`) — 5바이트 IR 패킷
+      //     또는 NFC NDEF Text Record. base64 페이로드를 직접 분류 → 매핑 → 엔진 입력.
+      //     payload.touch 가 함께 와서 (1) 에서 이미 처리된 경우는 중복 방지를 위해 스킵.
+      if (detail.type === 'ble.notify' && detail.payload.key === 'notify') {
+        if (detail.payload.touch) return; // (1) 에서 이미 처리됨
+        const ev = tryParseAnyNotifyBase64(detail.payload.base64Value);
+        if (!ev) return;
+        if (ev.type === 'TOUCH') {
+          // 분류기가 TOUCH 로 잡았는데 payload.touch 가 비어 있는 케이스 — 동일 데이터로 채점.
+          const useDelta = ev.deviceDeltaValid ? ev.deltaMs : undefined;
+          const accepted = engineRef.current?.handleTap(ev.pod, { deltaMs: useDelta, tickId: ev.tickId }) ?? false;
+          if (accepted) bumpTapCount(ev.pod, ev.tickId);
+          return;
+        }
+        if (ev.type === 'IR') {
+          // 펌웨어 누적 touchCount 가 증가한 만큼만 진동 입력으로 인정. 첫 패킷은
+          // baseline (delta=0) 으로 흡수해 잘못된 입력 폭주를 막는다.
+          const prev = prevIrTouchCountRef.current;
+          const delta = irTouchCountDelta(prev, ev.touchCount);
+          prevIrTouchCountRef.current = ev.touchCount;
+          if (delta <= 0) return;
+          // 현재 점등 pod 가 없으면 채점할 수 없으므로 무시 (대기 구간/페이즈 전환 등).
+          // 점등이 한 개 이상이면 첫 점등 pod 로 매핑 — 단순/예측 가능한 정책.
+          const targetPod = litPodIdsRef.current[0];
+          if (targetPod === undefined) return;
+          // 펌웨어 한 패킷에 delta>1 이 들어오는 경우(loss 보상)는 같은 pod 에 N회 친 것으로 간주.
+          for (let i = 0; i < delta; i++) {
+            const accepted = engineRef.current?.handleTap(targetPod) ?? false;
+            if (accepted) bumpTapCount(targetPod, undefined);
+          }
+          return;
+        }
+        if (ev.type === 'NFC_TEXT') {
+          // NFC 태그 텍스트(예: "left", "1")를 두 컨벤션 모두 인식해 pod 로 매핑 (사용자 정책 2=C).
+          // 매칭 안 되면 무시 — 사용자가 자유 라벨링해도 잘못된 입력이 발생하지 않는다.
+          const pod = nfcTextToPod(ev.text);
+          if (pod === null) return;
+          const accepted = engineRef.current?.handleTap(pod) ?? false;
+          if (accepted) bumpTapCount(pod, undefined);
+          return;
+        }
+      }
     };
     window.addEventListener('noilink-native-bridge', onBridge as EventListener);
     return () => {

@@ -608,3 +608,51 @@ export function tryParseAnyNotifyBase64(b64: string): LegacyNotifyEvent | null {
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// 입력 라우팅 헬퍼 — NFC 텍스트 → pod 매핑, IR touchCount 증분 (u8 wrap)
+//
+// 펌웨어는 IR 5바이트 패킷에 어느 pod 가 진동했는지 정보를 싣지 않는다 —
+// "터치 카운트가 N 증가" 만 알려준다. 트레이닝 화면 측에서 "현재 점등된 pod"
+// 를 저장해 두었다가 매핑하는 정책(사용자 결정 1=A).
+// NFC NDEF 텍스트는 "1"/"2"/"3"/"4" 또는 "left"/"right"/"up"/"down" 두 컨벤션을
+// 모두 인식한다(사용자 결정 2=C). 매칭 안 되면 null → 무시.
+// ---------------------------------------------------------------------------
+
+/**
+ * NFC NDEF 텍스트 페이로드를 pod 인덱스(0~3)로 매핑한다.
+ *
+ * 지원 컨벤션 (대소문자 무시, 양옆 공백 허용):
+ *   - 숫자 "1"/"2"/"3"/"4" → 0/1/2/3
+ *   - 방향 "left"/"right"/"up"/"down" → 0/1/2/3
+ * 그 외(예: "foo", 빈 문자열, null)는 null 반환.
+ */
+export function nfcTextToPod(text: string | null | undefined): number | null {
+  if (text == null) return null;
+  const t = text.trim().toLowerCase();
+  if (!t) return null;
+  switch (t) {
+    case '1': return 0;
+    case '2': return 1;
+    case '3': return 2;
+    case '4': return 3;
+    case 'left': return 0;
+    case 'right': return 1;
+    case 'up': return 2;
+    case 'down': return 3;
+    default: return null;
+  }
+}
+
+/**
+ * 펌웨어가 보내는 누적 touchCount(u8, wrap-around) 의 두 샘플 사이 증분을 계산한다.
+ *
+ * - prev === null (구독 시작 직후 첫 패킷) → 0 반환 (baseline 만 잡고 입력으로 인정 안 함)
+ * - 정상 증가: curr - prev
+ * - u8 overflow (예: prev=254, curr=1) → (curr - prev) & 0xff = 3
+ * - 같은 값 (curr === prev): 0 (펌웨어가 동일 카운트로 IR 거리만 갱신)
+ */
+export function irTouchCountDelta(prev: number | null, curr: number): number {
+  if (prev === null) return 0;
+  return (curr - prev) & 0xff;
+}

@@ -608,6 +608,8 @@ import {
   tryParseLegacyNdefTextBase64,
   tryParseAnyNotifyBytes,
   tryParseAnyNotifyBase64,
+  nfcTextToPod,
+  irTouchCountDelta,
 } from './ble-protocol.js';
 
 describe('tryParseLegacyIrBytes — 5바이트 IR/터치 패킷', () => {
@@ -685,6 +687,52 @@ describe('tryParseLegacyNdefTextBytes — NFC NDEF Text Record', () => {
       new Uint8Array([0xd1, 0x01, 0x07, 0x54, 0x02, 0x65, 0x6e, 0x6c, 0x65, 0x66, 0x74]),
     );
     expect(tryParseLegacyNdefTextBase64(b64)?.text).toBe('left');
+  });
+});
+
+describe('nfcTextToPod — NFC 텍스트 → pod 매핑 (사용자 정책: 두 컨벤션 모두 인식)', () => {
+  it('숫자 컨벤션 "1"/"2"/"3"/"4" → 0/1/2/3', () => {
+    expect(nfcTextToPod('1')).toBe(0);
+    expect(nfcTextToPod('2')).toBe(1);
+    expect(nfcTextToPod('3')).toBe(2);
+    expect(nfcTextToPod('4')).toBe(3);
+  });
+  it('방향 컨벤션 "left"/"right"/"up"/"down" → 0/1/2/3', () => {
+    expect(nfcTextToPod('left')).toBe(0);
+    expect(nfcTextToPod('right')).toBe(1);
+    expect(nfcTextToPod('up')).toBe(2);
+    expect(nfcTextToPod('down')).toBe(3);
+  });
+  it('대소문자/공백 무시', () => {
+    expect(nfcTextToPod(' Left ')).toBe(0);
+    expect(nfcTextToPod('RIGHT')).toBe(1);
+  });
+  it('매칭 안 되면 null (무시 정책)', () => {
+    expect(nfcTextToPod('foo')).toBeNull();
+    expect(nfcTextToPod('5')).toBeNull();
+    expect(nfcTextToPod('')).toBeNull();
+    expect(nfcTextToPod(null)).toBeNull();
+    expect(nfcTextToPod(undefined)).toBeNull();
+  });
+});
+
+describe('irTouchCountDelta — u8 wrap 처리', () => {
+  it('첫 패킷(prev=null)은 baseline → delta=0', () => {
+    expect(irTouchCountDelta(null, 0)).toBe(0);
+    expect(irTouchCountDelta(null, 42)).toBe(0);
+  });
+  it('정상 증가', () => {
+    expect(irTouchCountDelta(0, 1)).toBe(1);
+    expect(irTouchCountDelta(5, 8)).toBe(3);
+  });
+  it('동일 값 → 0', () => {
+    expect(irTouchCountDelta(7, 7)).toBe(0);
+  });
+  it('u8 overflow (prev=254, curr=1) → 3', () => {
+    expect(irTouchCountDelta(254, 1)).toBe(3);
+  });
+  it('u8 overflow (prev=255, curr=0) → 1', () => {
+    expect(irTouchCountDelta(255, 0)).toBe(1);
   });
 });
 

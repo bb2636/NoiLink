@@ -294,19 +294,37 @@ Default admin: `admin@admin.com` / `admin1234` (dev only, skipped in production 
     (정상/wrong sync/wrong op/길이 부족/flags edge/scale 등).
 - **Native → Web 전달** (`mobile/src/bridge/NativeBridgeDispatcher.ts`)
   - `notify` 채널의 base64 값을 매 콜백마다 `tryParseTouchBase64` 로 파싱
-    하고, 파싱 성공 시 `ble.touch` 메시지 (`{ touch: TouchEvent }`) 를 web
-    으로 push. 파싱 실패해도 raw `ble.notify` 는 그대로 전달.
+    하고, 차세대 11바이트 TOUCH 프레임이면 `ble.touch` 메시지
+    (`{ touch: TouchEvent }`) 를 web 으로 push. **파싱 성공/실패와 무관하게
+    raw `ble.notify` 는 항상 함께 전달**한다 — 현행 NINA-B1-FB55CE 펌웨어가
+    보내는 5바이트 IR 진동 패킷(`[hi][lo][touchCount][0D][0A]`) 과 NFC NDEF
+    Text Record 도 web 측 분류기에서 처리해야 하기 때문.
 - **Web 채점 진입점** (`client/src/pages/TrainingSessionPlay.tsx`)
   - 마운트 즉시 `bleSubscribeCharacteristic('notify')` 등록 (RX-keepalive
-    겸 입력 수신). `noilink-native-bridge` 이벤트에서 `ble.touch` 를 받아
-    `engine.handleTap(pod, { deltaMs: deviceDeltaValid ? deltaMs : undefined,
-    tickId })` 호출.
+    겸 입력 수신). `noilink-native-bridge` 이벤트의 두 갈래를 모두 처리:
+    1. `ble.touch` (차세대 NoiPod) → `engine.handleTap(pod, { deltaMs:
+       deviceDeltaValid ? deltaMs : undefined, tickId })`.
+    2. `ble.notify` (현행 펌웨어 raw base64) → `tryParseAnyNotifyBase64`
+       로 분류:
+       - **IR (5B)**: 누적 `touchCount` 가 직전 값보다 늘면(`irTouchCountDelta`
+         u8 wrap), **현재 점등 중인 첫 pod** 로 매핑해 그 횟수만큼
+         `engine.handleTap(litPodId)` 호출. 점등 pod 가 없으면 무시. 첫
+         패킷은 baseline (delta=0) 으로 흡수해 폭주 방지. 사용자 정책 1=A.
+       - **NFC_TEXT (NDEF)**: `nfcTextToPod(text)` 로 매핑 — 숫자 컨벤션
+         (`"1"`/`"2"`/`"3"`/`"4"`) 와 방향 컨벤션 (`"left"`/`"right"`/`"up"`/
+         `"down"`) 두 가지 모두 인식 (대소문자/공백 무시). 매칭 안 되면
+         null 반환 → 무시. 사용자 정책 2=C.
+       - **TOUCH (11B)**: `payload.touch` 가 함께 온 (1) 분기에서 이미
+         처리됐으므로 중복 방지 위해 스킵 (touch 필드 없는 fallback 케이스만
+         직접 채점).
+    - "현재 점등 중인 pod" 는 엔진의 `onPodStates` 콜백이 매 점등마다
+      `litPodIdsRef` 를 갱신해 IR 매핑이 즉시 정확한 pod 를 가리키도록 한다.
   - **앱 화면 클릭/터치는 채점 입력으로 인정하지 않는다.** 트레이닝 진행
     화면에는 4개 패널 시각화(이전의 `PodGrid` 컴포넌트) 자체를 그리지
     않는다 — 점등 표시는 기기(NoiPod) 의 LED 가 단독으로 담당한다. 화면은
     큰 타이머 + 페이즈/모드 안내 + 일시정지·재개·취소·뒤로 버튼만 노출하며,
     트레이닝 시간이 끝나면 자동으로 결과 화면(`/result`) 으로 진입한다.
-    모든 입력(터치/NFC) 은 기기 BLE TOUCH notify 11바이트 단일 소스에서만
+    모든 입력(IR 진동/NFC 태그/차세대 TOUCH) 은 기기 BLE notify 단일 소스에서만
     들어오므로, 앱 측에서 입력 채널이 두 개로 갈라져 중복 채점/잘못된
     시간 측정이 발생할 가능성을 원천 차단한다.
   - 앱이 기기로 보내는 것: 점등 신호(LED frame), 세션 시작/종료

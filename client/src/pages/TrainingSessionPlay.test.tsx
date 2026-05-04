@@ -31,6 +31,7 @@ import {
   DEFAULT_BLE_STABILITY_MS_THRESHOLD,
   DEFAULT_BLE_STABILITY_WINDOW_THRESHOLD,
   NATIVE_BRIDGE_VERSION,
+  bytesToBase64,
   setBleStabilityOverrideResolver,
   type NativeToWebMessage,
 } from '@noilink/shared';
@@ -54,9 +55,12 @@ vi.mock('../training/engine', () => {
     onElapsedMs?: (ms: number) => void;
     onComplete?: (m: unknown) => void;
   };
+  type EngineOptsFull = EngineOpts & {
+    onPodStates?: (states: Array<{ id: number; fill: string; litAt: number | null }>) => void;
+  };
   class FakeEngine {
-    private opts: EngineOpts;
-    constructor(opts: EngineOpts) {
+    private opts: EngineOptsFull;
+    constructor(opts: EngineOptsFull) {
       this.opts = opts;
       (globalThis as { __fakeEngineInstance__?: FakeEngine }).__fakeEngineInstance__ = this;
     }
@@ -70,12 +74,16 @@ vi.mock('../training/engine', () => {
       // 실제 엔진과 동일하게 onComplete 는 동기적으로 호출된다.
       this.opts.onComplete?.({});
     }
-    handleTap() {
-      return false;
-    }
+    // 입력 채점 — IR/NFC/TOUCH 라우팅 회귀 테스트가 호출 인자를 검증한다.
+    // 기본은 true 를 돌려줘 TrainingSessionPlay 의 bumpTapCount 까지 흐르게 한다.
+    handleTap = vi.fn((_pod: number, _opts?: { deltaMs?: number; tickId?: number }) => true);
     // 일시정지/재개 — UI 토글 회귀 테스트가 호출 횟수를 검증한다.
     pause = vi.fn();
     resume = vi.fn();
+    // 점등 상태 시뮬레이션 — IR 진동 입력 매핑 테스트가 "현재 lit pod" 을 주입.
+    emitPodStates(states: Array<{ id: number; fill: string; litAt: number | null }>) {
+      this.opts.onPodStates?.(states);
+    }
     // Task #27: BLE 회복 구간 알림 — 실제 채점 누적은 하지 않는 no-op stub.
     beginRecoveryWindow() {}
     endRecoveryWindow() {}
@@ -290,6 +298,8 @@ type FakeEngineHandle = {
   setRecoveryStats: (stats: { windows: number; totalMs: number }) => void;
   pause: ReturnType<typeof vi.fn>;
   resume: ReturnType<typeof vi.fn>;
+  handleTap: ReturnType<typeof vi.fn>;
+  emitPodStates: (states: Array<{ id: number; fill: string; litAt: number | null }>) => void;
 };
 function getFakeEngine(): FakeEngineHandle {
   const inst = (globalThis as { __fakeEngineInstance__?: FakeEngineHandle })
@@ -1187,6 +1197,152 @@ describe('TrainingSessionPlay — 브릿지 거부 토스트 (Task #77 / #104)',
 //   - "재개" 버튼 클릭 시 engine.resume() 가 정확히 1회 호출되고 라벨이 다시 "일시정지" 로 돌아온다.
 //   - "일시정지됨" 인디케이터가 일시정지 상태에서만 노출된다.
 // ───────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────
+// 현행 NINA-B1-FB55CE 펌웨어 입력 라우팅 회귀
+//   ble.notify (raw base64) → tryParseAnyNotifyBase64 분류 → IR/NFC 매핑 → engine.handleTap
+//   사용자 정책: 1=A (IR touchCount 증분 → 현재 점등 pod), 2=C (NFC 두 컨벤션 인식)
+// ───────────────────────────────────────────────────────────
+
+function notifyMessage(b64: string): NativeToWebMessage {
+  return {
+    v: NATIVE_BRIDGE_VERSION,
+    type: 'ble.notify',
+    payload: {
+      subscriptionId: 'training-touch-test',
+      key: 'notify',
+      base64Value: b64,
+    },
+  };
+}
+
+function irPacket(touchCount: number): string {
+  // 5바이트 IR: [hi=0x00][lo=0x9c][touchCount][0D][0A]
+  return bytesToBase64(new Uint8Array([0x00, 0x9c, touchCount & 0xff, 0x0d, 0x0a]));
+}
+
+function ndefTextPacket(text: string): string {
+  // NDEF Short Record + Text RTD: D1 01 LEN 54 02 65 6e + utf8(text)
+  // status byte 0x02 = UTF-8 + 'en' (2글자) 언어 코드
+  const enc = new TextEncoder().encode(text);
+  const payloadLen = 3 + enc.length; // status(1) + 'en'(2) + text
+  const bytes = new Uint8Array(4 + payloadLen);
+  bytes[0] = 0xd1;
+  bytes[1] = 0x01;
+  bytes[2] = payloadLen;
+  bytes[3] = 0x54;
+  bytes[4] = 0x02;
+  bytes[5] = 0x65;
+  bytes[6] = 0x6e;
+  bytes.set(enc, 7);
+  return bytesToBase64(bytes);
+}
+
+describe('TrainingSessionPlay — 현행 펌웨어 입력 라우팅 (IR / NFC)', () => {
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.useFakeTimers();
+    (window as unknown as { ReactNativeWebView?: { postMessage: (s: string) => void } })
+      .ReactNativeWebView = { postMessage: () => {} };
+  });
+
+  afterEach(() => {
+    unmountApp();
+    delete (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView;
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it('IR 첫 패킷은 baseline (delta=0) → handleTap 호출 안 됨', () => {
+    renderApp();
+    const eng = getFakeEngine();
+    eng.emitPodStates([{ id: 1, fill: 'GREEN', litAt: 1 }]);
+    dispatchBridge(notifyMessage(irPacket(7)));
+    expect(eng.handleTap).not.toHaveBeenCalled();
+  });
+
+  it('IR touchCount 증가 + 점등 pod 있음 → 그 pod 로 handleTap', () => {
+    renderApp();
+    const eng = getFakeEngine();
+    eng.emitPodStates([{ id: 2, fill: 'RED', litAt: 1 }]);
+    dispatchBridge(notifyMessage(irPacket(7))); // baseline
+    dispatchBridge(notifyMessage(irPacket(8))); // delta=1
+    expect(eng.handleTap).toHaveBeenCalledTimes(1);
+    expect(eng.handleTap).toHaveBeenCalledWith(2);
+  });
+
+  it('IR delta>1 (펌웨어 누락 보상) → 같은 pod 에 N회 handleTap', () => {
+    renderApp();
+    const eng = getFakeEngine();
+    eng.emitPodStates([{ id: 0, fill: 'BLUE', litAt: 1 }]);
+    dispatchBridge(notifyMessage(irPacket(0))); // baseline
+    dispatchBridge(notifyMessage(irPacket(3))); // delta=3
+    expect(eng.handleTap).toHaveBeenCalledTimes(3);
+    expect(eng.handleTap).toHaveBeenNthCalledWith(1, 0);
+    expect(eng.handleTap).toHaveBeenNthCalledWith(2, 0);
+    expect(eng.handleTap).toHaveBeenNthCalledWith(3, 0);
+  });
+
+  it('IR touchCount 증가했지만 점등 pod 가 없으면 무시', () => {
+    renderApp();
+    const eng = getFakeEngine();
+    // 점등 ref 비어있음 (대기 구간/페이즈 전환 등)
+    dispatchBridge(notifyMessage(irPacket(0)));
+    dispatchBridge(notifyMessage(irPacket(2)));
+    expect(eng.handleTap).not.toHaveBeenCalled();
+  });
+
+  it('IR touchCount 동일 → handleTap 호출 안 됨 (펌웨어가 거리만 갱신)', () => {
+    renderApp();
+    const eng = getFakeEngine();
+    eng.emitPodStates([{ id: 1, fill: 'GREEN', litAt: 1 }]);
+    dispatchBridge(notifyMessage(irPacket(5))); // baseline
+    dispatchBridge(notifyMessage(irPacket(5))); // delta=0
+    expect(eng.handleTap).not.toHaveBeenCalled();
+  });
+
+  it('NFC NDEF "left" → handleTap(0)', () => {
+    renderApp();
+    const eng = getFakeEngine();
+    dispatchBridge(notifyMessage(ndefTextPacket('left')));
+    expect(eng.handleTap).toHaveBeenCalledTimes(1);
+    expect(eng.handleTap).toHaveBeenCalledWith(0);
+  });
+
+  it('NFC NDEF "3" → handleTap(2)', () => {
+    renderApp();
+    const eng = getFakeEngine();
+    dispatchBridge(notifyMessage(ndefTextPacket('3')));
+    expect(eng.handleTap).toHaveBeenCalledWith(2);
+  });
+
+  it('NFC NDEF 매칭 안 되는 텍스트("foo") → 무시', () => {
+    renderApp();
+    const eng = getFakeEngine();
+    dispatchBridge(notifyMessage(ndefTextPacket('foo')));
+    expect(eng.handleTap).not.toHaveBeenCalled();
+  });
+
+  it('ble.notify 에 payload.touch 가 함께 오면 ble.touch 가 처리하므로 raw 분류는 스킵', () => {
+    renderApp();
+    const eng = getFakeEngine();
+    eng.emitPodStates([{ id: 1, fill: 'GREEN', litAt: 1 }]);
+    // touch 필드를 함께 실어 보낸다 — IR 분류 (touchCount 증가) 가 발동해서는 안 됨.
+    const detail: NativeToWebMessage = {
+      v: NATIVE_BRIDGE_VERSION,
+      type: 'ble.notify',
+      payload: {
+        subscriptionId: 'training-touch-test',
+        key: 'notify',
+        base64Value: irPacket(99),
+        touch: { type: 'TOUCH', tickId: 1, pod: 3, channel: 0, deltaMs: 50, deviceDeltaValid: true },
+      },
+    };
+    dispatchBridge(detail);
+    expect(eng.handleTap).not.toHaveBeenCalled();
+  });
+});
+
 describe('TrainingSessionPlay — 일시정지/재개 버튼', () => {
   beforeEach(() => {
     container = document.createElement('div');
