@@ -112,6 +112,18 @@ export default function MultiTrendChart({ data, height = 220, headerLeft }: Mult
 
     const range = Y_MAX - Y_MIN;
 
+    // y 좌표 계산 — Y_MIN(20) 미만의 값(예: 0)은 비율이 음수가 되어 차트 영역
+    // 바닥을 뚫고 X축 라벨 영역까지 색칠되는 문제가 있었다. 비율을 [0, 1] 로
+    // clamp 해서 어떤 값이 들어와도 라인/영역이 차트 plot area (padding ~
+    // padding+chartH) 안에 머물도록 한다. 0~20 구간의 점수는 시각적으로 바닥
+    // 라인에 붙는다 — Y축은 20부터 시작하는 정책 그대로 유지하면서, 아주 낮은
+    // 점수일 때 차트가 깨져 보이지 않게 하기 위함.
+    const toY = (v: number) => {
+      const ratio = (v - Y_MIN) / range;
+      const clamped = Math.max(0, Math.min(1, ratio));
+      return padding + chartH - chartH * clamped;
+    };
+
     // 영역(층) — 뒤(기억력=파랑) → 앞(순발력=라임) 순으로 그려서 색 띠가 쌓이도록.
     // 겹치는 구간에서 앞 레이어가 뒤 색을 덮지 않도록 채움 알파를 낮게 유지한다
     // (반투명으로 비쳐서 모든 색이 묻히지 않고 함께 보임).
@@ -124,8 +136,7 @@ export default function MultiTrendChart({ data, height = 220, headerLeft }: Mult
         const v = point[key];
         if (typeof v !== 'number') return;
         const x = padding + (chartW * index) / Math.max(recent.length - 1, 1);
-        const y = padding + chartH - (chartH * (v - Y_MIN)) / range;
-        pts.push({ x, y });
+        pts.push({ x, y: toY(v) });
       });
       if (pts.length === 0) return;
 
@@ -147,8 +158,7 @@ export default function MultiTrendChart({ data, height = 220, headerLeft }: Mult
         const v = point[key];
         if (typeof v !== 'number') return;
         const x = padding + (chartW * index) / Math.max(recent.length - 1, 1);
-        const y = padding + chartH - (chartH * (v - Y_MIN)) / range;
-        pts.push({ x, y });
+        pts.push({ x, y: toY(v) });
       });
       if (pts.length === 0) return;
 
