@@ -98,6 +98,23 @@ export type TrainingRunState = {
 // 기존 PHASE_LABEL/COG_LABEL 라벨 맵은 큰 원형 게이지 디자인에서 화면에 노출되지 않게
 // 정리되어 함께 제거됨 — 페이즈/모드 정보는 LED + BPM 배지로 통합 표현한다.
 
+// 모드별 입력 안내 — 게이지 아래의 디버깅/확인 라인에서 사용한다.
+// 사용자가 "이 모드에서 기기에 어떤 입력을 줘야 하나?" 를 화면에서 즉시 보고
+// 그 결과(입력 N회 카운트)와 매칭해 NFC/IR/TOUCH 가 채점에 잘 들어오는지 확인.
+function modeHintText(mode: string): string {
+  switch (mode) {
+    case 'RHYTHM':        return '점등 순간 정확히 탭! · P0 → P1 → P2 → P3';
+    case 'FOCUS':         return '🔵 파랑(BLUE)만 탭. 빨강/노랑은 무시.';
+    case 'MEMORY':        return '초록 순서를 외우고, 흰 신호 뒤 같은 순서로 탭.';
+    case 'COMPREHENSION': return '현재 규칙 색만 탭. 흰색 신호 후 규칙 변경.';
+    case 'JUDGMENT':      return '🟢 초록=1탭, 🔴 빨강=참기, 🟡 노랑=2탭(더블).';
+    case 'AGILITY':       return '🟢 초록=손, 🔵 파랑/🟡 노랑=발. Lv4부터 동시.';
+    case 'ENDURANCE':     return '🔵 파랑(BLUE) 타겟을 일정 속도로 끝까지 탭.';
+    case 'FREE':          return '자유롭게 탭 (점수는 기록되지 않음).';
+    default:              return '';
+  }
+}
+
 export default function TrainingSessionPlay() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -927,6 +944,31 @@ export default function TrainingSessionPlay() {
               )}
             </div>
           </div>
+        </div>
+
+        {/*
+          디버깅/확인용 안내 — 사용자가 기기(IR/NFC/TOUCH) 입력이 채점에 잘
+          잡히는지 화면에서 즉시 알 수 있게 두 줄을 노출한다:
+            1) 현재 모드에서 어떤 입력이 유효한지 (모드별 힌트)
+            2) 실시간 입력 누적 카운트 (tapCount) — 기기를 누를 때마다 +1 되어야
+               신호가 정상적으로 들어오는 것.
+          디자인을 해치지 않게 작은 폰트/회색으로만 표기한다.
+        */}
+        <div className="mt-3 text-center" aria-live="polite">
+          <p className="text-xs leading-relaxed" style={{ color: '#7BA80B' }}>
+            {modeHintText(
+              phaseInfo.phase === 'RHYTHM'
+                ? 'RHYTHM'
+                : (phaseInfo.cognitiveMode ?? state.apiMode),
+            )}
+          </p>
+          <p
+            className="mt-1 text-xs tabular-nums"
+            style={{ color: '#888' }}
+            data-testid="tap-count-debug"
+          >
+            입력 {tapCount}회
+          </p>
         </div>
 
         {err && (
