@@ -782,11 +782,17 @@ export default function TrainingSessionPlay() {
     <MobileLayout hideBottomNav>
       <div
         data-testid="training-session-play"
-        className="max-w-md mx-auto px-5 flex flex-col min-h-screen"
+        className="max-w-md mx-auto px-5 flex flex-col"
         style={{
-          paddingTop: 'calc(1rem + env(safe-area-inset-top))',
+          // 화면을 한 화면에 딱 맞추고 스크롤은 막는다 — 트레이닝 중에 스크롤이
+          // 발생하면 사용자가 게이지/타이머에 집중하지 못하고 화면이 흔들리는 인상을
+          // 준다. 모든 콘텐츠는 안드로이드 status bar/제스처 바를 피하면서 한 뷰포트
+          // 안에 들어가도록 위/아래 safe-area 만 최소로 확보한다.
+          height: '100vh',
+          overflow: 'hidden',
+          paddingTop: 'calc(0.25rem + env(safe-area-inset-top))',
           // 하단 버튼이 iOS 홈 인디케이터/안드로이드 제스처 바에 가리지 않도록 safe-area + 여유.
-          paddingBottom: 'calc(env(safe-area-inset-bottom) + 2rem)',
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 1rem)',
           color: '#fff',
           backgroundColor: '#0A0A0A',
         }}
@@ -869,7 +875,7 @@ export default function TrainingSessionPlay() {
         })()}
 
         {/* BPM 배지 — 라임 테두리 라운드 박스. 종합 모드는 사이클 정보를 함께 보여준다. */}
-        <div className="flex items-center justify-center mt-6 mb-10">
+        <div className="flex items-center justify-center mt-3 mb-6">
           <div
             className="px-8 py-2.5 rounded-full text-base font-semibold tabular-nums"
             style={{ border: '1.5px solid #AAED10', color: '#AAED10' }}
@@ -892,7 +898,12 @@ export default function TrainingSessionPlay() {
           기기(NoiPod) 의 LED 가 담당하고, 모든 입력은 기기 BLE notify 단일 소스로 받는다.
           원 안: "총 N초" 작은 회색 + "MM:SS" 큰 흰색.
         */}
-        <div className="flex flex-1 flex-col items-center justify-center">
+        {/*
+          게이지 컨테이너 — 이전엔 flex-1 로 빈 공간을 다 차지해서 하단 버튼이
+          화면 끝까지 밀려갔다. 사용자 요청에 따라 flex-1 을 제거해 게이지·힌트·
+          버튼이 자연스럽게 위에서부터 쌓이고, 버튼이 타이머 바로 아래에 붙게 한다.
+        */}
+        <div className="flex flex-col items-center justify-center">
           <div className="relative" style={{ width: RING_SIZE, height: RING_SIZE }}>
             <svg
               width={RING_SIZE}
@@ -985,8 +996,9 @@ export default function TrainingSessionPlay() {
           </div>
         )}
 
-        {/* 하단 원형 버튼: 좌 취소(회색) + 우 일시정지/재개(주황). 이미지 디자인 일치. */}
-        <div className="mt-8 flex items-center justify-between px-4">
+        {/* 원형 버튼 — 타이머/모드 안내 바로 아래에 붙도록 mt 만 살짝. 좌 취소(회색)
+            + 우 일시정지/재개(주황). 빈 공간은 자연스럽게 화면 하단으로 남는다. */}
+        <div className="mt-6 flex items-center justify-between px-4">
           <button
             type="button"
             onClick={leaveToList}
