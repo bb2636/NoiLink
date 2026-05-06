@@ -135,7 +135,8 @@ interface ModeAcc {
   fRTs: number[];
 
   // MEMORY
-  mShown: number;      // 시퀀스 길이 합
+  mShown: number;      // 시퀀스 길이 합 (SHOW 시점 누적)
+  mAttempts: number;   // 사용자가 RECALL 단계에서 누른 입력 수 (정답+오답)
   mCorrect: number;    // 정답 입력 수
   mPerfectSeqs: number; // 시퀀스 완벽 횟수
   mTotalSeqs: number;
@@ -199,7 +200,7 @@ function emptyAcc(): ModeAcc {
     ticks: 0, taps: 0, hits: 0, rtSamples: [],
     rhythmTicks: 0, rPerfect: 0, rGood: 0, rBad: 0, rMiss: 0, rOffsets: [],
     fTargetCount: 0, fTargetHits: 0, fDistractorCount: 0, fCommissions: 0, fOmissions: 0, fRTs: [],
-    mShown: 0, mCorrect: 0, mPerfectSeqs: 0, mTotalSeqs: 0, mRTs: [],
+    mShown: 0, mAttempts: 0, mCorrect: 0, mPerfectSeqs: 0, mTotalSeqs: 0, mRTs: [],
     cTotal: 0, cCorrect: 0, cSwitchCount: 0, cSwitchFirstRTs: [], cSwitchErrors: 0, cSwitchAttempts: 0, cRTs: [],
     jGoCount: 0, jGoHit: 0, jGoRTs: [], jNoGoCount: 0, jNoGoSuccess: 0, jDoubleCount: 0, jDoubleHit: 0, jImpulse: 0,
     aHandCount: 0, aHandHit: 0, aFootCount: 0, aFootHit: 0, aSimulCount: 0, aSimulHit: 0, aRTs: [],
@@ -1243,6 +1244,11 @@ export class TrainingEngine {
     const idx = this.memoryReplay.length - 1;
     const expected = this.memoryQueue[idx];
     const isHit = expected === pod.id;
+    // 명세 A.MEMORY 점수 산식의 "순서정확도" 정의 — 시도 기준(B):
+    //   seqAcc = mCorrect / mAttempts.
+    // 사용자가 누른 입력 한 건당 분모(시도)와 정답 시 분자(정답) 가 함께 증가하므로,
+    // Lv3+ 즉시실패 정책으로 시도조차 못 한 자극이 분모에 부풀려 들어가지 않는다.
+    this.acc.mAttempts += 1;
     if (isHit) {
       this.acc.mCorrect += 1;
     }
@@ -1338,8 +1344,9 @@ export class TrainingEngine {
     const fOmissionRate = (a.fTargetCount - a.fTargetHits) / totalTargets;
 
     // MEMORY
-    const mShown = Math.max(1, a.mShown);
-    const seqAcc = a.mCorrect / mShown;
+    // 순서정확도 = 시도 기준 (mCorrect / mAttempts).
+    // mAttempts=0 인 케이스(아무 입력 없음)는 0 으로 처리.
+    const seqAcc = a.mAttempts > 0 ? a.mCorrect / a.mAttempts : 0;
     const mTotalSeqs = Math.max(1, a.mTotalSeqs);
     const perfectRecall = a.mPerfectSeqs / mTotalSeqs;
 

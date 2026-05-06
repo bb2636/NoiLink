@@ -64,7 +64,7 @@ function freshAcc() {
     ticks: 0, taps: 0, hits: 0, rtSamples: [] as number[],
     rhythmTicks: 0, rPerfect: 0, rGood: 0, rBad: 0, rMiss: 0, rOffsets: [] as number[],
     fTargetCount: 0, fTargetHits: 0, fDistractorCount: 0, fCommissions: 0, fOmissions: 0, fRTs: [] as number[],
-    mShown: 0, mCorrect: 0, mPerfectSeqs: 0, mTotalSeqs: 0, mRTs: [] as number[],
+    mShown: 0, mAttempts: 0, mCorrect: 0, mPerfectSeqs: 0, mTotalSeqs: 0, mRTs: [] as number[],
     cTotal: 0, cCorrect: 0, cSwitchCount: 0, cSwitchFirstRTs: [] as number[], cSwitchErrors: 0, cSwitchAttempts: 0, cRTs: [] as number[],
     jGoCount: 0, jGoHit: 0, jGoRTs: [] as number[], jNoGoCount: 0, jNoGoSuccess: 0, jDoubleCount: 0, jDoubleHit: 0, jImpulse: 0,
     aHandCount: 0, aHandHit: 0, aFootCount: 0, aFootHit: 0, aSimulCount: 0, aSimulHit: 0, aRTs: [] as number[],
@@ -97,10 +97,10 @@ describe('buildMetrics: 결정론적 누적기에서 핵심 필드가 기댓값�
       // fRTs mean=300, sample sd = sqrt(((200-300)^2+(400-300)^2)/1)=sqrt(20000)≈141.42 → 141
       fTargetCount: 10, fTargetHits: 8, fDistractorCount: 10, fCommissions: 2, fOmissions: 2, fRTs: [200, 400],
 
-      // MEMORY: shown=10/correct=7 → seqAcc=0.7
+      // MEMORY: attempts=10/correct=7 → seqAcc=0.7 (시도 기준 B)
       // perfect 2/totalSeqs 4 → perfectRecall=0.5
       // mRTs: mean=200
-      mShown: 10, mCorrect: 7, mPerfectSeqs: 2, mTotalSeqs: 4, mRTs: [100, 300],
+      mShown: 10, mAttempts: 10, mCorrect: 7, mPerfectSeqs: 2, mTotalSeqs: 4, mRTs: [100, 300],
 
       // COMPREHENSION: ruleAcc=8/10=0.8, switchRT=mean([100,200,300])=200,
       // switchErrRate=2/10=0.2, cRTs mean=200
@@ -361,8 +361,8 @@ describe('buildMetrics: 모든 시도 실패 시 적중률·정확도가 0, 누�
       // FOCUS: 타겟 모두 누락 + 방해는 모두 잘못 누름
       fTargetCount: 5, fTargetHits: 0, fDistractorCount: 4, fCommissions: 4, fOmissions: 5,
 
-      // MEMORY: 입력 모두 오답
-      mShown: 6, mCorrect: 0, mPerfectSeqs: 0, mTotalSeqs: 2, mRTs: [],
+      // MEMORY: 입력 모두 오답 — 6번 시도, 0번 정답 → 0
+      mShown: 6, mAttempts: 6, mCorrect: 0, mPerfectSeqs: 0, mTotalSeqs: 2, mRTs: [],
 
       // COMPREHENSION: 정답 0
       cTotal: 5, cCorrect: 0, cSwitchCount: 2, cSwitchFirstRTs: [], cSwitchErrors: 4, cSwitchAttempts: 4, cRTs: [],
@@ -431,7 +431,7 @@ describe('buildMetrics: 모든 시도 성공 시 적중률·정확도가 1, 오�
       fRTs: [200, 200, 200, 200, 200],
 
       // MEMORY: 입력 모두 정답 + 모든 시퀀스 완벽
-      mShown: 6, mCorrect: 6, mPerfectSeqs: 2, mTotalSeqs: 2, mRTs: [100, 100],
+      mShown: 6, mAttempts: 6, mCorrect: 6, mPerfectSeqs: 2, mTotalSeqs: 2, mRTs: [100, 100],
 
       // COMPREHENSION: 모두 정답 + 전환 오류 0
       cTotal: 5, cCorrect: 5, cSwitchCount: 2, cSwitchFirstRTs: [200, 200],
