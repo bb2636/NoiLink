@@ -30,6 +30,7 @@ import {
   judgeRhythmError,
   judgmentDoubleTapWindowMs,
   logicColorToCode,
+  mixedColorRateForLevel,
   rhythmStepsForBeat,
 } from '@noilink/shared';
 
@@ -266,6 +267,10 @@ export class TrainingEngine {
   private lastTapAt: { podId: number; ts: number } | null = null; // 더블탭 감지
   private switchPendingFirst = false; // COMPREHENSION 전환 직후 첫 입력 측정
   private switchedAt = 0;
+  /** COMPREHENSION 규칙 변경 직후 N tick 동안 "혼합색(RED 방해 자극)" 점등 금지.
+   *  명세 B: 변경 직후 2~3 Tick 은 혼합색 금지 — 사용자가 새 규칙에 적응할 시간을 준다.
+   *  매 fireComprehensionTick 시작에서 0 이상이면 1 감소, >0 인 동안은 RED 를 색 풀에서 제외. */
+  private cNoMixedUntilTicks = 0;
   private destroyed = false;
   /** monotonic tick id — BLE LED/TOUCH 매칭과 중복 입력 차단에 사용 */
   private tickIdCounter = 0;
@@ -331,6 +336,9 @@ export class TrainingEngine {
     this.startedAt = Date.now();
     this.acc = emptyAcc();
     this.consumedTickIds.clear();
+    // 같은 인스턴스를 재시작(restart)하는 경우 이전 세션의 COMPREHENSION 잔여 카운터가
+    // 새 세션 첫 tick 의 RED 풀에 영향 주지 않도록 명시적으로 0 으로 되돌린다.
+    this.cNoMixedUntilTicks = 0;
 
     // BLE 세션 메타 + START (네이티브 셸이 아니면 자동 no-op)
     // 정책:
@@ -679,9 +687,11 @@ export class TrainingEngine {
       this.runMemorySequence();
     }
 
-    // COMPREHENSION 시작 시 규칙 결정
+    // COMPREHENSION 시작 시 규칙 결정 + "전환 직후 혼합색 금지" 카운터 초기화
+    // (Composite 의 이전 COMPREHENSION 페이즈 잔여값이 다음 페이즈로 새지 않게 한다.)
     if (!segIsRhythm && this.currentCognitiveMode === 'COMPREHENSION') {
       this.currentRule = Math.random() < 0.5 ? 'GREEN' : 'BLUE';
+      this.cNoMixedUntilTicks = 0;
     }
 
     const fireTick = () => {
@@ -859,15 +869,21 @@ export class TrainingEngine {
   }
 
   private fireFocusTick(beatMs: number): void {
-    // 60% 타겟(BLUE), 40% 방해(RED/YELLOW)
-    // 명세 C.FOCUS: Lv3+ 는 타겟+방해 동시 점등 (방해 자극 속에서 타겟만 선택)
+    // 60% 타겟(BLUE), 40% 방해.
+    // 명세 C.FOCUS:
+    //   - Lv3+ 는 타겟+방해 동시 점등 (방해 자극 속에서 타겟만 선택)
+    //   - 혼합색(YELLOW = 물리 RG 합성) 사용률은 레벨에 따라 Lv1=0% → Lv5=35% 선형 증가.
+    //     혼합색 미사용 시에는 단색 RED 만 방해 자극으로 사용한다.
+    const mixedRate = mixedColorRateForLevel(this.cfg.level);
+    const pickDistractor = (): LogicColor => (Math.random() < mixedRate ? 'YELLOW' : 'RED');
+
     const allowSimul = this.cfg.level >= 3 && this.cfg.podCount >= 2;
     if (allowSimul && Math.random() < 0.3) {
       // 타겟 1 + 방해 1 동시 점등 (서로 다른 Pod)
       const tPod = Math.floor(Math.random() * this.cfg.podCount);
       let dPod = Math.floor(Math.random() * this.cfg.podCount);
       if (dPod === tPod) dPod = (dPod + 1) % this.cfg.podCount;
-      const distractor: LogicColor = Math.random() < 0.5 ? 'RED' : 'YELLOW';
+      const distractor = pickDistractor();
       this.acc.fTargetCount += 1;
       this.acc.fDistractorCount += 1;
       this.recordIntervalCount('total', this.elapsedMs(), 1);
@@ -875,7 +891,7 @@ export class TrainingEngine {
       return;
     }
     const isTarget = Math.random() < 0.6;
-    const color: LogicColor = isTarget ? 'BLUE' : (Math.random() < 0.5 ? 'RED' : 'YELLOW');
+    const color: LogicColor = isTarget ? 'BLUE' : pickDistractor();
     const podId = Math.floor(Math.random() * this.cfg.podCount);
     if (isTarget) {
       this.acc.fTargetCount += 1;
@@ -887,19 +903,36 @@ export class TrainingEngine {
   }
 
   private fireComprehensionTick(beatMs: number, totalMs: number, elapsedInPhase: number): void {
-    // 일정 확률로 규칙 전환 (페이즈당 1~3회)
+    // 명세 B.COMPREHENSION:
+    //   - 페이즈당 규칙 변경 1~3회 (최소 1회 보장).
+    //   - 변경 직후 2~3 Tick 은 혼합색(RED 방해) 금지 — 새 규칙 적응 시간 부여.
+    // 매 tick 시작에서 "혼합색 금지" 카운터를 1 감소시켜 자연 만료시킨다.
+    if (this.cNoMixedUntilTicks > 0) this.cNoMixedUntilTicks -= 1;
+
     const switchProb = 1.5 / Math.max(4, totalMs / beatMs);
-    if (this.acc.cSwitchCount < 3 && Math.random() < switchProb && elapsedInPhase > beatMs * 2) {
+    const probabilisticSwitch = Math.random() < switchProb;
+    // 페이즈 절반(50% 경과)까지 한 번도 전환이 없었다면 강제 1회 전환을 보장한다.
+    // 70% 로 두면 강제 전환이 phase 종료 직전에 일어나 새 규칙으로 시도할 시간이 부족.
+    const forcedFirstSwitch = this.acc.cSwitchCount === 0 && elapsedInPhase > totalMs * 0.5;
+    const wantSwitch = forcedFirstSwitch || probabilisticSwitch;
+    if (wantSwitch && this.acc.cSwitchCount < 3 && elapsedInPhase > beatMs * 2) {
       this.currentRule = this.currentRule === 'GREEN' ? 'BLUE' : 'GREEN';
       this.acc.cSwitchCount += 1;
       this.switchPendingFirst = true;
       this.switchedAt = Date.now();
+      // 변경 직후 3 Tick 동안 RED(혼합색) 방해를 풀에서 제외 (이번 tick 포함 → 카운터=3).
+      this.cNoMixedUntilTicks = 3;
       // WHITE 전환 경고 → 다음 tick에 점등
       this.flashAll('WHITE', 250);
       return;
     }
-    // 규칙 색을 정답으로, 반대색이나 RED를 방해로
-    const colors: LogicColor[] = [this.currentRule, this.currentRule === 'GREEN' ? 'BLUE' : 'GREEN', 'RED'];
+    // 규칙 색을 정답으로, 반대색이나 RED를 방해로.
+    // 단, 전환 직후 cNoMixedUntilTicks > 0 인 동안은 RED 를 풀에서 제외해 사용자가
+    // 새 규칙(GREEN↔BLUE 정답 색)에만 집중할 수 있게 한다.
+    const oppositeRule: LogicColor = this.currentRule === 'GREEN' ? 'BLUE' : 'GREEN';
+    const colors: LogicColor[] = this.cNoMixedUntilTicks > 0
+      ? [this.currentRule, oppositeRule]
+      : [this.currentRule, oppositeRule, 'RED'];
     const c = rand(colors);
     const podId = Math.floor(Math.random() * this.cfg.podCount);
     const isTarget = c === this.currentRule;
