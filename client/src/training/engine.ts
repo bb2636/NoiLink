@@ -257,6 +257,11 @@ export class TrainingEngine {
   private memoryPhase: 'SHOW' | 'RECALL' = 'SHOW';
   private memoryRecallStartedAt = 0;
   private memoryLastTapAt = 0;
+  /** 현재 MEMORY phase 의 1박 간격(ms) — runMemorySequence 가 SHOW 시퀀스를 그릴 때 사용. */
+  private memoryTickInterval = 0;
+  /** 다음 MEMORY 시퀀스로의 advance 가 이미 예약됐는지 — RECALL 완료 입력과 window 만료
+   *  schedule 양쪽이 같은 사이클에서 advance 를 두 번 트리거하지 않도록 막는 멱등 플래그. */
+  private memorySequenceAdvancing = false;
   private pendingTimers: number[] = []; // destroy 시 정리 대상
   private lastTapAt: { podId: number; ts: number } | null = null; // 더블탭 감지
   private switchPendingFirst = false; // COMPREHENSION 전환 직후 첫 입력 측정
@@ -500,6 +505,96 @@ export class TrainingEngine {
     this.pendingTimers.push(id);
   }
 
+  // ───── MEMORY 시퀀스 사이클 ──────────────────────────────────────────
+  /**
+   * MEMORY phase 의 SHOW→RECALL 한 사이클을 schedule 한다.
+   *
+   * - SHOW: tickInterval 마다 시퀀스 한 개씩 GREEN 점등 (Lv1~2 는 연속 동일 Pod 금지).
+   * - RECALL: SHOW 종료 직후 모든 Pod WHITE 로 전환, recallWindow ms 동안 입력 대기.
+   * - RECALL window 가 자연 만료되면 advanceMemorySequence 가 다음 SHOW 를 트리거한다.
+   *   사용자가 시퀀스를 다 채우면 handleMemoryTap 이 같은 헬퍼를 즉시 호출(중복 방지는
+   *   memorySequenceAdvancing 플래그).
+   *
+   * phase 가 이미 종료됐거나(잔여시간 ≤ 0), MEMORY 가 아닌 다른 mode 로 전환됐다면 no-op
+   * — pending advance schedule 이 phase 전환 후에 늦게 발사되더라도 안전.
+   */
+  private runMemorySequence(): void {
+    if (this.destroyed) return;
+    if (this.currentCognitiveMode !== 'MEMORY') return;
+    const elapsed = Date.now() - this.currentPhaseStartedAt;
+    if (elapsed >= this.currentPhaseDurationMs) return;
+    const tickInterval = this.memoryTickInterval;
+    if (tickInterval <= 0) return;
+
+    this.memorySequenceAdvancing = false;
+    this.memoryQueue = [];
+    this.memoryReplay = [];
+    this.memoryPhase = 'SHOW';
+    const seqLen = clamp(this.cfg.level + 2, 3, 6);
+    this.acc.mTotalSeqs += 1;
+    this.acc.mShown += seqLen;
+    // 명세 A.MEMORY: Lv1~2 는 연속 동일 Pod 금지 (학습 진입 부담 완화)
+    const banConsecutive = this.cfg.level <= 2;
+    let prevPod = -1;
+    // 첫 점등은 START(aa 55) 이후 FIRST_TICK_DELAY_MS 만큼 기다린다 — 다른 모드의
+    // fireTick 첫 호출과 같은 마진. 두 번째 사이클부터는 advanceMemorySequence 가
+    // 짧은 휴식(GAP) 후 호출하므로 START 마진은 첫 사이클에서만 의미가 있다.
+    for (let i = 0; i < seqLen; i++) {
+      let podId = Math.floor(Math.random() * this.cfg.podCount);
+      if (banConsecutive && this.cfg.podCount > 1 && podId === prevPod) {
+        podId = (podId + 1) % this.cfg.podCount;
+      }
+      prevPod = podId;
+      this.memoryQueue.push(podId);
+      this.schedule(() => {
+        this.lightSinglePod(podId, 'GREEN', tickInterval * 0.6);
+      }, FIRST_TICK_DELAY_MS + i * tickInterval);
+    }
+    // SHOW 끝나면 RECALL로 전환 (모든 Pod WHITE 신호)
+    const showEnd = FIRST_TICK_DELAY_MS + seqLen * tickInterval;
+    this.schedule(() => {
+      if (this.destroyed) return;
+      if (this.currentCognitiveMode !== 'MEMORY') return;
+      this.memoryPhase = 'RECALL';
+      this.memoryRecallStartedAt = Date.now();
+      this.memoryLastTapAt = 0;
+      this.allOff();
+      // WHITE 입력 신호 — Pod별 monotonic tickId 부여 + BLE 점등
+      // 명세 A.MEMORY: Recall 입력 시간 = on_ms + 250ms (시퀀스 길이만큼 누적)
+      const onMsPerStep = defaultOnMsForLevel(this.cfg.level) + 250;
+      const recallWindow = onMsPerStep * seqLen;
+      const now = Date.now();
+      this.pods = this.pods.map(p => {
+        const tickId = this.nextTickId();
+        bleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode('WHITE'), onMs: recallWindow });
+        return { ...p, fill: 'WHITE', isTarget: true, litAt: now, expiresAt: now + recallWindow, tickId };
+      });
+      this.cfg.onPodStates(this.pods);
+      // RECALL window 자연 만료(미완 입력) → 다음 시퀀스로
+      this.schedule(() => this.advanceMemorySequence(), recallWindow);
+    }, showEnd);
+  }
+
+  /**
+   * 다음 MEMORY SHOW 시퀀스를 짧은 휴식(GAP) 후 자동 트리거.
+   * RECALL window 만료 schedule 과 handleMemoryTap 의 시퀀스 완료/오답 양쪽이
+   * 같은 사이클에서 advance 를 두 번 트리거하지 않도록 멱등 플래그로 보호한다.
+   */
+  private advanceMemorySequence(): void {
+    if (this.destroyed) return;
+    // 모드/phase 가드 — RECALL window 만료 schedule 이 phase 전환 후 늦게 발사되더라도
+    // 다른 cognitive mode 의 LED 를 잘못 끄거나 memoryPhase 를 흔들지 않도록 한다.
+    if (this.currentCognitiveMode !== 'MEMORY') return;
+    if (this.memoryPhase !== 'RECALL') return;
+    if (this.memorySequenceAdvancing) return;
+    this.memorySequenceAdvancing = true;
+    this.memoryPhase = 'SHOW'; // RECALL 입력 비활성 — handleMemoryTap 가드
+    this.allOff();
+    // GAP — 사용자가 "다음 시퀀스" 시작을 인지할 수 있는 짧은 휴식(약 한 박)
+    const gap = Math.max(300, Math.min(this.memoryTickInterval || 600, 800));
+    this.schedule(() => this.runMemorySequence(), gap);
+  }
+
   // ───── Composite 플랜 (5사이클 RHYTHM↔COGNITIVE) ────────────────────
   private buildCompositePlan(): void {
     const total = this.cfg.totalDurationMs;
@@ -574,51 +669,14 @@ export class TrainingEngine {
     this.currentPhaseScheduleBased =
       !segIsRhythm && this.currentCognitiveMode === 'MEMORY';
 
-    // MEMORY는 SHOW 단계 먼저 → RECALL
+    // MEMORY는 SHOW 단계 먼저 → RECALL → 다음 SHOW … 를 phase 시간이 끝날 때까지 반복.
+    // 한 사이클(SHOW+RECALL) 의 모든 점등/전환이 schedule()→pendingTimers 에 들어가며,
+    // RECALL 종료(시퀀스 완료 or window 만료) 시 advanceMemorySequence 가 다음 SHOW 를
+    // 자동 트리거한다. (handleMemoryTap 도 시퀀스 완료/오답 시점에 같은 헬퍼를 호출.)
     if (!segIsRhythm && this.currentCognitiveMode === 'MEMORY') {
-      this.memoryQueue = [];
-      this.memoryReplay = [];
-      this.memoryPhase = 'SHOW';
-      const seqLen = clamp(this.cfg.level + 2, 3, 6);
-      this.acc.mTotalSeqs += 1;
-      this.acc.mShown += seqLen;
-      // 시퀀스 보여주기: tickInterval 마다 하나씩 (destroy 시 정리)
-      // 명세 A.MEMORY: Lv1~2 는 연속 동일 Pod 금지 (학습 진입 부담 완화)
-      const banConsecutive = this.cfg.level <= 2;
-      let prevPod = -1;
-      // 첫 점등은 START(aa 55) 이후 FIRST_TICK_DELAY_MS 만큼 기다린다 — 다른 모드의
-      // fireTick 첫 호출과 같은 마진을 부여해, NUS 계열 펌웨어가 START 처리 도중
-      // 들어온 LED 프레임을 잃어버리지 않도록 한다(handleTestBlink 와 동일 정책).
-      for (let i = 0; i < seqLen; i++) {
-        let podId = Math.floor(Math.random() * this.cfg.podCount);
-        if (banConsecutive && this.cfg.podCount > 1 && podId === prevPod) {
-          podId = (podId + 1) % this.cfg.podCount;
-        }
-        prevPod = podId;
-        this.memoryQueue.push(podId);
-        this.schedule(() => {
-          this.lightSinglePod(podId, 'GREEN', tickInterval * 0.6);
-        }, FIRST_TICK_DELAY_MS + i * tickInterval);
-      }
-      // SHOW 끝나면 RECALL로 전환 (모든 Pod WHITE 신호)
-      const showEnd = FIRST_TICK_DELAY_MS + seqLen * tickInterval;
-      this.schedule(() => {
-        this.memoryPhase = 'RECALL';
-        this.memoryRecallStartedAt = Date.now();
-        this.memoryLastTapAt = 0;
-        this.allOff();
-        // WHITE 입력 신호 — Pod별 monotonic tickId 부여 + BLE 점등
-        // 명세 A.MEMORY: Recall 입력 시간 = on_ms + 250ms (시퀀스 길이만큼 누적)
-        const onMsPerStep = defaultOnMsForLevel(this.cfg.level) + 250;
-        const recallWindow = onMsPerStep * seqLen;
-        const now = Date.now();
-        this.pods = this.pods.map(p => {
-          const tickId = this.nextTickId();
-          bleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode('WHITE'), onMs: recallWindow });
-          return { ...p, fill: 'WHITE', isTarget: true, litAt: now, expiresAt: now + recallWindow, tickId };
-        });
-        this.cfg.onPodStates(this.pods);
-      }, showEnd);
+      this.memoryTickInterval = tickInterval;
+      this.memorySequenceAdvancing = false;
+      this.runMemorySequence();
     }
 
     // COMPREHENSION 시작 시 규칙 결정
@@ -1044,7 +1102,14 @@ export class TrainingEngine {
         this.handleMemoryTap(pod, now);
         break;
     }
-    // tap 처리 후 끄기 (RHYTHM 외)
+    // tap 처리 후 끄기 (RHYTHM 외).
+    // MEMORY RECALL 진행 중에는 다음 입력을 받아야 하므로 끄지 않는다 — 첫 탭 후
+    // 곧바로 allOff 하면 같은 시퀀스의 두 번째 입력이 handleTap 의 OFF 가드에 막힌다.
+    // 시퀀스 완료/오답 시점에는 handleMemoryTap → advanceMemorySequence 가 명시적으로
+    // allOff 를 호출한다.
+    if (this.currentCognitiveMode === 'MEMORY' && this.memoryPhase === 'RECALL') {
+      return true;
+    }
     this.allOff();
     return true;
   }
@@ -1143,20 +1208,16 @@ export class TrainingEngine {
     const rt = Math.max(0, now - refTs);
     if (rt > 0) this.acc.mRTs.push(rt);
     this.memoryLastTapAt = now;
-    // 명세 A.MEMORY: Lv3+ 는 오입력 시 즉시 해당 사이클 실패
+    // 명세 A.MEMORY: Lv3+ 는 오입력 시 즉시 해당 사이클 실패 → 다음 시퀀스로 넘어간다.
     if (!isHit && this.cfg.level >= 3) {
-      this.memoryPhase = 'SHOW';
-      this.memoryReplay = [];
-      this.memoryQueue = [];
-      this.allOff();
+      this.advanceMemorySequence();
       return;
     }
     if (this.memoryReplay.length >= this.memoryQueue.length) {
       const allOk = this.memoryReplay.every((p, i) => p === this.memoryQueue[i]);
       if (allOk) this.acc.mPerfectSeqs += 1;
-      this.memoryPhase = 'SHOW';
-      this.memoryReplay = [];
-      this.memoryQueue = [];
+      // 시퀀스 완료 → window 만료를 기다리지 않고 즉시 다음 SHOW 사이클 트리거.
+      this.advanceMemorySequence();
     }
   }
 
