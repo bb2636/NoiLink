@@ -587,9 +587,61 @@ export function tryParseLegacyNdefTextBase64(b64: string): LegacyNdefTextEvent |
 }
 
 /**
+ * NFC raw ASCII 텍스트 페이로드 파서 — NDEF wrapper 없이 펌웨어가 NFC 태그에서
+ * 읽은 문자열을 그대로(printable ASCII + 선택적 CR/LF) push 하는 컨벤션을 처리한다.
+ *
+ * 펌웨어 합의:
+ *   - NFC 태그를 읽으면 200ms 주기 stream 안에 raw 텍스트 바이트가 끼어 들어온다.
+ *   - 예: 0x6C 0x65        → "le"
+ *         0x6C 0x65 0x66 0x74 → "left"
+ *         0x31              → "1"
+ *         사용자 임의 문자열 (예: "1:left", "right\r\n") 도 그대로 전달된다.
+ *
+ * IR 5바이트 패킷이나 TOUCH/NDEF 프레임으로 먼저 매칭한 뒤 *마지막 fallback*
+ * 으로만 호출해야 한다 — 짧은 임의 바이트열은 거의 모두 ASCII 범위에 들어와
+ * 우선순위를 주면 다른 프레임을 잡아먹기 때문이다.
+ *
+ * 허용 바이트: 0x09(TAB), 0x0A(LF), 0x0D(CR), 0x20..0x7E (printable).
+ * 한 바이트라도 범위 밖이면 null (binary frame 으로 간주, 무시).
+ */
+export function tryParseLegacyNfcRawTextBytes(bytes: Uint8Array): LegacyNdefTextEvent | null {
+  if (bytes.length === 0) return null;
+  let text = '';
+  for (let i = 0; i < bytes.length; i++) {
+    const c = bytes[i]!;
+    const isPrintable = c >= 0x20 && c <= 0x7e;
+    const isWhitespace = c === 0x09 || c === 0x0a || c === 0x0d;
+    if (!isPrintable && !isWhitespace) return null;
+    text += String.fromCharCode(c);
+  }
+  // 양 끝 공백/CR/LF 제거 후 빈 문자열이면 입력으로 인정하지 않는다 — pod 매핑이 불가.
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  return { type: 'NFC_TEXT', text: trimmed, language: '' };
+}
+
+export function tryParseLegacyNfcRawTextBase64(b64: string): LegacyNdefTextEvent | null {
+  try {
+    return tryParseLegacyNfcRawTextBytes(base64ToBytes(b64));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 현행 펌웨어가 보낸 notify 페이로드를 한 번에 분류한다.
- * 시도 순서: TOUCH(0xa5/0x81) → IR(5B + 0x0D 0x0A) → NDEF Text(0xD1 0x01 …).
+ * 시도 순서:
+ *   1. TOUCH (0xa5/0x81) — NoiPod 정식 11바이트 프레임
+ *   2. IR (5B, 종료자 0x0D 0x0A) — 200ms 주기 IR+진동 카운트
+ *   3. NDEF Text (0xD1 0x01 …) — NDEF wrapper 가 있는 NFC 리더
+ *   4. Raw ASCII 텍스트 — NDEF wrapper 없이 NFC 태그 텍스트가 그대로 들어오는
+ *      현행 펌웨어 컨벤션 (예: "le", "left", "1", "right\r\n").
  * 어떤 패턴에도 안 맞으면 null.
+ *
+ * raw ASCII 는 IR 5바이트 패킷과 충돌하지 않는다 — IR 패킷은 byte[3]=0x0D,
+ * byte[4]=0x0A 가 강제되는데 raw 텍스트는 trim 후 1바이트 이상의 printable
+ * 콘텐츠가 있어야 매치되고, IR 종료자 위치의 0x0D/0x0A 가 ASCII 텍스트의
+ * 일부일 가능성은 매우 낮다(앞에 IR 시도가 먼저 매치된다).
  */
 export type LegacyNotifyEvent = TouchEvent | LegacyIrEvent | LegacyNdefTextEvent;
 
@@ -597,7 +649,8 @@ export function tryParseAnyNotifyBytes(bytes: Uint8Array): LegacyNotifyEvent | n
   return (
     tryParseTouchBytes(bytes) ??
     tryParseLegacyIrBytes(bytes) ??
-    tryParseLegacyNdefTextBytes(bytes)
+    tryParseLegacyNdefTextBytes(bytes) ??
+    tryParseLegacyNfcRawTextBytes(bytes)
   );
 }
 

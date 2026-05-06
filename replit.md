@@ -49,6 +49,7 @@ cd shared && npm run build # Must build shared before client
 - **ESM-only Shared Package:** The `@noilink/shared` package is ESM-only (`"type": "module"`), enforcing `import` syntax to prevent runtime errors. A `post-merge.sh` script validates this.
 - **Unified Ranking Source:** User ranking cards (`/api/rankings/user/:userId/card`) derive all 4 stats (compositeScore, totalTimeHours, streakDays, attendanceRate) from the same 14-day window and session data as the main ranking table (`/api/rankings`).
 - **BLE Legacy Mode Toggle:** Supports both current NINA-B1 firmware (legacy mode, default ON) and future NoiPod specification (toggle OFF), with specific encoding/decoding logic for each. Includes a migration for users with old settings.
+- **BLE Notify Parser Order (legacy):** `tryParseAnyNotifyBytes` classifies the 200ms notify stream in priority order: TOUCH (0xA5/0x81 11B) → IR (5B + 0x0D 0x0A) → NDEF Text (0xD1 0x01 …) → **raw ASCII fallback**. The current firmware delivers NFC tag text without an NDEF wrapper (e.g. `0x6C 0x65` = `"le"`), so the raw ASCII fallback is required for NFC input to register. `nfcTextToPod` then maps `"1".."4"` or `"left"/"right"/"up"/"down"` to pod 0..3.
 - **KST-based Date Consistency:** All date-dependent calculations for result comparison, attendance, and rankings use KST (Korean Standard Time) helpers (`shared/kst-date.ts`) to ensure consistency regardless of client device timezones.
 
 ## Product
