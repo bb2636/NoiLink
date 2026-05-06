@@ -1082,10 +1082,20 @@ export class TrainingEngine {
     if (opts?.tickId && opts.tickId > 0 && pod.tickId > 0 && opts.tickId !== pod.tickId) {
       return false; // stale BLE TOUCH
     }
-    // 중복 처리 차단 — 동일 (pod, tickId) 가 BLE notify 중복 도착하는 케이스 보호
-    const expectedTickId = pod.tickId > 0 ? pod.tickId : (opts?.tickId ?? 0);
-    if (expectedTickId > 0) {
-      const key = `${podId}:${expectedTickId}`;
+    // 중복 처리 차단 — 동일 (pod, tickId) 가 BLE notify 중복 도착하는 케이스 보호.
+    //
+    // 이 dedup 은 BLE TOUCH 11B 프레임(`opts.tickId` 명시) 의 네이티브-웹 중복 디스패치
+    // 보호용이다. NFC raw / IR 진동 / 단위 테스트 호출 등 `opts.tickId` 가 없는
+    // 입력은 dedup 에서 제외한다 — 그렇지 않으면 다음 정상 시나리오가 한 번만 채점된다:
+    //   - MEMORY RECALL 에서 같은 Pod 가 시퀀스에 반복 등장 (예: [0,1,0]) → 사용자가
+    //     같은 Pod 를 두 번째로 누르면 pod.tickId 가 같아 dedup 에 막혀 무시됨 →
+    //     mCorrect 가 안 올라가고 점수가 부당하게 낮게 나오던 버그.
+    //   - JUDGMENT YELLOW 더블탭 → 두 번째 탭이 같은 pod.tickId 라 dedup 에 막혀
+    //     `jDoubleHit` 이 절대 올라가지 않음.
+    // BLE TOUCH 는 펌웨어가 한 입력당 한 frame 씩 발행하므로 같은 (pod, tickId) 가
+    // 두 번 도착하는 건 진짜 중복으로 간주해도 안전하다.
+    if (opts?.tickId && opts.tickId > 0) {
+      const key = `${podId}:${opts.tickId}`;
       if (this.consumedTickIds.has(key)) return false;
       this.consumedTickIds.add(key);
       // 장시간 세션에서 무한히 자라지 않도록 상한(8192) 초과 시 가장 오래된 키부터 prune
