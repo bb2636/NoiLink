@@ -5,7 +5,6 @@ import { useHome } from '../hooks/useHome';
 import { useUserStats } from '../hooks/useUserStats';
 import { useNavigate } from 'react-router-dom';
 import Logo from '../components/Logo';
-import { RecoverySection } from '../components/RecoverySection';
 import { getBrainimalIcon, BRAINIMAL_INFO } from '../utils/brainimalIcons';
 import { placeholderImage, fallbackImg } from '../utils/imagePlaceholder';
 import { DEMO_PROFILE } from '../utils/demoProfile';
@@ -352,9 +351,6 @@ function StandardHome({ variant, home, user, streakDays }: StandardProps) {
             ))}
           </div>
         </div>
-
-        {/* BLE 재연결 회복 통계·코칭(Task #37) — 트레이닝 요약 직후 노출 */}
-        <RecoverySection stats={stats.recoveryStats} userId={user?.id ?? null} />
 
         {/* 나의 트렌드 */}
         <h2 className="text-white text-base font-semibold mb-3">나의 트렌드</h2>
