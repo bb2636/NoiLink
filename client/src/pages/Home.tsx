@@ -212,7 +212,7 @@ function StandardHome({ variant, home, user, streakDays }: StandardProps) {
           paddingTop: 'env(safe-area-inset-top)',
         }}
       >
-        <div className="max-w-md mx-auto px-4 h-12 flex items-center justify-between">
+        <div className="max-w-md mx-auto px-4 h-10 flex items-center justify-between">
           <Logo size="md" white />
           <button onClick={() => navigate('/device')} className="text-white text-sm">
             기기 관리 &gt;
@@ -591,7 +591,7 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
           paddingTop: 'env(safe-area-inset-top)',
         }}
       >
-        <div className="max-w-md mx-auto px-4 h-12 flex items-center justify-between">
+        <div className="max-w-md mx-auto px-4 h-10 flex items-center justify-between">
           <Logo size="md" white />
           <button onClick={() => navigate('/device')} className="text-white text-sm">
             기기 관리 &gt;

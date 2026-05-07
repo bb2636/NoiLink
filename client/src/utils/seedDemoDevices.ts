@@ -18,33 +18,21 @@ interface RegisteredDevice {
   registeredAt: string;
 }
 
-const DEMO_DEVICES: RegisteredDevice[] = [
-  {
-    id: 'demo-pod-1',
-    name: 'NoiPod #1',
-    deviceId: 'NINA-DEMO-01',
-    registeredAt: new Date().toISOString(),
-  },
-  {
-    id: 'demo-pod-2',
-    name: 'NoiPod #2',
-    deviceId: 'NINA-DEMO-02',
-    registeredAt: new Date().toISOString(),
-  },
-];
+const DEMO_DEVICE_IDS = ['demo-pod-1', 'demo-pod-2'];
 
 export function ensureDemoDevicesSeeded(): void {
   try {
-    if (localStorage.getItem(SEED_FLAG_KEY) === 'true') return;
-    const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_DEVICES);
-    const list: RegisteredDevice[] = raw ? JSON.parse(raw) : [];
-    if (Array.isArray(list) && list.length > 0) {
-      // 이미 사용자 기기가 있으면 시드를 건너뛰되, 다시 채우지 않도록 플래그만 표시
-      localStorage.setItem(SEED_FLAG_KEY, 'true');
-      return;
-    }
-    localStorage.setItem(STORAGE_KEYS.REGISTERED_DEVICES, JSON.stringify(DEMO_DEVICES));
+    // 데모 시드 비활성화 — 실제 BLE 페어링만 사용.
+    // 과거 시드된 데모 기기(demo-pod-1, demo-pod-2)는 1회 정리해서 제거.
     localStorage.setItem(SEED_FLAG_KEY, 'true');
+    const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_DEVICES);
+    if (!raw) return;
+    const list: RegisteredDevice[] = JSON.parse(raw);
+    if (!Array.isArray(list)) return;
+    const cleaned = list.filter((d) => !DEMO_DEVICE_IDS.includes(d?.id));
+    if (cleaned.length !== list.length) {
+      localStorage.setItem(STORAGE_KEYS.REGISTERED_DEVICES, JSON.stringify(cleaned));
+    }
   } catch {
     /* localStorage 미사용 환경 무시 */
   }
