@@ -847,6 +847,20 @@ export default function TrainingSessionPlay() {
   //   (성공/최종 실패는 이후 outcome 배너로 사용자에게 1회성으로 안내된다.)
   // - 그 외 평범한 취소/뒤로는 안내 배너 없이 조용히 목록으로 돌아간다.
   const leaveToList = () => {
+    // FREE 무제한 모드에서 사용자가 "취소/뒤로" 로 화면을 떠나는 경우에도,
+    // 자동 종료 시점이 없어 그대로 두면 elapsed 가 영영 저장되지 않는다 (Task #154).
+    // 전용 "종료" 버튼과 동일하게 endNow() 를 호출해 onComplete → runSubmit 흐름을
+    // 타도록 하고, 정상적으로 결과 화면으로 이동하게 한다. 이미 메트릭이 산출된
+    // 상태(engineMetrics 존재)면 runSubmit 이 진행 중이거나 곧 트리거될 예정이므로
+    // 추가 호출 없이 그대로 흐름을 보존한다. 제출 실패(err) 분기는 아래의 기존
+    // pending 큐 적재 흐름이 그대로 처리한다.
+    if (isFreeUnlimited && !err && state && !engineMetrics) {
+      const eng = engineRef.current;
+      if (eng) {
+        eng.endNow();
+        return;
+      }
+    }
     if (err && state) {
       try {
         enqueuePendingRun({
