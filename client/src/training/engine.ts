@@ -134,8 +134,21 @@ export interface EnginePhaseInfo {
  *     'SIMUL'      — 모든 선택 pod 동시 점등 (반응 연습)
  */
 export interface EngineFreeConfig {
+  /**
+   * 점등 색상.
+   *  - colorMode === 'SINGLE' (기본) 일 때만 의미가 있다 — 모든 점등이 이 색.
+   *  - 'MULTI' 일 때는 무시되며 5색 팔레트(GREEN/BLUE/YELLOW/RED/WHITE) 가
+   *    pod 별 또는 tick 별로 순환한다.
+   */
   color: LogicColor;
   sequenceMode: 'RANDOM' | 'SEQUENTIAL' | 'SIMUL';
+  /**
+   * 색상 모드 (Task #154).
+   *  - 'SINGLE' (기본): 사용자가 색상 섹션에서 고른 단일 색만 점등.
+   *  - 'MULTI': 5색 팔레트가 순환 점등 — 다양한 색 자극으로 시각 변화 연습.
+   * 미지정이면 'SINGLE' 폴백 (단위 테스트/마이그레이션 호환).
+   */
+  colorMode?: 'SINGLE' | 'MULTI';
   /**
    * 무제한 진행. true 면 startElapsedRaf 가 elapsed 도달로 complete() 를
    * 호출하지 않고, 사용자가 화면에서 "종료" 를 눌러 endNow() 가 호출되어야
@@ -143,6 +156,32 @@ export interface EngineFreeConfig {
    * totalDurationSec 가 갱신되어 서버에 정확한 길이가 저장된다.
    */
   unlimited?: boolean;
+}
+
+/**
+ * FREE MULTI 색상 모드의 5색 팔레트 (Task #154). 점등마다 순환 인덱스로 다음
+ * 색을 고른다. handleTap 의 정답 색 비교가 일어나는 모드가 아니므로 (FREE 는
+ * 채점 자체가 없음) 색 순서/구성은 사용자 시각 자극용으로만 의미가 있다.
+ */
+const FREE_MULTI_COLOR_PALETTE: ReadonlyArray<LogicColor> = [
+  'GREEN', 'BLUE', 'YELLOW', 'RED', 'WHITE',
+];
+
+/**
+ * BLE SESSION write 의 `durationSec` 가 펌웨어 u16 (max 65535s ≈ 18.2h) 임을
+ * 고려해 안전 상한을 둔다. FREE 무제한 모드는 totalDurationMs 를
+ * Number.MAX_SAFE_INTEGER 로 받아 자동 종료를 차단하지만, 그 값을 그대로
+ * Math.round(/1000) 하면 u16 오버플로우/wraparound 가 발생해 펌웨어가 거부할
+ * 위험이 있다. 펌웨어가 받은 durationSec 는 자동 종료 신호일 뿐이고 클라이언트
+ * 엔진이 endNow() 로 세션을 끝내므로, 안전한 최대값(SESSION_MAX_MS=300s) 을
+ * 보내고 만료 직전에 다시 START 프레임을 보낼 필요는 없다 — 사용자가 자발적
+ * 종료할 때까지 펌웨어 측 자동 종료는 사실상 의미가 없으며, 안전 상한은
+ * "프로토콜 위반을 일으키지 않을 만큼 큰 합리적 값" 으로 충분하다.
+ */
+function clampDurationSecForBle(durationMs: number): number {
+  const sec = Math.round(durationMs / 1000);
+  if (!Number.isFinite(sec) || sec < 0) return 1;
+  return Math.min(sec, 65535);
 }
 
 export interface EngineConfig {
@@ -325,6 +364,9 @@ export class TrainingEngine {
    * RANDOM/SIMUL 분기에서는 사용하지 않는다.
    */
   private freeSeqCursor = 0;
+  // FREE colorMode='MULTI' 의 5색 팔레트 순환 인덱스 (Task #154). pod 별로 다음
+  // 색을 결정하므로 SIMUL 분기에서는 한 tick 안에 nPods 번 증가한다.
+  private freeMultiCursor = 0;
   private currentRule: LogicColor = 'GREEN';
   private rhythmStep = 0;
   private memoryQueue: number[] = []; // 현재 보여줄 시퀀스
@@ -471,7 +513,7 @@ export class TrainingEngine {
           bpm: clampBpmForBle(this.cfg.bpm),
           level: this.cfg.level,
           phase: firstPhase,
-          durationSec: Math.round(first.durationMs / 1000),
+          durationSec: clampDurationSecForBle(first.durationMs),
         });
       }
       safeBleWriteControl(CTRL_START);
@@ -490,10 +532,15 @@ export class TrainingEngine {
         bpm: clampBpmForBle(this.cfg.bpm),
         level: this.cfg.level,
         phase: SESSION_PHASE_COGNITIVE,
-        durationSec: Math.round(this.cfg.totalDurationMs / 1000),
+        durationSec: clampDurationSecForBle(this.cfg.totalDurationMs),
       });
       safeBleWriteControl(CTRL_START);
       this.cfg.onPhaseChange({ phase: 'COGNITIVE', cognitiveMode: this.currentCognitiveMode, cycleIndex: 0 });
+      // FREE 무제한 모드는 totalDurationMs=MAX_SAFE_INTEGER 로 들어와 startTickLoop
+      // 의 elapsedInPhase>=duration 분기가 사실상 트리거되지 않는다 (timer cleanup
+      // 도 동일하게 큰 값까지 살아 있어 수동 endNow() 까지 fireFreeTick 이 계속
+      // 발사된다). NaN/overflow 우려는 위 clampDurationSecForBle 가 BLE 송신
+      // 단계에서만 65535 로 캡해 차단.
       this.startTickLoop(this.cfg.totalDurationMs);
     }
 
@@ -776,7 +823,7 @@ export class TrainingEngine {
         bpm: clampBpmForBle(this.cfg.bpm),
         level: this.cfg.level,
         phase: blePhase,
-        durationSec: Math.round(seg.durationMs / 1000),
+        durationSec: clampDurationSecForBle(seg.durationMs),
       });
     }
     this.startTickLoop(seg.durationMs, () => {
@@ -1184,6 +1231,16 @@ export class TrainingEngine {
     const nPods = this.cfg.podCount;
     if (nPods <= 0) return;
     const onMs = beatMs * 0.9;
+    // FREE 색상 모드 (Task #154): 'MULTI' 면 5색 팔레트가 순환, 'SINGLE'(기본)
+    // 이면 cfg.color 단일 색만 사용. nextColor() 는 호출마다 다음 색을 발사하므로
+    // SIMUL 분기는 pod 별로 호출해 pod 마다 다른 색이 동시 점등되도록 한다.
+    const colorMode = cfg.colorMode ?? 'SINGLE';
+    const nextColor = (): LogicColor => {
+      if (colorMode !== 'MULTI') return cfg.color;
+      const c = FREE_MULTI_COLOR_PALETTE[this.freeMultiCursor % FREE_MULTI_COLOR_PALETTE.length];
+      this.freeMultiCursor = (this.freeMultiCursor + 1) % FREE_MULTI_COLOR_PALETTE.length;
+      return c;
+    };
     // FREE 는 점수 산출이 없는 연습 모드 — `isTarget=false` 로 점등해
     // `lightSinglePod` 의 미응답 timeout 분기에서 `recordOmission` 이
     // 트리거되지 않게 한다. handleTap 도 FREE case 가 없어 채점 누적기를
@@ -1196,8 +1253,9 @@ export class TrainingEngine {
       const onMsClamped = Math.min(0xffff, Math.round(onMs));
       this.pods = this.pods.map(p => {
         const tickId = this.nextTickId();
-        safeBleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode(cfg.color), onMs: onMsClamped });
-        return { ...p, fill: cfg.color, isTarget: false, litAt: now, expiresAt, tickId };
+        const c = nextColor();
+        safeBleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode(c), onMs: onMsClamped });
+        return { ...p, fill: c, isTarget: false, litAt: now, expiresAt, tickId };
       });
       this.cfg.onPodStates(this.pods);
       this.schedule(() => this.allOff(), onMs);
@@ -1211,7 +1269,7 @@ export class TrainingEngine {
       // RANDOM (또는 SIMUL with nPods=1)
       podId = Math.floor(Math.random() * nPods);
     }
-    this.lightSinglePod(podId, cfg.color, onMs, false);
+    this.lightSinglePod(podId, nextColor(), onMs, false);
   }
 
   private flashAll(color: LogicColor, ms: number): void {

@@ -203,6 +203,9 @@ export default function TrainingSetup() {
   // 화면/엔진 어디에도 흘려보내지 않으므로 영향 없음.
   const [freeSequenceMode, setFreeSequenceMode] =
     useState<EngineFreeConfig['sequenceMode']>('RANDOM');
+  // 색상 모드: 단색(=색상 섹션에서 고른 한 가지) / 멀티(=5색 팔레트 순환)
+  const [freeColorMode, setFreeColorMode] =
+    useState<NonNullable<EngineFreeConfig['colorMode']>>('SINGLE');
   const [freeDurationSec, setFreeDurationSec] = useState<number>(60);
   const isFreeUnlimited = isFree && freeDurationSec === FREE_UNLIMITED_SENTINEL;
 
@@ -250,6 +253,7 @@ export default function TrainingSetup() {
             freeConfig: {
               color: COLOR_ID_TO_LOGIC[color] ?? 'GREEN',
               sequenceMode: freeSequenceMode,
+              colorMode: freeColorMode,
               ...(isFreeUnlimited ? { unlimited: true } : {}),
             },
             // FREE 는 사용자가 실제로 연결·선택한 Pod 수만 점등 대상으로
@@ -448,6 +452,33 @@ export default function TrainingSetup() {
               세션 길이를 선택할 수 있다. 색상은 위 색상 섹션을 그대로 재사용. */}
         {isFree && (
           <>
+            <section className="mb-6">
+              <h2 className="text-sm font-semibold text-white mb-3">색상 모드</h2>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { id: 'SINGLE', label: '단색', desc: '위에서 고른 한 색' },
+                  { id: 'MULTI',  label: '멀티', desc: '5색 팔레트 순환' },
+                ] as const).map((opt) => {
+                  const selected = freeColorMode === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => setFreeColorMode(opt.id)}
+                      className="rounded-xl px-3 py-3 text-left transition-all"
+                      style={{
+                        backgroundColor: selected ? '#AAED10' : '#1A1A1A',
+                        color: selected ? '#000' : '#CCC',
+                        border: selected ? 'none' : '1.5px solid #2A2A2A',
+                      }}
+                    >
+                      <div className="text-sm font-semibold">{opt.label}</div>
+                      <div className="text-[11px] opacity-80 mt-0.5">{opt.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
             <section className="mb-6">
               <h2 className="text-sm font-semibold text-white mb-3">진행 방식</h2>
               <div className="grid grid-cols-3 gap-2">

@@ -106,6 +106,7 @@ export type TrainingRunState = {
    * 미지정이면 엔진이 `{ color: 'GREEN', sequenceMode: 'RANDOM' }` 폴백.
    */
   freeConfig?: import('../training/engine').EngineFreeConfig;
+  // 위 import 타입에 colorMode/unlimited/sequenceMode/color 가 모두 포함되므로 별도 필드 없음.
   /**
    * FREE 모드에서 사용자가 setup 화면에서 선택한 Pod 수. 다른 모드는 항상 4
    * (펌웨어 LED 4채널 전제) 로 고정. FREE 만 사용자가 1~4 사이로 선택할 수
@@ -782,6 +783,16 @@ export default function TrainingSessionPlay() {
         // 부족" 배너를 ENDURANCE 모드에서만 띄울 수 있게 모드와 표본 수를 전달.
         apiMode: state.apiMode,
         enduranceLateSampleCount: metrics?.endurance?.lateSampleCount,
+        // FREE 결과 화면 — 사용자가 실제 진행한 시간/입력 횟수(Task #154).
+        // 다른 모드는 점수가 있어 별도 표시가 필요 없으므로 FREE 일 때만 채움.
+        ...(state.apiMode === 'FREE'
+          ? {
+              freeDurationSec: isFreeUnlimited
+                ? Math.max(0, Math.ceil(elapsedMsRef.current / 1000))
+                : totalSec,
+              freeTapCount: tapCount,
+            }
+          : {}),
       },
     });
   }, [state, totalSec, tapCount, navigate]);

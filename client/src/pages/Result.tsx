@@ -83,6 +83,15 @@ export type TrainingResultState = {
    * 일반(첫 응답) 흐름에서는 undefined 로 안내가 뜨지 않는다.
    */
   replayed?: boolean;
+  /**
+   * FREE 모드 결과 화면용 — 사용자가 실제로 진행한 시간(초). 무제한 진행 시
+   * 사용자가 종료 버튼을 누른 시점의 elapsed 가 들어온다 (Task #154).
+   */
+  freeDurationSec?: number;
+  /**
+   * FREE 모드 결과 화면용 — 사용자가 실제로 두드린 횟수 (Task #154).
+   */
+  freeTapCount?: number;
 };
 
 /** 회복이 N회 이상 발생하면 환경 점검 안내를 추가로 노출 (Task #36). */
@@ -356,13 +365,30 @@ export default function Result() {
 
   // 점수 산출이 없는 트레이닝 (자유 트레이닝 등)
   if (hasPayload && state?.yieldsScore === false) {
+    // 수행 시간/입력 횟수 표시 (Task #154). 페이로드에 안 실려 온 과거 호출
+    // 호환은 0으로 폴백 — 그래도 점수 없음 메시지는 그대로 노출.
+    const freeSec = Math.max(0, Math.round(state?.freeDurationSec ?? 0));
+    const mm = Math.floor(freeSec / 60);
+    const ss = freeSec % 60;
+    const freeDurationLabel = mm > 0 ? `${mm}분 ${ss}초` : `${ss}초`;
+    const freeTaps = Math.max(0, state?.freeTapCount ?? 0);
     return (
       <MobileLayout>
         <div className="max-w-md mx-auto px-4 pb-12 text-center" style={{ paddingTop: 'calc(3rem + env(safe-area-inset-top))' }}>
           <h1 className="text-2xl font-bold text-white mb-3">수고했어요!</h1>
-          <p className="text-gray-300 mb-8 text-sm">
+          <p className="text-gray-300 mb-6 text-sm">
             자유 트레이닝은 점수를 산출하지 않습니다.<br />합계 시간·스트릭에만 반영됩니다.
           </p>
+          <div className="grid grid-cols-2 gap-3 mb-8">
+            <div className="rounded-2xl px-4 py-5" style={{ backgroundColor: '#1A1A1A', border: '1px solid #2A2A2A' }}>
+              <div className="text-[11px] text-gray-400 mb-1">수행 시간</div>
+              <div className="text-xl font-bold text-white">{freeDurationLabel}</div>
+            </div>
+            <div className="rounded-2xl px-4 py-5" style={{ backgroundColor: '#1A1A1A', border: '1px solid #2A2A2A' }}>
+              <div className="text-[11px] text-gray-400 mb-1">두드린 횟수</div>
+              <div className="text-xl font-bold text-white">{freeTaps}회</div>
+            </div>
+          </div>
           <div className="space-y-3">
             <button
               onClick={() => navigate('/training')}

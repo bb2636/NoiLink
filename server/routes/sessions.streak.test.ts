@@ -123,6 +123,25 @@ describe('POST /api/sessions — KST 기준 streak 갱신 (Task #152)', () => {
     expect(store.users[0].lastTrainingDate).toBe(firstLast);
   });
 
+  it('FREE 모드 세션도 streak/lastTrainingDate 갱신을 트리거한다 (Task #154)', async () => {
+    // FREE 는 점수 산출이 없는 자유 트레이닝이라 score 가 빠진 페이로드를 보낸다.
+    // 이 분기에서도 동일하게 KST 기준 streak 가 누적되어야 — 그래야 "쉬운 자유
+    // 연습으로도 출석 streak 을 이어갈 수 있다" 는 사용자 흐름이 깨지지 않는다.
+    const app = buildApp();
+    const FREE_PAYLOAD = { ...PAYLOAD, mode: 'FREE', isComposite: false };
+
+    // KST 04-24 → 04-25 연속 (UTC 같은 04-24 일자에 묶이는 경계)
+    vi.setSystemTime(new Date('2026-04-24T14:00:00.000Z'));
+    await request(app).post('/api/sessions').send(FREE_PAYLOAD).expect(201);
+    expect(store.users[0].streak).toBe(1);
+
+    vi.setSystemTime(new Date('2026-04-24T16:00:00.000Z'));
+    await request(app).post('/api/sessions').send(FREE_PAYLOAD).expect(201);
+    expect(store.users[0].streak).toBe(2);
+    expect(store.users[0].bestStreak).toBe(2);
+    expect(store.users[0].lastTrainingDate).toBe('2026-04-24T16:00:00.000Z');
+  });
+
   it('KST 기준 하루를 건너뛰면 streak 가 1 로 리셋되고 bestStreak 는 그대로 보관된다', async () => {
     const app = buildApp();
 
