@@ -353,6 +353,37 @@ export class TrainingEngine {
    *     원래대로 유지).
    */
   private currentPhaseScheduleBased = false;
+  /**
+   * AGILITY(=멀티태스킹) 동시(simul) 자극 진행 상태.
+   *
+   * 명세 F. 멀티태스킹 (Lv4+): GREEN 앵커(손) 와 BLUE/YELLOW(발) 가 같은 tick 에 함께
+   * 점등될 때, "두 채널 모두 윈도우 안에 정확히 입력" 되어야만 동시성공(`aSimulHit`)
+   * 으로 인정한다. 그 동안 한 채널 입력이 도달했다고 해서 `allOff()` 로 다른 pod 까지
+   * 꺼버리면 두 번째 채널이 영영 입력될 수 없어 명세상 동시성공이 구조적으로 불가능
+   * 해진다.
+   *
+   * 동작:
+   *  - `fireAgilityTick` simul 분기에서 lit 된 두 pod id 를 Set 으로 기록한다.
+   *  - `handleAgilityTap` 가 정확 채널 입력을 받으면 set 에서 그 pod 를 제거하고:
+   *    - 비면 → `aSimulHit++` + state clear → `handleTap` 끝의 `allOff()` 진행.
+   *    - 남으면 → 입력 pod 만 단일 OFF, 다른 pod 는 lit 유지 → `allOff()` 스킵.
+   *  - 채널 침범(cross-channel) 입력이 들어오면 simul state 를 무효화 — 두 pod 모두
+   *    종료(allOff) 하고 `aCrossChannelErrors++` (동시성공도 자연 실패).
+   *  - simul 윈도우 만료 시(`schedule()` 로 예약) 자동 clear — 미입력으로 자연 실패.
+   *
+   * `null` 이면 simul 미진행 (단일 자극 또는 simul 완료 후).
+   */
+  private agilitySimulPending: Set<number> | null = null;
+  /**
+   * `agilitySimulPending` 의 원본 simul tick 식별 토큰. simul 자극이 시작될 때마다
+   * 증가하며, 윈도우 만료 cleanup 콜백은 이 토큰이 일치할 때만 state 를 비운다.
+   *
+   * 이유: simul cleanup 은 `schedule(simulOnMs+50)` 으로 예약되는데, 다음 tick 이
+   * `beatMs` 에 시작되므로 이전 cleanup 이 새 simul 자극의 pending set 을 잘못
+   * 비울 수 있다(레이스). 토큰 가드가 없으면 두 번째 채널 입력 요건이 우회되어
+   * `aSimulHit` 가 1 채널만으로도 카운트되는 회귀가 되살아난다.
+   */
+  private agilitySimulSeq = 0;
 
   constructor(cfg: EngineConfig) {
     this.cfg = cfg;
@@ -371,6 +402,9 @@ export class TrainingEngine {
     this.startedAt = Date.now();
     this.acc = emptyAcc();
     this.consumedTickIds.clear();
+    // 이전 인스턴스/세션의 잔여 simul state 가 새 세션 첫 입력을 잘못 simul 로 분류하지
+    // 않도록 명시적으로 비운다.
+    this.agilitySimulPending = null;
     // 같은 인스턴스를 재시작(restart)하는 경우 이전 세션의 COMPREHENSION 잔여 카운터가
     // 새 세션 첫 tick 의 RED 풀에 영향 주지 않도록 명시적으로 0 으로 되돌린다.
     this.cNoMixedUntilTicks = 0;
@@ -821,6 +855,10 @@ export class TrainingEngine {
     }
     this.pendingTimers.forEach((t) => window.clearTimeout(t));
     this.pendingTimers = [];
+    // simul 윈도우 cleanup 타이머도 함께 cancel 됐으므로, 진행 중이던 동시 자극의
+    // pending set 을 명시적으로 비운다. 그렇지 않으면 resume 후 다음 단일 자극이
+    // 잘못 simul 로 분류되어 한 번의 정확 입력만으로 `aSimulHit` 가 누적된다.
+    this.agilitySimulPending = null;
     // 펌웨어에 정지 통보 — 재개 시 다시 START 를 보낼 것이다.
     safeBleWriteControl(CTRL_STOP);
     this.pausedAt = Date.now();
@@ -1002,11 +1040,26 @@ export class TrainingEngine {
     const allowSimul = this.cfg.level >= 4;
     const r = Math.random();
     if (allowSimul && r < 0.25) {
-      // 동시: GREEN + BLUE
+      // 동시: GREEN(pod 1, 손) + BLUE(pod 0, 오른발). 두 채널 모두 정확 입력해야 simul 성공.
       this.acc.aSimulCount += 1;
       this.acc.aHandCount += 1;
       this.acc.aFootCount += 1;
-      this.lightTwoPods(1, 'GREEN', 0, 'BLUE', beatMs * 1.0, true);
+      const simulOnMs = beatMs * 1.0;
+      this.agilitySimulSeq += 1;
+      const mySeq = this.agilitySimulSeq;
+      this.agilitySimulPending = new Set<number>([1, 0]);
+      this.lightTwoPods(1, 'GREEN', 0, 'BLUE', simulOnMs, true);
+      // 윈도우 만료까지 두 번째 채널이 도달하지 않으면 simul state 를 자동 정리한다.
+      // (만료 시점에 lightTwoPods 의 expiresAt 으로 LED 는 자연 OFF — handleTap 의
+      //  OFF 가드가 후속 입력을 막는다. 여기서는 simul state 만 비워서 다음 tick 의
+      //  단일 자극 입력이 잘못 simul 로 분류되지 않도록 한다.)
+      // 토큰 가드: 이 cleanup 이 fire 될 때 더 새 simul 이 이미 시작됐다면 새 set
+      // 을 비우지 않는다 — 새 simul 의 두 번째 채널 입력 요건이 우회되는 race 방지.
+      this.schedule(() => {
+        if (this.agilitySimulPending && this.agilitySimulSeq === mySeq) {
+          this.agilitySimulPending = null;
+        }
+      }, simulOnMs + 50);
       return;
     }
     if (r < 0.5) {
@@ -1195,9 +1248,13 @@ export class TrainingEngine {
       case 'JUDGMENT':
         this.handleJudgmentTap(pod, now, isDoubleTap, opts?.deltaMs);
         break;
-      case 'AGILITY':
-        this.handleAgilityTap(pod, now, opts?.deltaMs, opts?.source);
+      case 'AGILITY': {
+        const keepOtherPodLit = this.handleAgilityTap(pod, now, opts?.deltaMs, opts?.source);
+        // 동시(simul) 자극에서 다른 채널 입력을 아직 기다리는 중이면 다른 pod 의 LED 를
+        // allOff() 로 꺼서는 안 된다 — 명세 F 의 동시성공 윈도우를 구조적으로 보장.
+        if (keepOtherPodLit) return true;
         break;
+      }
       case 'MEMORY':
         this.handleMemoryTap(pod, now);
         break;
@@ -1284,7 +1341,14 @@ export class TrainingEngine {
     }
   }
 
-  private handleAgilityTap(pod: PodState, now: number, deltaMs?: number, source?: 'touch' | 'nfc'): void {
+  /**
+   * AGILITY(=멀티태스킹) 입력 한 건을 처리한다.
+   *
+   * @returns `true` 면 동시(simul) 자극에서 다른 채널 입력을 아직 기다리는 중이므로
+   *          호출자(`handleTap`)가 `allOff()` 를 스킵해야 한다. `false` 면 자극이
+   *          완료/실패 — `allOff()` 로 모든 pod 를 끈다.
+   */
+  private handleAgilityTap(pod: PodState, now: number, deltaMs?: number, source?: 'touch' | 'nfc'): boolean {
     const rt = this.rtFromTap(pod, now, deltaMs);
     this.acc.aRTs.push(rt);
     const isHand = pod.fill === 'GREEN';
@@ -1299,13 +1363,30 @@ export class TrainingEngine {
       (isFoot && source === 'nfc');
     if (!channelOk) {
       this.acc.aCrossChannelErrors += 1;
-      return;
+      // 동시 자극 진행 중이었으면 무효화 — 다른 채널까지 일괄 종료(=동시성공 실패).
+      this.agilitySimulPending = null;
+      return false;
     }
     if (isHand) this.acc.aHandHit += 1;
     else if (isFoot) this.acc.aFootHit += 1;
-    // 동시 이벤트 케이스: 다른 Pod도 켜져 있으면 simul 성공
-    const other = this.pods.find(p => p.id !== pod.id && p.fill !== 'OFF');
-    if (other) this.acc.aSimulHit += 1;
+    // 동시(simul) 자극 진행 중이면 두 채널 모두 정확 입력될 때까지 자극을 유지한다.
+    if (this.agilitySimulPending && this.agilitySimulPending.has(pod.id)) {
+      this.agilitySimulPending.delete(pod.id);
+      if (this.agilitySimulPending.size === 0) {
+        // 두 채널 모두 정확 입력 — 동시성공.
+        this.acc.aSimulHit += 1;
+        this.agilitySimulPending = null;
+        return false;
+      }
+      // 한 채널만 입력 완료 — 입력 pod 만 단일 OFF, 다른 pod 는 lit 유지.
+      this.bleOffPod(pod.id, pod.tickId);
+      this.pods = this.pods.map(p =>
+        p.id === pod.id ? { ...p, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null, tickId: 0 } : p
+      );
+      this.cfg.onPodStates(this.pods);
+      return true;
+    }
+    return false;
   }
 
   private handleMemoryTap(pod: PodState, now: number): void {

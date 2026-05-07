@@ -224,8 +224,11 @@ describe('TrainingEngine: allOff 경로(destroy)가 모든 점등 Pod에 OFF 프
     expect(mockedWriteControl).toHaveBeenCalledWith(CTRL_STOP);
   });
 
-  it('AGILITY Lv4 동시 점등 → 탭 처리 후 두 Pod 모두 OFF 프레임이 송신된다', () => {
-    // fireAgilityTick: allowSimul && r < 0.25 분기 (BLUE+GREEN 두 Pod 점등)
+  it('AGILITY Lv4 동시 점등 → 두 채널 모두 정확 입력되면 두 Pod 모두 OFF 프레임이 송신된다', () => {
+    // fireAgilityTick: allowSimul && r < 0.25 분기 (GREEN(pod 1) + BLUE(pod 0) 두 Pod 점등)
+    // 명세 F. 멀티태스킹: 두 채널(손=Touch/GREEN, 발=NFC/BLUE) 모두 윈도우 안에 정확
+    // 입력되어야 동시성공. 첫 입력만으로 다른 pod 까지 끄면 두 번째 채널이 영영 입력될
+    // 수 없어 명세상 동시성공이 구조적으로 불가능해진다.
     const seq = [0.1]; // 첫 random < 0.25 → 동시 점등 분기
     let i = 0;
     vi.spyOn(Math, 'random').mockImplementation(() => seq[i++ % seq.length]);
@@ -238,16 +241,22 @@ describe('TrainingEngine: allOff 경로(destroy)가 모든 점등 Pod에 OFF 프
     const snap = bag.podStates[bag.podStates.length - 1];
     const litPods = snap.filter((p) => p.fill !== 'OFF');
     expect(litPods.length).toBe(2);
+    const greenPod = litPods.find((p) => p.fill === 'GREEN')!;
+    const bluePod = litPods.find((p) => p.fill === 'BLUE')!;
 
-    // 한쪽 Pod 탭 → handleTap 후 allOff() 가 두 Pod 모두 OFF 송신
-    engine.handleTap(litPods[0].id);
+    // 첫 채널: 발(NFC) → 발 pod 만 OFF, 손 pod 는 lit 유지 (다른 채널 대기).
+    engine.handleTap(bluePod.id, { source: 'nfc' });
+    let offs = offCalls();
+    let offPods = new Set(offs.map((o) => o.pod));
+    expect(offPods.has(bluePod.id)).toBe(true);
+    expect(offPods.has(greenPod.id)).toBe(false);
 
-    const offs = offCalls();
-    // 두 점등 Pod 모두에 대해 OFF 프레임 송신
-    const offPods = new Set(offs.map((o) => o.pod));
-    expect(offPods.has(litPods[0].id)).toBe(true);
-    expect(offPods.has(litPods[1].id)).toBe(true);
-    // 모두 OFF 컨벤션
+    // 둘째 채널: 손(Touch) → 동시성공 + allOff 로 손 pod 도 OFF.
+    engine.handleTap(greenPod.id, { source: 'touch' });
+    offs = offCalls();
+    offPods = new Set(offs.map((o) => o.pod));
+    expect(offPods.has(greenPod.id)).toBe(true);
+    expect(offPods.has(bluePod.id)).toBe(true);
     for (const o of offs) {
       expect(o.colorCode).toBe(COLOR_CODE.OFF);
       expect(o.onMs).toBe(0);
