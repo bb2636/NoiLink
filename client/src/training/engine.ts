@@ -37,6 +37,29 @@ import {
 import { bleWriteControl, bleWriteLed, bleWriteSession } from '../native/bleBridge';
 
 /**
+ * Task #150 — BLE 송신 throw 가 트레이닝 흐름(특히 Composite 의 start →
+ * runNextPlan → fireTick 루프)을 중단시키지 못하게 하는 방어선.
+ *
+ * 사용자 보고: 종합트레이닝(5분) 시작 시 처음부터 끝까지 점등 0건 + 입력 카운터
+ * 0건. 단위 테스트로 Composite 정상 흐름은 모두 통과 → 코드 로직은 OK 였고,
+ * 실제 회귀는 사용자 환경에서 BLE write 가 throw 하여 start() 가 도중에 끊긴
+ * 시나리오로 좁혀졌다 (handleTap 의 OFF 가드 때문에 점등이 안 일어나면 입력
+ * 카운터까지 0 으로 보임).
+ *
+ * native 미연결 환경에서는 어차피 no-op 이고, 연결 환경에서도 BLE 전송 실패가
+ * 트레이닝 채점/시각화 흐름을 막아서는 안 되므로 모든 호출을 try/catch 로 감싼다.
+ */
+function safeBleWriteSession(p: Parameters<typeof bleWriteSession>[0]): void {
+  try { bleWriteSession(p); } catch { /* swallow — 트레이닝 흐름 보호 */ }
+}
+function safeBleWriteControl(p: Parameters<typeof bleWriteControl>[0]): void {
+  try { bleWriteControl(p); } catch { /* swallow */ }
+}
+function safeBleWriteLed(p: Parameters<typeof bleWriteLed>[0]): void {
+  try { bleWriteLed(p); } catch { /* swallow */ }
+}
+
+/**
  * START(`aa 55`) 송신 직후 첫 LED 명령까지의 마진(ms).
  *
  * 사용자 NINA-B1 펌웨어 같은 NUS 계열은 START 처리에 시간이 필요한데, 이 마진이
@@ -356,25 +379,29 @@ export class TrainingEngine {
       if (first) {
         const firstPhase = first.type === 'RHYTHM' ? SESSION_PHASE_RHYTHM : SESSION_PHASE_COGNITIVE;
         this.currentBlePhase = firstPhase;
-        bleWriteSession({
+        // Task #150 — BLE 송신이 throw 해도 runNextPlan() 진입을 막지 못하게 한다.
+        // (사용자 보고: 종합트레이닝 시작 시 첫 점등이 한 번도 안 일어남 → handleTap
+        //  의 OFF 가드에 모든 입력이 막혀 카운터까지 0. 환경 의존 throw 가 start() 흐름을
+        //  중단시키는 회귀 시나리오를 영구 차단.)
+        safeBleWriteSession({
           bpm: clampBpmForBle(this.cfg.bpm),
           level: this.cfg.level,
           phase: firstPhase,
           durationSec: Math.round(first.durationMs / 1000),
         });
       }
-      bleWriteControl(CTRL_START);
+      safeBleWriteControl(CTRL_START);
       this.runNextPlan();
     } else {
       this.currentCognitiveMode = this.cfg.mode === 'FREE' ? 'FOCUS' : this.cfg.mode;
       this.currentBlePhase = SESSION_PHASE_COGNITIVE;
-      bleWriteSession({
+      safeBleWriteSession({
         bpm: clampBpmForBle(this.cfg.bpm),
         level: this.cfg.level,
         phase: SESSION_PHASE_COGNITIVE,
         durationSec: Math.round(this.cfg.totalDurationMs / 1000),
       });
-      bleWriteControl(CTRL_START);
+      safeBleWriteControl(CTRL_START);
       this.cfg.onPhaseChange({ phase: 'COGNITIVE', cognitiveMode: this.currentCognitiveMode, cycleIndex: 0 });
       this.startTickLoop(this.cfg.totalDurationMs);
     }
@@ -421,7 +448,7 @@ export class TrainingEngine {
           this.bleOffPod(p.id, p.tickId);
         }
       }
-      bleWriteControl(CTRL_STOP);
+      safeBleWriteControl(CTRL_STOP);
     }
     this.destroyed = true;
     if (this.rafId) window.cancelAnimationFrame(this.rafId);
@@ -575,7 +602,7 @@ export class TrainingEngine {
       const now = Date.now();
       this.pods = this.pods.map(p => {
         const tickId = this.nextTickId();
-        bleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode('WHITE'), onMs: recallWindow });
+        safeBleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode('WHITE'), onMs: recallWindow });
         return { ...p, fill: 'WHITE', isTarget: true, litAt: now, expiresAt: now + recallWindow, tickId };
       });
       this.cfg.onPodStates(this.pods);
@@ -644,7 +671,7 @@ export class TrainingEngine {
     const blePhase = seg.type === 'RHYTHM' ? SESSION_PHASE_RHYTHM : SESSION_PHASE_COGNITIVE;
     if (blePhase !== this.currentBlePhase) {
       this.currentBlePhase = blePhase;
-      bleWriteSession({
+      safeBleWriteSession({
         bpm: clampBpmForBle(this.cfg.bpm),
         level: this.cfg.level,
         phase: blePhase,
@@ -746,6 +773,12 @@ export class TrainingEngine {
     this.currentTickFire = fireTick;
     // 첫 tick은 살짝 딜레이(준비). 디바이스 점등 진단의 START→LED 마진과 동일하게 두어
     // NUS 계열 펌웨어가 START(`aa 55`) 를 처리할 충분한 시간을 보장한다.
+    // Task #150 — 직전 페이즈의 tickTimer 가 살아있으면 cancel. runNextPlan 으로
+    // 페이즈가 빠르게 전환될 때 두 fireTick 루프가 겹치는 것을 막는다.
+    if (this.tickTimer) {
+      window.clearTimeout(this.tickTimer);
+      this.tickTimer = null;
+    }
     this.tickTimer = window.setTimeout(fireTick, FIRST_TICK_DELAY_MS);
   }
 
@@ -778,7 +811,7 @@ export class TrainingEngine {
     this.pendingTimers.forEach((t) => window.clearTimeout(t));
     this.pendingTimers = [];
     // 펌웨어에 정지 통보 — 재개 시 다시 START 를 보낼 것이다.
-    bleWriteControl(CTRL_STOP);
+    safeBleWriteControl(CTRL_STOP);
     this.pausedAt = Date.now();
     this.isPaused = true;
   }
@@ -804,7 +837,7 @@ export class TrainingEngine {
     this.isPaused = false;
     this.pausedAt = 0;
     // 펌웨어 재시작 — pause 시점에 STOP 을 보냈으므로 다시 START 가 필요하다.
-    bleWriteControl(CTRL_START);
+    safeBleWriteControl(CTRL_START);
     // elapsed RAF 재시작.
     this.startElapsedRaf();
     // 자극 루프 재개 — 남은 phase 시간이 양수면 다음 fireTick 을 setTimeout 으로 발사.
@@ -989,7 +1022,7 @@ export class TrainingEngine {
     const tickId = lastTickId > 0 ? lastTickId : this.nextTickId();
     // OFF 프레임은 손실되면 잔상이 남으므로 ack 보장(withResponse) 모드로 송신.
     // 일반 점등 프레임은 저지연 우선이라 기본 'auto'를 유지한다.
-    bleWriteLed({
+    safeBleWriteLed({
       tickId,
       pod: podId,
       colorCode: COLOR_CODE.OFF,
@@ -1014,7 +1047,7 @@ export class TrainingEngine {
     // 입력을 받지 않는 시각 신호이므로 BLE는 동기 송신만 (tickId는 부여하지만 consume 추적 X)
     this.pods = this.pods.map(p => {
       const tickId = this.nextTickId();
-      bleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode(color), onMs: ms });
+      safeBleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode(color), onMs: ms });
       return { ...p, fill: color, isTarget: false, litAt: null, expiresAt: null, tickId: 0 };
     });
     this.cfg.onPodStates(this.pods);
@@ -1025,7 +1058,7 @@ export class TrainingEngine {
     const now = Date.now();
     const expiresAt = now + windowMs;
     const tickId = this.nextTickId();
-    bleWriteLed({ tickId, pod: podId, colorCode: logicColorToCode(color), onMs: Math.min(0xffff, Math.round(windowMs)) });
+    safeBleWriteLed({ tickId, pod: podId, colorCode: logicColorToCode(color), onMs: Math.min(0xffff, Math.round(windowMs)) });
     this.pods = this.pods.map(p =>
       p.id === podId
         ? { ...p, fill: color, isTarget, litAt: now, expiresAt, tickId }
@@ -1048,8 +1081,8 @@ export class TrainingEngine {
     const tickIdA = this.nextTickId();
     const tickIdB = this.nextTickId();
     const onMsClamped = Math.min(0xffff, Math.round(windowMs));
-    bleWriteLed({ tickId: tickIdA, pod: idA, colorCode: logicColorToCode(colorA), onMs: onMsClamped });
-    bleWriteLed({ tickId: tickIdB, pod: idB, colorCode: logicColorToCode(colorB), onMs: onMsClamped });
+    safeBleWriteLed({ tickId: tickIdA, pod: idA, colorCode: logicColorToCode(colorA), onMs: onMsClamped });
+    safeBleWriteLed({ tickId: tickIdB, pod: idB, colorCode: logicColorToCode(colorB), onMs: onMsClamped });
     this.pods = this.pods.map(p => {
       if (p.id === idA) return { ...p, fill: colorA, isTarget, litAt: now, expiresAt, tickId: tickIdA };
       if (p.id === idB) return { ...p, fill: colorB, isTarget, litAt: now, expiresAt, tickId: tickIdB };
@@ -1321,7 +1354,7 @@ export class TrainingEngine {
     if (this.phaseTimer) window.clearTimeout(this.phaseTimer);
     this.allOff();
     // BLE 정상 종료 (bleWriteControl는 native 미연결 시 자동 no-op)
-    bleWriteControl(CTRL_STOP);
+    safeBleWriteControl(CTRL_STOP);
     this.cfg.onPhaseChange({ phase: 'DONE', cycleIndex: 0 });
     this.cfg.onComplete(this.buildMetrics());
   }
