@@ -92,7 +92,7 @@ export default function MobileLayout({ children, hideBottomNav = false }: Mobile
         // (이 컨테이너에서 처리하면 sticky 헤더가 노치를 덮을 수 없어 콘텐츠가 가려짐)
         paddingBottom: hideBottomNav
           ? 'env(safe-area-inset-bottom)'
-          : 'calc(64px + env(safe-area-inset-bottom) + 4px)', // 하단바 높이 + safe area + 최소 여유
+          : 'calc(64px + env(safe-area-inset-bottom))', // 하단바 높이 + safe area
         height: '100vh',
         WebkitOverflowScrolling: 'touch',
         overscrollBehaviorY: 'none',
@@ -108,7 +108,7 @@ export default function MobileLayout({ children, hideBottomNav = false }: Mobile
       <nav
         className="fixed bottom-0 left-0 right-0 z-50"
         style={{
-          paddingBottom: 'calc(env(safe-area-inset-bottom) + 4px)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
           paddingLeft: '12px',
           paddingRight: '12px',
         }}

@@ -41,19 +41,12 @@ body {
   width: 100%;
   max-width: 100vw;
   overflow-x: hidden;
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  /* safe-area-inset-top/bottom 은 각 페이지의 PageHeader/하단바가 직접 처리.
+     #root 에서도 적용하면 페이지 측 env() 와 누적되어 상·하단 여백이
+     두 배로 부풀어 보이는 회귀가 생긴다. */
   touch-action: pan-y;
   overscroll-behavior: none;
   -webkit-overflow-scrolling: touch;
-}
-
-/* Safe area 지원 */
-@supports (padding: max(0px)) {
-  #root {
-    padding-top: max(env(safe-area-inset-top), 0px);
-    padding-bottom: max(env(safe-area-inset-bottom), 0px);
-  }
 }
 
 /* 모바일 반응형 기본 설정 */

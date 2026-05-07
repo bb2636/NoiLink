@@ -5,14 +5,15 @@ import WebAppWebView from '../shell/WebAppWebView';
 /**
  * 앱의 단일 진입 — 풀스크린 WebView에 Vite 클라이언트를 로드합니다.
  *
- * SafeAreaView 로 감싸 안드로이드 status bar / iOS 노치·홈 인디케이터 영역을
- * 침범하지 않도록 한다. 웹쪽 #root 의 env(safe-area-inset-*) 패딩만으로는
- * 안드로이드 WebView 가 status bar 아래까지 콘텐츠를 그릴 때 헤더가
- * 시스템 UI 에 묻히는 문제가 있어, 네이티브 레이어에서 한번 더 보장한다.
+ * SafeAreaView 의 edges 는 ['left','right'] 만 사용 — top/bottom 인셋은
+ * 웹쪽 #root / 페이지별 `env(safe-area-inset-*)` CSS 가 처리한다.
+ * 과거 ['top','bottom','left','right'] 는 안드로이드/iOS 모두에서 네이티브
+ * 인셋 + 웹 env() 인셋이 동시에 적용되어 상단 로고 위·하단 탭바 위 여백이
+ * 두 배로 부풀어 보이는 회귀(2026-05-07 사용자 보고) 의 직접 원인이었다.
  */
 export default function WebShellScreen() {
   return (
-    <SafeAreaView style={styles.fill} edges={['top', 'bottom', 'left', 'right']}>
+    <SafeAreaView style={styles.fill} edges={['left', 'right']}>
       <WebAppWebView />
     </SafeAreaView>
   );
