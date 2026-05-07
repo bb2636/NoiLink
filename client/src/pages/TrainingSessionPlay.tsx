@@ -666,10 +666,26 @@ export default function TrainingSessionPlay() {
           const prev = prevIrTouchCountRef.current;
           const delta = irTouchCountDelta(prev, ev.touchCount);
           prevIrTouchCountRef.current = ev.touchCount;
+          // IR 입력 디버깅 로그 — touchCount(byte[2]) / 증분 / 매핑된 pod / 현재 점등 pod 목록
+          let rawBytes: Uint8Array | null = null;
+          try {
+            const bin = atob(detail.payload.base64Value);
+            rawBytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) rawBytes[i] = bin.charCodeAt(i);
+          } catch {}
+          const podId = litPodIdsRef.current[0];
+          // eslint-disable-next-line no-console
+          console.log(
+            '[touch]',
+            rawBytes?.[2],
+            delta,
+            podId,
+            litPodIdsRef.current
+          );
           if (delta <= 0) return;
           // 현재 점등 pod 가 없으면 채점할 수 없으므로 무시 (대기 구간/페이즈 전환 등).
           // 점등이 한 개 이상이면 첫 점등 pod 로 매핑 — 단순/예측 가능한 정책.
-          const targetPod = litPodIdsRef.current[0];
+          const targetPod = podId;
           if (targetPod === undefined) return;
           // 펌웨어 한 패킷에 delta>1 이 들어오는 경우(loss 보상)는 같은 pod 에 N회 친 것으로 간주.
           // 명세 F: IR 진동 센서 입력은 손(Touch) 채널로 분류한다 (진동 = 손으로 두드린 것).
