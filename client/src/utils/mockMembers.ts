@@ -36,6 +36,9 @@ export const MOCK_MEMBERS: MockMember[] = [
   { id: 'm10', username: 'yoon10', name: '윤덕수', userType: 'ORGANIZATION', age: 78, brainAge: 76, brainimalType: 'EAGLE_INSIGHT',    streak: 5, createdAt: '', lastTrainingDate: daysAgo(0), birthDate: birthDateString(78, '09.04') },
   { id: 'm11', username: 'lim11',  name: '임순녀', userType: 'ORGANIZATION', age: 83, brainAge: 86, brainimalType: 'LION_BOLD',        streak: 1, createdAt: '', lastTrainingDate: daysAgo(5), birthDate: birthDateString(83, '09.04') },
   { id: 'm12', username: 'han12',  name: '한봉수', userType: 'ORGANIZATION', age: 75, brainAge: 72, brainimalType: 'DOG_SOCIAL',       streak: 9, createdAt: '', lastTrainingDate: daysAgo(0), birthDate: birthDateString(75, '09.04') },
+  { id: 'm13', username: 'cho13',  name: '조명자', userType: 'ORGANIZATION', age: 80, brainAge: 78, brainimalType: 'FOX_BALANCED',     streak: 4, createdAt: '', lastTrainingDate: daysAgo(1), birthDate: birthDateString(80, '09.04') },
+  { id: 'm14', username: 'baek14', name: '백철호', userType: 'ORGANIZATION', age: 77, brainAge: 74, brainimalType: 'TIGER_STRATEGIC',  streak: 6, createdAt: '', lastTrainingDate: daysAgo(0), birthDate: birthDateString(77, '09.04') },
+  { id: 'm15', username: 'moon15', name: '문영자', userType: 'ORGANIZATION', age: 79, brainAge: 80, brainimalType: 'OWL_FOCUS',        streak: 3, createdAt: '', lastTrainingDate: daysAgo(2), birthDate: birthDateString(79, '09.04') },
 ];
 
 export function getMockMember(id: string | undefined): MockMember | null {

@@ -107,15 +107,20 @@ export default function OrganizationReport() {
   const navigate = useNavigate();
   // 데모: 항상 하드코딩 데이터 표시 (실 API 연동은 추후 교체)
   // 단, 회사명은 로그인한 기업 회원의 실제 소속명으로 덮어씀.
+  const members: User[] = MOCK_MEMBERS;
+  // 총 관리 인원 카드(report.managedMemberCount)는 하드코딩(12)이었는데
+  // MOCK_MEMBERS 가 15 로 늘면서 "소속 인원 현황 탭에는 15명, 상단 카드는
+  // 12명" 이라는 시각적 불일치가 생긴다. 회원 수는 항상 실제 멤버 배열 길이를
+  // 진실원으로 사용해 동기화한다.
   const report: OrganizationInsightReport = useMemo(
     () => ({
       ...MOCK_REPORT,
       organizationName: user?.organizationName ?? MOCK_REPORT.organizationName,
+      managedMemberCount: members.length,
     }),
-    [user?.organizationName],
+    [user?.organizationName, members.length],
   );
   const trendPoints: TrendPoint[] = MOCK_TREND;
-  const members: User[] = MOCK_MEMBERS;
 
   // 탭 상태를 URL 쿼리(?tab=...)에 영속화 — 멤버 리포트로 이동했다가 뒤로가기 시
   // 같은 탭(특히 '소속 인원 현황')으로 자연스럽게 복귀하도록 한다.
@@ -469,14 +474,16 @@ function BrainimalTabSection({
             size={160}
             onHover={setHoveredType}
           />
-          {/* 호버 툴팁 */}
+          {/* 호버 툴팁 — 도넛 우측에 두면 좁은 모바일 화면에서 우측 범례 영역과
+              겹치며 라벨 글씨가 박스 밖으로 잘려 보인다. 도넛 위쪽 가운데에
+              띄우고(translate(-50%, -100%)) whitespace-nowrap 으로 한 줄 유지. */}
           {hoveredSlice && hoveredInfo && (
             <div
               className="absolute z-10 pointer-events-none rounded-lg px-3 py-2 shadow-lg whitespace-nowrap"
               style={{
-                left: '100%',
-                top: -6,
-                transform: 'translateX(8px)',
+                left: '50%',
+                top: -8,
+                transform: 'translate(-50%, -100%)',
                 backgroundColor: '#2A2A2A',
                 border: '1px solid #3A3A3A',
               }}
@@ -793,7 +800,9 @@ function HelpDot({
   text: string;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(true);
+  // 안내 말풍선은 기본 닫힘 상태 — 사용자가 ?를 눌러야 안내가 나타난다.
+  // 항상 펼쳐 두면 변화 추이 차트 위 공간을 항상 차지해 시각적 노이즈가 된다.
+  const [open, setOpen] = useState(false);
   return (
     <div className="relative inline-block">
       <div className="flex items-center gap-1.5">

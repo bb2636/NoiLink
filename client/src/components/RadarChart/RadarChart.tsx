@@ -194,24 +194,43 @@ export default function RadarChart({
     const scaleY = size / rect.height;
     const px = (e.clientX - rect.left) * scaleX;
     const py = (e.clientY - rect.top) * scaleY;
-    let best: { key: string; label: string; value: number; d: number } | null = null;
-    METRICS.forEach((metric) => {
-      const value = data[metric.key as keyof typeof data] || 0;
-      const n = value / 100;
-      const rad = ((metric.angle - 90) * Math.PI) / 180;
-      const vx = center + radius * n * Math.cos(rad);
-      const vy = center + radius * n * Math.sin(rad);
-      const d = Math.hypot(px - vx, py - vy);
-      if (!best || d < best.d) best = { key: metric.key, label: metric.label, value, d };
-    });
-    const found = best as { key: string; label: string; value: number; d: number } | null;
-    if (found && found.d <= 30) {
-      // 같은 꼭짓점 재클릭 → 닫기, 다른 꼭짓점 클릭 → 그 지표로 전환
-      setSelectedKey((prev) => (prev === found.key ? null : found.key));
-      onPointClick?.(found.label, found.value);
-      onPointHover?.(found.label, found.value);
-    } else {
+
+    // 지표별 점수가 작으면(예: 지구력=0) 데이터 꼭짓점이 차트 중앙 근처에 찍히고,
+    // 사용자는 보통 외곽의 라벨 텍스트("지구력")를 눌러 선택하려 한다. 점-거리
+    // 기반(d<=30)으로는 점이 멀리 있어 그 지표만 선택이 안 되는 문제가 발생한다.
+    // → 클릭 위치의 각도(중심 기준)를 6분할 섹터로 매핑해 어느 지표 영역인지로
+    //    판정한다. 정 중앙(<5%)과 라벨 바깥(>radius+35) 만 무선택 처리.
+    const dx = px - center;
+    const dy = py - center;
+    const dist = Math.hypot(dx, dy);
+    if (dist > radius + 35 || dist < radius * 0.05) {
       setSelectedKey(null);
+      return;
+    }
+    // 차트 좌표계: 상단 = 0deg, 시계방향. atan2 결과(-180~180)에 +90 으로 보정.
+    let clickAngle = (Math.atan2(dy, dx) * 180) / Math.PI + 90;
+    if (clickAngle < 0) clickAngle += 360;
+    if (clickAngle >= 360) clickAngle -= 360;
+
+    let bestMetric: typeof METRICS[number] | null = null;
+    let bestDelta = 360;
+    METRICS.forEach((metric) => {
+      // 원형 거리 — 360도 wrap-around 고려.
+      const raw = Math.abs(metric.angle - clickAngle);
+      const delta = Math.min(raw, 360 - raw);
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        bestMetric = metric;
+      }
+    });
+
+    if (bestMetric) {
+      const m = bestMetric as typeof METRICS[number];
+      const value = (data[m.key as keyof typeof data] as number) || 0;
+      // 같은 꼭짓점 재클릭 → 닫기, 다른 꼭짓점 클릭 → 그 지표로 전환
+      setSelectedKey((prev) => (prev === m.key ? null : m.key));
+      onPointClick?.(m.label, value);
+      onPointHover?.(m.label, value);
     }
   };
 

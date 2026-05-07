@@ -104,35 +104,6 @@ function buildOrgRowsFromMembers(members: MockMember[]): Record<TabKey, Row[]> {
 const ORG_ROWS: Record<TabKey, Row[]> = buildOrgRowsFromMembers(MOCK_MEMBERS);
 
 /**
- * 기업 랭킹 — 서버 응답(실데이터) + MOCK_MEMBERS 더미 멤버를 합쳐 다시 등수 매김.
- * 더미 멤버는 OrganizationReport 의 "소속 인원 현황" 탭과 동일한 진실원이라
- * 리포트에는 보이지만 랭킹에는 빠지는 모순을 막는다.
- *
- * - 동일 닉네임은 서버 측을 우선 (실데이터 신뢰).
- * - 합쳐진 뒤 value 내림차순 정렬, 동점은 같은 등수.
- */
-function mergeOrgRows(
-  serverRows: Record<TabKey, Row[]>,
-  mockRows: Record<TabKey, Row[]>,
-): Record<TabKey, Row[]> {
-  const out: Record<TabKey, Row[]> = { composite: [], time: [], streak: [] };
-  (Object.keys(out) as TabKey[]).forEach((k) => {
-    const seen = new Set(serverRows[k].map((r) => r.nickname));
-    const extras = mockRows[k].filter((r) => !seen.has(r.nickname));
-    const merged = [...serverRows[k], ...extras].sort((a, b) => b.value - a.value);
-    let prevValue = Number.POSITIVE_INFINITY;
-    let prevRank = 0;
-    out[k] = merged.map((r, i) => {
-      const rank = r.value === prevValue ? prevRank : i + 1;
-      prevValue = r.value;
-      prevRank = rank;
-      return { rank, nickname: r.nickname, value: r.value };
-    });
-  });
-  return out;
-}
-
-/**
  * "나의 랭킹" 카드의 4개 stat (종합·합계 시간·연속·출석률) + 등수.
  *
  * 과거: DEMO_PROFILE 하드코딩(80점/4시간/5일/90%) + user 테이블 캐시 필드를
@@ -239,34 +210,44 @@ export default function Ranking() {
                   : Math.round(e.score),
             }));
           });
-          // 기업 관리자: 더미 멤버(MOCK_MEMBERS)를 합쳐 다시 등수 매김.
-          //   서버에 멤버가 실제 user 로 등록되지 않아도, 리포트와 동일한
-          //   더미 로스터가 랭킹에서도 보이도록 일관성을 맞춘다.
-          const merged = isOrgAdmin ? mergeOrgRows(out, ORG_ROWS) : out;
-          // 어느 탭에라도 데이터가 있으면 (서버+더미) 합산값 사용
-          const hasAny = merged.composite.length || merged.time.length || merged.streak.length;
-          if (hasAny) setServerRows(merged);
+          // 카드(`/api/rankings/user/:id/card`) 와 목록(`/api/rankings`) 은
+          // 동일한 서버 14일 창에서 산출되어야 한다(replit.md "Unified Ranking
+          // Source" 정책). 과거 isOrgAdmin 인 경우 mock 멤버(MOCK_MEMBERS)를
+          // mergeOrgRows 로 합쳐 등수를 다시 매겼는데, 그러면 카드 myRank(서버
+          // 산출) ≠ 목록 myRank(mock 합산 후 재산출)이 되어 본인 등수가 카드와
+          // 목록에서 다르게 보이는 모순이 생긴다. 본인이 목록에 안 나오는 문제는
+          // 아래 dataset useMemo 에서 카드 stats 기반으로 본인 row 만 inject 하는
+          // 방식으로 해결하므로, mock merge 는 완전히 제거한다.
+          const hasAny = out.composite.length || out.time.length || out.streak.length;
+          if (hasAny) setServerRows(out);
         }
 
         if (user?.id) {
-          const cardRes = await api.getMyRankingCard(user.id);
-          if (!cancelled && cardRes.success && cardRes.data) {
-            setCardStats({
-              compositeScore: cardRes.data.compositeScore,
-              totalTimeHours: cardRes.data.totalTimeHours,
-              streakDays: cardRes.data.streakDays,
-              attendanceRate: cardRes.data.attendanceRate,
-            });
-            setMyServerRank({
-              composite: cardRes.data.myRanks.composite,
-              time: cardRes.data.myRanks.time,
-              streak: cardRes.data.myRanks.streak,
-            });
-            setCardLoaded(true);
+          try {
+            const cardRes = await api.getMyRankingCard(user.id);
+            if (!cancelled && cardRes.success && cardRes.data) {
+              setCardStats({
+                compositeScore: cardRes.data.compositeScore,
+                totalTimeHours: cardRes.data.totalTimeHours,
+                streakDays: cardRes.data.streakDays,
+                attendanceRate: cardRes.data.attendanceRate,
+              });
+              setMyServerRank({
+                composite: cardRes.data.myRanks.composite,
+                time: cardRes.data.myRanks.time,
+                streak: cardRes.data.myRanks.streak,
+              });
+            }
+          } finally {
+            // 카드 API 가 실패해도 cardLoaded 는 true 로 마감해야 한다. 그렇지
+            // 않으면 등수 표시가 영구히 '…' 로 남고, dataset useMemo 의 본인
+            // inject 가 비활성화되어 "본인이 목록에 안 나옴" 회귀가 다시 생긴다.
+            if (!cancelled) setCardLoaded(true);
           }
         }
       } catch (e) {
         console.error('랭킹 로드 실패:', e);
+        if (!cancelled) setCardLoaded(true);
       }
     })();
     return () => {
@@ -275,14 +256,48 @@ export default function Ranking() {
   }, [isOrgAdmin, user?.id, user?.organizationId]);
 
   const dataset: Record<TabKey, Row[]> = useMemo(() => {
-    if (!serverRows) return fallbackDataset;
-    // 탭별로 서버 데이터가 비었으면 fallback 사용
-    return {
-      composite: serverRows.composite.length > 0 ? serverRows.composite : fallbackDataset.composite,
-      time: serverRows.time.length > 0 ? serverRows.time : fallbackDataset.time,
-      streak: serverRows.streak.length > 0 ? serverRows.streak : fallbackDataset.streak,
+    const base: Record<TabKey, Row[]> = serverRows
+      ? {
+          composite: serverRows.composite.length > 0 ? serverRows.composite : fallbackDataset.composite,
+          time:      serverRows.time.length      > 0 ? serverRows.time      : fallbackDataset.time,
+          streak:    serverRows.streak.length    > 0 ? serverRows.streak    : fallbackDataset.streak,
+        }
+      : fallbackDataset;
+
+    // 본인이 목록에 없으면 카드 stats 기준으로 inject — 카드와 표가 같은 사람을
+    // 보여 "내 등수=2등인데 표에는 내가 없다" 같은 모순을 막는다. 등수는 합쳐서
+    // 다시 매김 (동점은 동률).
+    const myName = user?.name || user?.username;
+    if (!myName || !cardLoaded) return base;
+
+    const myValueMap: Record<TabKey, number | null> = {
+      composite: cardStats.compositeScore,
+      time:      cardStats.totalTimeHours > 0 ? cardStats.totalTimeHours : null,
+      streak:    cardStats.streakDays > 0 ? cardStats.streakDays : null,
     };
-  }, [serverRows, fallbackDataset]);
+
+    const out: Record<TabKey, Row[]> = { composite: [], time: [], streak: [] };
+    (Object.keys(out) as TabKey[]).forEach((k) => {
+      const rowsK = base[k];
+      const myValue = myValueMap[k];
+      const alreadyIn = rowsK.some((r) => r.nickname === myName);
+      if (alreadyIn || myValue == null) {
+        out[k] = rowsK;
+        return;
+      }
+      const merged = [...rowsK, { rank: 0, nickname: myName, value: myValue }]
+        .sort((a, b) => b.value - a.value);
+      let prevValue = Number.POSITIVE_INFINITY;
+      let prevRank = 0;
+      out[k] = merged.map((r, i) => {
+        const rank = r.value === prevValue ? prevRank : i + 1;
+        prevValue = r.value;
+        prevRank = rank;
+        return { rank, nickname: r.nickname, value: r.value };
+      });
+    });
+    return out;
+  }, [serverRows, fallbackDataset, user?.name, user?.username, cardStats, cardLoaded]);
 
   const rows = useMemo(() => dataset[tab], [dataset, tab]);
   const suffix = TABS.find((t) => t.id === tab)!.suffix;
@@ -295,7 +310,9 @@ export default function Ranking() {
   // 카드 4개 stat — 모두 서버 14일 창 단일 진실원에서 옴.
   // 종합 점수가 null 이면 "-" 표기 (세션 0건). 다른 stat 은 0 으로 자연 표기.
   const compositeDisplay = cardStats.compositeScore != null ? `${cardStats.compositeScore}점` : '-';
-  const totalTimeDisplay = `${cardStats.totalTimeHours}${isOrgAdmin ? '회' : '시간'}`;
+  // 카드의 합계 시간은 항상 시간 단위(서버가 초→시간 변환). 과거 isOrgAdmin 분기에
+   // '회'로 표기하던 것은 단위 표기 버그로 제거 (값 계산은 동일하게 시간 단위).
+  const totalTimeDisplay = `${cardStats.totalTimeHours}시간`;
   const streakDisplay = `${cardStats.streakDays}일`;
   const attendanceDisplay = `${cardStats.attendanceRate}%`;
   const rankDisplay = myRank != null ? `${myRank}등` : (cardLoaded ? '-' : '…');
