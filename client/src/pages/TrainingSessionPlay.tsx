@@ -44,6 +44,24 @@ import { getLegacyBleMode } from '../native/legacyBleMode';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { subscribeAckErrorBanner, type AckBannerSubscription } from '../native/nativeAckErrors';
 import { isBleUnstableForAbort, type TrainingAbortReason } from './trainingAbortReason';
+import { STORAGE_KEYS } from '../utils/constants';
+
+/**
+ * 등록된 패드 수를 1~4 사이로 반환. 등록 정보 없으면 1로 폴백
+ * (한 개라도 켜져 있다고 가정 — 0개를 넘기면 fireXxxTick 가드가 즉시 종료시켜
+ * 트레이닝 자체가 시작 안 됨).
+ */
+function getRegisteredPodCount(): number {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_DEVICES);
+    if (!raw) return 1;
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return 1;
+    return Math.max(1, Math.min(4, list.length));
+  } catch {
+    return 1;
+  }
+}
 
 /**
  * 백그라운드 중단 시 부분 결과 저장을 제안하는 진행률 임계값은 모드별로 다르다.
@@ -302,9 +320,13 @@ export default function TrainingSessionPlay() {
       level: state.level,
       totalDurationMs: totalMs,
       // FREE 모드만 사용자가 setup 화면에서 1~4 사이로 선택 가능 (Task #154).
-      // 다른 모드는 펌웨어 LED 4채널 전제로 항상 4. fireFreeTick 의 nPods<=0
-      // 가드와 함께 두 겹의 보호.
-      podCount: state.apiMode === 'FREE' ? Math.max(1, Math.min(4, state.podCount ?? 4)) : 4,
+      // 다른 모드는 등록된 패드 수(REGISTERED_DEVICES)를 기준으로 1~4로 자동 결정.
+      // 1개만 등록된 사용자에게 4개 전제로 점등 시퀀스를 돌리면 평균 75% 의 LED
+      // 프레임이 존재하지 않는 pod 로 송신되어 펌웨어가 무시 → "점등 안 됨" 회귀.
+      // fireFreeTick 의 nPods<=0 가드와 함께 두 겹의 보호.
+      podCount: state.apiMode === 'FREE'
+        ? Math.max(1, Math.min(4, state.podCount ?? 4))
+        : getRegisteredPodCount(),
       isComposite: state.isComposite || state.apiMode === 'COMPOSITE',
       // Task #154: FREE 자유설정(색·진행 방식) 을 엔진까지 흘려보낸다. 미지정
       // 시 엔진이 'GREEN'/RANDOM 폴백으로 동작 — TrainingSetup 의 FREE 분기가

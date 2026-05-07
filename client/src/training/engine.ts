@@ -1145,7 +1145,11 @@ export class TrainingEngine {
 
   private fireAgilityTick(beatMs: number): void {
     // GREEN=손(아무 Pod), BLUE=오른발(Pod0), YELLOW=왼발(Pod3) — 동시 이벤트는 Lv4+
-    const allowSimul = this.cfg.level >= 4;
+    // simul 분기는 pod 0/1 두 채널을 하드코딩으로 점등하므로 podCount>=2 일 때만 허용.
+    // 단일 패드(podCount=1) 환경에서 simul 을 켜면 존재하지 않는 pod 1 에 LED write 가
+    // 나가고 agilitySimulPending=[1,0] 이 영원히 size>0 으로 남아 aSimulHit=0 으로 고정,
+    // simulRate 이 구조적으로 0% 가 된다.
+    const allowSimul = this.cfg.level >= 4 && this.cfg.podCount >= 2;
     const r = Math.random();
     if (allowSimul && r < 0.25) {
       // 동시: GREEN(pod 1, 손) + BLUE(pod 0, 오른발). 두 채널 모두 정확 입력해야 simul 성공.
