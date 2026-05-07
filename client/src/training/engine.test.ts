@@ -498,3 +498,85 @@ describe('TrainingEngine: COMPOSITE/RHYTHM 탭 → bleOffPod 즉시 송신', () 
     engine.destroy();
   });
 });
+
+// ───────────────────────────────────────────────────────────
+// (5) FREE 자유 트레이닝 (Task #154)
+//   - sequenceMode (RANDOM/SEQUENTIAL/SIMUL) + colorMode (SINGLE/MULTI) 가
+//     fireFreeTick 에서 그대로 반영되어야 한다.
+//   - unlimited=true 면 자동 onComplete 가 발생하지 않고, 수동 endNow() 호출만이
+//     세션을 종료한다 — 회귀하면 무제한 모드 사용자가 영영 종료를 못 한다.
+// ───────────────────────────────────────────────────────────
+
+describe('TrainingEngine: FREE 자유 트레이닝 (Task #154)', () => {
+  it('SEQUENTIAL + SINGLE 색 — pod 가 0,1,2,3 순서로 단일 색만 점등된다', () => {
+    const { cfg } = makeConfig({
+      mode: 'FREE',
+      bpm: 60, // beat=1000ms
+      podCount: 4,
+      freeConfig: { color: 'BLUE', sequenceMode: 'SEQUENTIAL', colorMode: 'SINGLE' },
+    });
+    const engine = new TrainingEngine(cfg);
+    engine.start();
+
+    // 4 박을 흘려 각 박마다 1 pod 가 점등되도록 한다 (startTickLoop 350ms 지연 + beat=1000ms).
+    vi.advanceTimersByTime(350 + 1000 * 4);
+
+    const lits = litCalls();
+    expect(lits.length).toBeGreaterThanOrEqual(4);
+    // pod 순환: 0,1,2,3
+    expect(lits.slice(0, 4).map(l => l.pod)).toEqual([0, 1, 2, 3]);
+    // 모두 같은 색 (BLUE)
+    const blueCode = lits[0].colorCode;
+    expect(lits.slice(0, 4).every(l => l.colorCode === blueCode)).toBe(true);
+
+    engine.destroy();
+  });
+
+  it('SIMUL + MULTI 색 — 한 박에 모든 pod 가 동시 점등되며 pod 별로 다른 색이 들어간다', () => {
+    const { cfg } = makeConfig({
+      mode: 'FREE',
+      bpm: 60,
+      podCount: 4,
+      freeConfig: { color: 'BLUE', sequenceMode: 'SIMUL', colorMode: 'MULTI' },
+    });
+    const engine = new TrainingEngine(cfg);
+    engine.start();
+
+    // 첫 박만 통과
+    vi.advanceTimersByTime(510);
+
+    const lits = litCalls();
+    // 동시 점등이라 첫 tick 에 4 pod 가 모두 켜져야 함
+    expect(lits.length).toBe(4);
+    expect(new Set(lits.map(l => l.pod))).toEqual(new Set([0, 1, 2, 3]));
+    // MULTI 면 5색 팔레트 순환 → 4 pod 의 색은 서로 달라야 한다
+    const colorCodes = new Set(lits.map(l => l.colorCode));
+    expect(colorCodes.size).toBe(4);
+
+    engine.destroy();
+  });
+
+  it('unlimited=true — totalDurationMs 를 한참 지나도 자동 완료되지 않고, endNow() 호출에만 onComplete 가 발생한다', () => {
+    const { cfg, bag } = makeConfig({
+      mode: 'FREE',
+      bpm: 60,
+      podCount: 4,
+      // 무제한 모드는 totalDurationMs 가 MAX_SAFE_INTEGER 로 들어오지만, 안전상
+      // 작은 값으로도 자동 완료가 발생하지 않아야 함을 검증.
+      totalDurationMs: 5_000,
+      freeConfig: { color: 'GREEN', sequenceMode: 'RANDOM', unlimited: true },
+    });
+    const engine = new TrainingEngine(cfg);
+    engine.start();
+
+    // totalDurationMs 의 6 배 시간을 흘려도 onComplete 가 호출되면 안 된다.
+    vi.advanceTimersByTime(30_000);
+    expect(bag.completed.length).toBe(0);
+
+    // 사용자 종료 시뮬레이션
+    engine.endNow();
+    expect(bag.completed.length).toBe(1);
+
+    engine.destroy();
+  });
+});
