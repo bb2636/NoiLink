@@ -556,6 +556,123 @@ describe('TrainingEngine: FREE 자유 트레이닝 (Task #154)', () => {
     engine.destroy();
   });
 
+  it('COMPREHENSION 전환 직후 cNoMixedUntilTicks=3 → 3 tick 동안 RED 풀에서 제외, 자연 감소 (Task #155)', () => {
+    // 명세 §B.COMPREHENSION:
+    //   - 페이즈당 규칙 변경 1~3회 (cSwitchCount 상한 3)
+    //   - 변경 직후 2~3 Tick 은 혼합색(RED 방해) 금지 — 새 규칙 적응 시간
+    // forcedFirstSwitch 분기를 강제 발화시켜 (elapsedInPhase > totalMs * 0.5),
+    // 카운터 셋팅과 매 tick 자연 감소가 정확히 동작하는지 잠근다.
+    const { cfg } = makeConfig({ mode: 'COMPREHENSION', bpm: 60, podCount: 4 });
+    const engine = new TrainingEngine(cfg);
+    type Internal = {
+      fireComprehensionTick: (b: number, t: number, e: number) => void;
+      cNoMixedUntilTicks: number;
+      acc: { cSwitchCount: number };
+      currentRule: 'GREEN' | 'BLUE';
+      switchPendingFirst: boolean;
+    };
+    const e = engine as unknown as Internal;
+    const beat = 1000, totalMs = 60_000;
+    const ruleBefore = e.currentRule;
+    expect(e.cNoMixedUntilTicks).toBe(0);
+    expect(e.acc.cSwitchCount).toBe(0);
+    // Math.random() 고정 — probabilisticSwitch (Math.random < ~0.025) 가
+    // 우연히 발동해 cNoMixedUntilTicks 가 다시 3 으로 리셋되는 race 를 차단.
+    const origRand = Math.random;
+    Math.random = () => 0.99;
+    try {
+      // 첫 호출: forcedFirstSwitch 발동 (cSwitchCount===0 + elapsed > totalMs*0.5,
+      // Math.random 무관)
+      e.fireComprehensionTick(beat, totalMs, totalMs * 0.6);
+      expect(e.acc.cSwitchCount).toBe(1);
+      expect(e.currentRule).not.toBe(ruleBefore);
+      expect(e.switchPendingFirst).toBe(true);
+      expect(e.cNoMixedUntilTicks).toBe(3);
+      // 후속 tick 은 Math.random=0.99 라 probabilisticSwitch=false → 자연 감소만.
+      e.fireComprehensionTick(beat, totalMs, totalMs * 0.61);
+      expect(e.cNoMixedUntilTicks).toBe(2);
+      e.fireComprehensionTick(beat, totalMs, totalMs * 0.62);
+      expect(e.cNoMixedUntilTicks).toBe(1);
+      e.fireComprehensionTick(beat, totalMs, totalMs * 0.63);
+      expect(e.cNoMixedUntilTicks).toBe(0);
+      e.fireComprehensionTick(beat, totalMs, totalMs * 0.64);
+      expect(e.cNoMixedUntilTicks).toBe(0);
+      // cSwitchCount 상한 3 가드: 강제로 cSwitchCount=3 셋팅 후 wantSwitch 가
+      // 발동해도 (Math.random=0) 가드에서 차단되어야 한다.
+      e.acc.cSwitchCount = 3;
+      const ruleBefore2 = e.currentRule;
+      Math.random = () => 0;
+      e.fireComprehensionTick(beat, totalMs, totalMs * 0.7);
+      expect(e.acc.cSwitchCount).toBe(3);
+      expect(e.currentRule).toBe(ruleBefore2);
+    } finally {
+      Math.random = origRand;
+    }
+    engine.destroy();
+  });
+
+  it('COMPREHENSION 전환 직후 3 tick 동안 lightSinglePod 색상 풀에서 RED 가 실제로 제외된다 (Task #155)', () => {
+    // 명세 §B.COMPREHENSION 적응 윈도우의 효과(=색상 풀에서 RED 제거)까지 직접 잠금.
+    const { cfg } = makeConfig({ mode: 'COMPREHENSION', bpm: 60, podCount: 4 });
+    const engine = new TrainingEngine(cfg);
+    type Internal = {
+      fireComprehensionTick: (b: number, t: number, e: number) => void;
+      lightSinglePod: (pod: number, c: string, ms: number, isTarget: boolean) => void;
+      cNoMixedUntilTicks: number;
+    };
+    const e = engine as unknown as Internal;
+    const beat = 1000, totalMs = 60_000;
+    // 강제 전환 발동 → cNoMixedUntilTicks=3
+    e.fireComprehensionTick(beat, totalMs, totalMs * 0.6);
+    expect(e.cNoMixedUntilTicks).toBe(3);
+    // 후속 3 tick 모두에서 점등 색이 RED 가 아니어야 한다 (Math.random 을 다양화).
+    const litColors: string[] = [];
+    const origLight = e.lightSinglePod.bind(engine);
+    e.lightSinglePod = (pod, c, ms, isTarget) => {
+      litColors.push(c);
+      origLight(pod, c, ms, isTarget);
+    };
+    const origRand = Math.random;
+    // 0.99 고정 — probabilisticSwitch (Math.random < ~0.025) 미발동 보장 +
+    // 색상 인덱스/podId 도 안정. 색상 풀 길이 2 (no RED) → idx=floor(0.99*2)=1 (oppositeRule).
+    Math.random = () => 0.99;
+    try {
+      // 전환 tick 자체는 forcedSwitch 분기에서 early return 하므로 lightSinglePod 미호출.
+      // 후속 tick 진입 시 cNoMixedUntilTicks 가 3→2→1→0 순으로 감소하고, 색상 풀은
+      // `cNoMixedUntilTicks > 0` 인 2 tick 동안만 RED 를 제외한다 (적응 윈도우 = 2 tick).
+      e.fireComprehensionTick(beat, totalMs, totalMs * 0.61); // 3→2, no RED
+      e.fireComprehensionTick(beat, totalMs, totalMs * 0.62); // 2→1, no RED
+    } finally {
+      Math.random = origRand;
+    }
+    expect(litColors.length).toBe(2);
+    expect(litColors.includes('RED')).toBe(false);
+    engine.destroy();
+  });
+
+  it('Early/Mid/Late 버킷 경계는 1/3·2/3 으로 정렬된다 (Task #155 — 0.34/0.66 근사 제거)', () => {
+    // 명세 §B.ENDURANCE: 300s 세션에서 Early=0~100s / Mid=100~200s / Late=200~300s.
+    // 과거 0.34/0.66 근사는 102s/198s 로 어긋나 100~102s 의 입력이 Mid 가 아닌 Early 로,
+    // 198~200s 의 입력이 Late 가 아닌 Mid 로 잘못 누적되었다. 1/3·2/3 으로 정렬돼
+    // ENDURANCE_EARLY_END_MS=100_000 / ENDURANCE_LATE_START_MS=200_000 와 정확히 일치한다.
+    const { cfg } = makeConfig({
+      mode: 'ENDURANCE',
+      bpm: 60,
+      podCount: 4,
+      totalDurationMs: 300_000,
+    });
+    const engine = new TrainingEngine(cfg);
+    // private 메서드 직접 호출해 경계 결정 함수만 검증.
+    const eml = (engine as unknown as { earlyMidLateBucket: (ms: number) => string }).earlyMidLateBucket.bind(engine);
+    expect(eml(0)).toBe('early');
+    expect(eml(99_999)).toBe('early');
+    expect(eml(100_000)).toBe('mid');       // 정확히 1/3 경계 = mid 시작
+    expect(eml(199_999)).toBe('mid');
+    expect(eml(200_000)).toBe('late');      // 정확히 2/3 경계 = late 시작
+    expect(eml(299_999)).toBe('late');
+    engine.destroy();
+  });
+
   it('unlimited=true — totalDurationMs 를 한참 지나도 자동 완료되지 않고, endNow() 호출에만 onComplete 가 발생한다', () => {
     const { cfg, bag } = makeConfig({
       mode: 'FREE',

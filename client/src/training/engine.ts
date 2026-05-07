@@ -1596,26 +1596,40 @@ export class TrainingEngine {
       // RED 미응답 = 억제 성공
       this.acc.jNoGoSuccess += 1;
     }
-    // 구간 omission
-    const e = this.elapsedMs();
+    // 구간 omission — Early/Late 두 버킷만 사용 (Mid 의 omission 누락은 의도된
+    // 명세 단순화). 경계는 위 earlyMidLateBucket 과 일관되게 1/3·2/3 으로 정렬한다.
+    const bucket = this.earlyMidLateBucket(this.elapsedMs());
+    if (bucket === 'early') this.acc.earlyOmissions += 1;
+    else if (bucket === 'late') this.acc.lateOmissions += 1;
+  }
+
+  // ENDURANCE Early/Mid/Late 경계 — 명세 §B.ENDURANCE 와 정확히 정렬 (Task #155).
+  // 명세는 300s 고정에서 0~100s / 100~200s / 200~300s 즉 1/3, 2/3 분할인데
+  // 과거에는 0.34/0.66 근사값을 썼다 — 300s 에서 102s/198s 로 어긋나 100~102s
+  // 의 입력이 Mid 가 아니라 Early 로, 198~200s 의 입력이 Late 가 아니라 Mid 로
+  // 잘못 누적되어 maintainRatio 계산이 미세하게 비뚤어졌다. 1/3·2/3 으로 바꿔
+  // 300_000ms 일 때 정확히 ENDURANCE_EARLY_END_MS=100_000 / ENDURANCE_LATE_START_MS=200_000
+  // 와 일치하게 한다. 비-300s totalDurationMs 에서도 동일 비례가 적용된다.
+  private earlyMidLateBucket(elapsedMs: number): 'early' | 'mid' | 'late' {
     const total = this.cfg.totalDurationMs;
-    if (e < total * 0.34) this.acc.earlyOmissions += 1;
-    else if (e > total * 0.66) this.acc.lateOmissions += 1;
+    if (elapsedMs < total / 3) return 'early';
+    if (elapsedMs < (total * 2) / 3) return 'mid';
+    return 'late';
   }
 
   private recordIntervalCount(_kind: 'total', elapsedMs: number, n: number): void {
-    const total = this.cfg.totalDurationMs;
-    if (elapsedMs < total * 0.34) this.acc.earlyTotal += n;
-    else if (elapsedMs < total * 0.66) this.acc.midTotal += n;
+    const bucket = this.earlyMidLateBucket(elapsedMs);
+    if (bucket === 'early') this.acc.earlyTotal += n;
+    else if (bucket === 'mid') this.acc.midTotal += n;
     else this.acc.lateTotal += n;
   }
 
   private recordIntervalHit(_kind: 'hit', elapsedMs: number, rt: number): void {
-    const total = this.cfg.totalDurationMs;
-    if (elapsedMs < total * 0.34) {
+    const bucket = this.earlyMidLateBucket(elapsedMs);
+    if (bucket === 'early') {
       this.acc.earlyHits += 1;
       this.acc.earlyRTs.push(rt);
-    } else if (elapsedMs < total * 0.66) {
+    } else if (bucket === 'mid') {
       this.acc.midHits += 1;
       this.acc.midRTs.push(rt);
     } else {
