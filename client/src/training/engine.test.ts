@@ -611,6 +611,36 @@ describe('TrainingEngine: FREE 자유 트레이닝 (Task #154)', () => {
     engine.destroy();
   });
 
+  it('COMPREHENSION 전환 시 flashAll(WHITE, 250) 가 항상 호출된다 (Task #155 — 명세 §B.COMPREHENSION 전환 경고)', async () => {
+    // 명세상 규칙 변경 직후 사용자에게 WHITE 전체 점등으로 전환을 알린다.
+    // bleWriteLed 모킹을 통해 podCount 만큼의 WHITE/onMs=250 프레임이 발생하는지 검증.
+    const { COLOR_CODE } = await import('@noilink/shared');
+    const { cfg } = makeConfig({ mode: 'COMPREHENSION', bpm: 60, podCount: 4 });
+    const engine = new TrainingEngine(cfg);
+    type Internal = {
+      fireComprehensionTick: (b: number, t: number, e: number) => void;
+    };
+    const e = engine as unknown as Internal;
+    mockedWriteLed.mockClear();
+    const origRand = Math.random;
+    Math.random = () => 0.99;
+    try {
+      // forcedFirstSwitch 발동 → flashAll(WHITE, 250) 호출 기대
+      e.fireComprehensionTick(1000, 60_000, 60_000 * 0.6);
+    } finally {
+      Math.random = origRand;
+    }
+    const whiteFlashCalls = mockedWriteLed.mock.calls.filter(
+      (c: unknown[]) => {
+        const arg = c[0] as { colorCode?: number; onMs?: number };
+        return arg?.colorCode === COLOR_CODE.WHITE && arg?.onMs === 250;
+      },
+    );
+    // podCount=4 → 모든 Pod 에 WHITE 250ms 전송
+    expect(whiteFlashCalls.length).toBe(4);
+    engine.destroy();
+  });
+
   it('COMPREHENSION 전환 직후 3 tick 동안 lightSinglePod 색상 풀에서 RED 가 실제로 제외된다 (Task #155)', () => {
     // 명세 §B.COMPREHENSION 적응 윈도우의 효과(=색상 풀에서 RED 제거)까지 직접 잠금.
     const { cfg } = makeConfig({ mode: 'COMPREHENSION', bpm: 60, podCount: 4 });

@@ -251,6 +251,70 @@ describe('judgmentDoubleTapWindowMs — min(700, 0.9 × beat_ms)', () => {
   });
 });
 
+describe('Task #155 — judgmentDoubleTapWindowMs 정합성 점검 (모든 BPM 영역에서 명세 정렬)', () => {
+  // 명세 §B.JUDGMENT: 더블탭 유효 윈도우 = min(700ms, 0.9 × beat_ms).
+  // 상/하한 BPM 영역(40 하한 / 200 상한) + 전환점(BPM≈77 ≈ 700/0.9·60) 을
+  // task-scoped 회귀 가드로 잠근다 — 산식 변경 시 임계 BPM 에서 가장 먼저 깨진다.
+  it('BPM 40 (하한 — beatMs=1500) → 700 (상한 적용)', () => {
+    expect(judgmentDoubleTapWindowMs(40)).toBe(700);
+  });
+  it('BPM 77 (전환점 부근) → 700 (0.9·779≈701 > 700, 상한 적용)', () => {
+    expect(judgmentDoubleTapWindowMs(77)).toBe(700);
+  });
+  it('BPM 78 (전환점 직후) → 0.9·beatMs(78) (상한 미적용)', () => {
+    // 0.9 * (60000/78) ≈ 692.31 < 700 → 산식값 사용
+    expect(judgmentDoubleTapWindowMs(78)).toBeCloseTo(692.3076923, 5);
+    expect(judgmentDoubleTapWindowMs(78)).toBeLessThan(700);
+  });
+  it('BPM 200 (상한) → 0.9 × 300 = 270', () => {
+    expect(judgmentDoubleTapWindowMs(200)).toBeCloseTo(270, 6);
+  });
+});
+
+describe('Task #155 — scoreEndurance 명세 산식 codification (server Z-score 분기 정책)', () => {
+  // 명세 §B.ENDURANCE 가중합: 40·maintainRatio + 20·(1−drift) + 15·(1−omissionInc)
+  //   + 15·lateStability + 10·lateSpeed (Late 표본 부족시 Early-only 재정규화).
+  // server/services/score-calculator.ts 의 calculateEnduranceScore 는 6지표 분포
+  // 정합성을 위해 NormConfig Z-score(maintainRatio Z 80 + rhythm 20) 로 운영한다.
+  // 두 산식은 의도된 분기이며 (replit.md "ENDURANCE 점수 산식 — server vs spec 분기"),
+  // 명세 산식 채택은 6지표 일괄 정규화 재설계가 선행돼야 한다 (Task #156).
+  // 본 테스트는 명세 산식의 핵심 가중치(40/20/15/15/10) 를 골든 케이스로 잠가
+  // 향후 마이그레이션 시 reference 로 사용한다.
+  it('가중치 분리 검증: maintainRatio 만 1.0 → 40점, 나머지는 (1-0)·15 + … = 35점', () => {
+    expect(
+      scoreEndurance({
+        maintainRatio: 1,
+        drift01: 1,
+        omissionIncrease01: 1,
+        lateStability01: 0,
+        lateSpeed01: 0,
+      }),
+    ).toBe(40); // 40·1 + 20·0 + 15·0 + 15·0 + 10·0
+  });
+  it('가중치 분리 검증: lateStability 만 1.0 → 15 + 35(drift/omission 1-0) = 50', () => {
+    expect(
+      scoreEndurance({
+        maintainRatio: 0,
+        drift01: 0,
+        omissionIncrease01: 0,
+        lateStability01: 1,
+        lateSpeed01: 0,
+      }),
+    ).toBe(50); // 0 + 20 + 15 + 15 + 0
+  });
+  it('가중치 분리 검증: lateSpeed 만 1.0 → 10 + 35 = 45', () => {
+    expect(
+      scoreEndurance({
+        maintainRatio: 0,
+        drift01: 0,
+        omissionIncrease01: 0,
+        lateStability01: 0,
+        lateSpeed01: 1,
+      }),
+    ).toBe(45);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 1.5 리듬 패턴
 // ---------------------------------------------------------------------------
