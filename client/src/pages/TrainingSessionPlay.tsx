@@ -1061,10 +1061,17 @@ export default function TrainingSessionPlay() {
             <div
               className="absolute inset-0 flex flex-col items-center justify-center"
               aria-live="off"
-              aria-label={`총 ${totalSec}초 중 ${mm}분 ${ss}초 경과`}
+              aria-label={
+                isFreeUnlimited
+                  ? `무제한 모드 — ${mm}분 ${ss}초 경과`
+                  : `총 ${totalSec}초 중 ${mm}분 ${ss}초 경과`
+              }
             >
               <div className="text-sm" style={{ color: '#888' }}>
-                총 {totalSec}초
+                {/* 무제한 FREE 모드는 totalSec 가 placeholder(60s) 라 그대로 노출하면
+                    사용자가 60초 후 자동 종료될 거라 오해한다. 라벨을 "무제한" 으로
+                    바꿔, 종료 버튼만이 세션을 끝낸다는 점을 명확히 보여준다 (Task #154). */}
+                {isFreeUnlimited ? '무제한' : `총 ${totalSec}초`}
               </div>
               <div
                 className="text-6xl font-semibold tabular-nums tracking-tight mt-1"
