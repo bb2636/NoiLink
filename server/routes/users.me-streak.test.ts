@@ -144,6 +144,26 @@ describe('GET /api/users/me — KST 기준 streak 자동 리셋 (Task #152)', ()
     expect(res.body.data.streak).toBe(3);
   });
 
+  it('FREE 모드만으로 쌓은 streak 도 동일하게 보존된다 (Task #154 — 모드 무관 잠금)', async () => {
+    // /users/me 의 streak 자동 리셋 분기는 mode 를 보지 않고 lastTrainingDate
+    // 만 비교하므로, FREE 만 한 사용자도 KST "어제" 기록이 있으면 streak 가
+    // 보존돼야 한다. 의미상 자명하지만 명시적으로 잠가 둔다.
+    vi.setSystemTime(new Date('2026-04-26T14:30:00.000Z'));
+    store.users = [
+      {
+        ...ACTOR_BASE,
+        streak: 4,
+        bestStreak: 4,
+        // POST /api/sessions FREE 분기로 갱신된 lastTrainingDate 가정
+        lastTrainingDate: '2026-04-25T13:00:00.000Z',
+      },
+    ];
+    const res = await getMe(buildApp());
+    expect(res.status).toBe(200);
+    expect(res.body.data.streak).toBe(4);
+    expect(res.body.data.bestStreak).toBe(4);
+  });
+
   it('KST 기준 이틀 이상 비웠을 때는 streak 리셋, bestStreak 는 그대로 보관된다', async () => {
     // now: UTC 2026-04-27 03:00 = KST 2026-04-27 12:00 → KST 오늘 = 04-27
     vi.setSystemTime(new Date('2026-04-27T03:00:00.000Z'));
