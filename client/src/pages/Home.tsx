@@ -311,7 +311,10 @@ function StandardHome({ variant, home, user, streakDays }: StandardProps) {
             <span className="px-2.5 py-1 rounded-full text-xs font-semibold text-black" style={{ backgroundColor: '#AAED10' }}>
               주간 성장률 +{weeklyChange}
             </span>
-            <button onClick={() => navigate('/profile')} className="text-gray-400 text-lg">→</button>
+            {/* 다음(→) 버튼: 본인 프로필이 아닌 본인 리포트로 이동 — 사용자가
+                트레이닝 요약 카드를 누르면 자연스럽게 더 자세한 6대 지표/추이를 볼 수
+                있어야 한다. (개인/기업 홈 모두 동일 정책) */}
+            <button onClick={() => navigate('/report')} className="text-gray-400 text-lg">→</button>
           </div>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
@@ -647,17 +650,31 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
           style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
         >
           <div className="p-4">
-            {/* 상단: 아바타 + 기관명 */}
-            <div className="flex items-center gap-3">
-              <div
-                className="w-10 h-10 rounded-full flex items-center justify-center"
-                style={{ backgroundColor: '#264213' }}
-              >
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#AAED10" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 12h.01M9 15h.01M13 9h.01M13 12h.01M13 15h.01" />
-                </svg>
+            {/* 상단: 아바타 + 기관명 + 대표 브레이니멀 칩
+                (사용자 요청: "모든 타입 보기" 푸터 통째 삭제. 대신 대표
+                 브레이니멀은 기업명 옆 우측에 칩으로 노출 — 한 줄에 기관
+                 정체성 + 조직 성향이 같이 보이도록 한다.) */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+                  style={{ backgroundColor: '#264213' }}
+                >
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#AAED10" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 12h.01M9 15h.01M13 9h.01M13 12h.01M13 15h.01" />
+                  </svg>
+                </div>
+                <p className="text-base font-semibold text-white truncate">{orgName}</p>
               </div>
-              <p className="text-base font-semibold text-white">{orgName}</p>
+              {dominantBrainimal && (
+                <span
+                  className="px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1.5 shrink-0"
+                  style={{ backgroundColor: `${dominantBrainimal.color}26`, color: dominantBrainimal.color }}
+                >
+                  <img src={dominantBrainimal.icon} alt="" className="w-4 h-4 rounded-full object-cover" />
+                  {dominantBrainimal.name}
+                </span>
+              )}
             </div>
 
             {/* 구분선 */}
@@ -670,31 +687,6 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
                 {membersLoading ? '...' : `${totalCount}명`}
               </span>
             </div>
-          </div>
-
-          {/* 푸터: 대표 브레이니멀 + 모든 타입 보기 */}
-          <div
-            className="px-4 py-3 flex items-center justify-between"
-            style={{ backgroundColor: '#1F2A0E' }}
-          >
-            <div className="flex items-center gap-2">
-              {dominantBrainimal ? (
-                <>
-                  <img src={dominantBrainimal.icon} alt="" className="w-5 h-5 object-contain" />
-                  <span className="text-sm font-medium" style={{ color: '#AAED10' }}>
-                    {dominantBrainimal.name}
-                  </span>
-                </>
-              ) : (
-                <span className="text-gray-500 text-sm">데이터 부족</span>
-              )}
-            </div>
-            <button
-              onClick={() => navigate('/organization-report')}
-              className="text-xs text-gray-400"
-            >
-              모든 타입 보기 &gt;
-            </button>
           </div>
         </motion.div>
 
@@ -717,7 +709,7 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
             <span className="px-2.5 py-1 rounded-full text-xs font-semibold text-black" style={{ backgroundColor: '#AAED10' }}>
               주간 성장률 +{weeklyChange}
             </span>
-            <button onClick={() => navigate('/profile')} className="text-gray-400 text-lg">→</button>
+            <button onClick={() => navigate('/report')} className="text-gray-400 text-lg">→</button>
           </div>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>

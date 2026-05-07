@@ -220,8 +220,10 @@ export default function OrganizationReport() {
         open={orgInfoOpen}
         onToggle={() => setOrgInfoOpen((v) => !v)}
         footer={
+          // 사용자 요청으로 "모든 타입 보기" 버튼 제거. 대표 브레이니멀
+          // 라벨만 푸터에 남겨 한눈에 조직 성향을 확인할 수 있게 한다.
           <div
-            className="px-4 py-3 flex items-center justify-between"
+            className="px-4 py-3 flex items-center"
             style={{ backgroundColor: '#1F2A0E' }}
           >
             <div className="flex items-center gap-2">
@@ -234,13 +236,6 @@ export default function OrganizationReport() {
                 {report.representativeBrainimalLabel}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => navigate('/profile')}
-              className="text-xs text-gray-400"
-            >
-              모든 타입 보기 &gt;
-            </button>
           </div>
         }
       >

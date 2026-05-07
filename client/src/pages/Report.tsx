@@ -661,8 +661,11 @@ export default function Report() {
             </div>
           </div>
 
-          {/* 브레이니멀 라벨 + 모든 타입 보기 */}
-          <div className="flex items-center justify-between">
+          {/* 브레이니멀 라벨
+              (사용자 요청: "모든 타입 보기" 버튼 삭제 — 개인 리포트와
+               기업 리포트에서 멤버 리포트로 진입한 더미 소속회원 화면도
+               같은 컴포넌트라 동시에 적용된다.) */}
+          <div className="flex items-center">
             <span
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold"
               style={{ backgroundColor: "#2A2A2A", color: brainimalInfo.color }}
@@ -676,14 +679,6 @@ export default function Report() {
               )}
               {brainimalInfo.name}
             </span>
-            <button
-              type="button"
-              onClick={() => navigate("/profile")}
-              className="text-xs font-medium"
-              style={{ color: "#B6B6B9" }}
-            >
-              모든 타입 보기 &gt;
-            </button>
           </div>
         </div>
       </section>
