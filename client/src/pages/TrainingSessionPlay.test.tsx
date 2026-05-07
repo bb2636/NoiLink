@@ -110,6 +110,16 @@ vi.mock('../training/engine', () => {
 vi.mock('../native/bleBridge', () => ({
   bleSubscribeCharacteristic: vi.fn(),
   bleUnsubscribeCharacteristic: vi.fn(),
+  bleReconnectNow: vi.fn(),
+  // BLE 진단 라인이 1Hz 폴링으로 호출하는 getter — 테스트에선 정적 값으로 충분.
+  getLegacyEmittedCount: () => 0,
+  getLegacyLastEmittedFrameHex: () => '',
+}));
+vi.mock('../native/bleFirmwareReady', () => ({
+  getBleFirmwareReady: () => null,
+}));
+vi.mock('../native/legacyBleMode', () => ({
+  getLegacyBleMode: () => true,
 }));
 
 // BLE 그레이스 useEffect 는 isNoiLinkNativeShell() === true 일 때만 등록된다.

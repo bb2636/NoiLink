@@ -32,8 +32,15 @@ import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
 import { createPendingLocalId, enqueuePendingRun } from '../utils/pendingTrainingRuns';
 import { reportBleAbortFireAndForget } from '../utils/reportBleAbort';
 import { TrainingEngine, type EnginePhaseInfo } from '../training/engine';
-import { bleReconnectNow, bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
+import {
+  bleReconnectNow,
+  bleSubscribeCharacteristic,
+  bleUnsubscribeCharacteristic,
+  getLegacyEmittedCount,
+  getLegacyLastEmittedFrameHex,
+} from '../native/bleBridge';
 import { getBleFirmwareReady } from '../native/bleFirmwareReady';
+import { getLegacyBleMode } from '../native/legacyBleMode';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { subscribeAckErrorBanner, type AckBannerSubscription } from '../native/nativeAckErrors';
 import { isBleUnstableForAbort, type TrainingAbortReason } from './trainingAbortReason';
@@ -129,6 +136,34 @@ export default function TrainingSessionPlay() {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [phaseInfo, setPhaseInfo] = useState<EnginePhaseInfo>({ phase: 'IDLE', cycleIndex: 0 });
   const [tapCount, setTapCount] = useState(0);
+  // BLE 송신 진단 — 1Hz 폴링으로 화면 하단 한 줄에 노출. 점등이 안 들어올 때
+  // (펌웨어 미준비 / 잘못된 모드 / 송신 0건 / 마지막 프레임 hex) 를 사용자/QA 가
+  // 화면에서 즉시 확인할 수 있게 한다. 폴링 주기를 짧게 잡아도 비용은 무시 가능
+  // (모두 단순 ref/storage 읽기).
+  const [bleDiag, setBleDiag] = useState<{
+    fwLabel: string;
+    legacyLabel: string;
+    emitted: number;
+    lastFrame: string;
+  }>({ fwLabel: '?', legacyLabel: '?', emitted: 0, lastFrame: '' });
+  useEffect(() => {
+    const tick = () => {
+      const fw = getBleFirmwareReady();
+      // 마지막 프레임 hex 가 길어 좁은 화면(360px) 에서 가로 오버플로/줄바꿈을
+      // 일으키지 않도록 앞 20자만 노출 (LED 11B = 33자, IR 5B = 14자 등).
+      const raw = getLegacyLastEmittedFrameHex() || '';
+      const lastFrame = raw.length > 20 ? `${raw.slice(0, 20)}…` : raw;
+      setBleDiag({
+        fwLabel: fw === true ? 'O' : fw === false ? 'X' : '?',
+        legacyLabel: getLegacyBleMode() ? 'ON' : 'OFF',
+        emitted: getLegacyEmittedCount(),
+        lastFrame,
+      });
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, []);
   // 사용자가 일시정지/재개를 화면에서 직접 토글할 수 있도록 상태로 들고 간다.
   // 엔진의 pause()/resume() 와 동기화 (자동 백그라운드 일시정지 분기는 동일 메서드를 호출).
   const [isPaused, setIsPaused] = useState(false);
@@ -788,7 +823,15 @@ export default function TrainingSessionPlay() {
           // 발생하면 사용자가 게이지/타이머에 집중하지 못하고 화면이 흔들리는 인상을
           // 준다. 모든 콘텐츠는 안드로이드 status bar/제스처 바를 피하면서 한 뷰포트
           // 안에 들어가도록 위/아래 safe-area 만 최소로 확보한다.
-          height: '100vh',
+          //
+          // 사용자 보고: 모바일 WebView 에서 입력 카운터가 화면 밖으로 밀려 안 보임.
+          // 100vh 는 iOS Safari/안드로이드 WebView 의 동적 주소창 영역까지 포함한
+          // "전체 뷰포트" 라서 실제 보이는 영역(가시 viewport)을 초과해 콘텐츠가
+          // 잘렸다. 100dvh(동적 viewport)로 바꿔 주소창 노출 여부와 무관하게
+          // 게이지·힌트·카운터·버튼이 한 화면에 모두 들어오게 한다. dvh 미지원
+          // 구형 브라우저는 100vh 로 자연 폴백된다.
+          height: '100dvh',
+          minHeight: '100vh',
           overflow: 'hidden',
           paddingTop: 'calc(0.25rem + env(safe-area-inset-top))',
           // 하단 버튼이 iOS 홈 인디케이터/안드로이드 제스처 바에 가리지 않도록 safe-area + 여유.
@@ -979,6 +1022,26 @@ export default function TrainingSessionPlay() {
             data-testid="tap-count-debug"
           >
             입력 {tapCount}회
+          </p>
+          {/* BLE 송신 진단 한 줄 — 점등이 안 들어오는 원인을 사용자/QA 가 화면에서
+              즉시 식별할 수 있게 노출. 펌웨어 ready 여부, 레거시 모드, 누적 송신
+              횟수, 마지막 송신 프레임을 한 줄로 보여준다.
+              - 펌웨어 미준비(FW=X) → bleBridge 가 모든 LED/SESSION/CONTROL write
+                를 silent skip → 점등 0건의 가장 흔한 원인.
+              - 레거시 모드(L=ON/OFF) → 현행 NINA-B1 펌웨어는 ON, NoiPod 신규
+                펌웨어는 OFF. 잘못된 모드면 프레임 인코딩이 달라져 본체가 무시.
+              - 송신=0 → 엔진이 LED 호출조차 안 하는 상태(트레이닝 자체가 멈춤).
+              - 마지막 프레임 hex → 본체가 안 깜빡이면 "송신은 됐는데 본체가
+                무시" vs "송신 자체가 안 됨" 을 구분.
+              Task #150 의 safe* wrapper 가 BLE throw 를 silent swallow 하므로
+              이 라인이 사실상 유일한 사용자측 진단 수단이다. */}
+          <p
+            className="mt-1 text-[10px] font-mono"
+            style={{ color: '#555' }}
+            data-testid="ble-diag"
+          >
+            BLE: FW={bleDiag.fwLabel} · L={bleDiag.legacyLabel} · 송신={bleDiag.emitted}
+            {bleDiag.lastFrame ? ` · ${bleDiag.lastFrame}` : ''}
           </p>
         </div>
 

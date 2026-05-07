@@ -8,7 +8,14 @@ import { MobileLayout } from '../components/Layout';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import { STORAGE_KEYS } from '../utils/constants';
 import { ensureDemoDevicesSeeded } from '../utils/seedDemoDevices';
-import { bleConnect, bleDisconnect } from '../native/bleBridge';
+import {
+  bleConnect,
+  bleDisconnect,
+  getLegacyEmittedCount,
+  getLegacyLastEmittedFrameHex,
+} from '../native/bleBridge';
+import { getBleFirmwareReady } from '../native/bleFirmwareReady';
+import { getLegacyBleMode } from '../native/legacyBleMode';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { subscribeAckErrorBanner, type AckBannerSubscription } from '../native/nativeAckErrors';
 import type { NativeToWebMessage } from '@noilink/shared';
@@ -63,6 +70,33 @@ export default function Device() {
   // 브릿지가 web→native 메시지를 거부할 때 (`native.ack.ok=false`) 화면에 띄울 안내.
   // 핵심 흐름(연결/해제) 도중 조용히 실패하지 않도록 짧은 토스트로 사유를 노출한다 (Task #77).
   const [ackErrorBanner, setAckErrorBanner] = useState<string | null>(null);
+  // BLE 진단 — 연결된 기기 카드 하단에 한 줄로 노출. 트레이닝 화면과 동일한
+  // 출처(getBleFirmwareReady / getLegacyBleMode / getLegacyEmittedCount /
+  // getLegacyLastEmittedFrameHex)로 1Hz 폴링. "연결됨 표시인데 점등이 안 들어옴"
+  // 같은 모호한 상태를 사용자/QA 가 화면에서 즉시 추적할 수 있게 한다.
+  const [bleDiag, setBleDiag] = useState<{
+    fwLabel: string;
+    legacyLabel: string;
+    emitted: number;
+    lastFrame: string;
+  }>({ fwLabel: '?', legacyLabel: '?', emitted: 0, lastFrame: '' });
+  useEffect(() => {
+    const tick = () => {
+      const fw = getBleFirmwareReady();
+      // 좁은 화면 가로 오버플로 방지 — 앞 20자만 노출.
+      const raw = getLegacyLastEmittedFrameHex() || '';
+      const lastFrame = raw.length > 20 ? `${raw.slice(0, 20)}…` : raw;
+      setBleDiag({
+        fwLabel: fw === true ? 'O' : fw === false ? 'X' : '?',
+        legacyLabel: getLegacyBleMode() ? 'ON' : 'OFF',
+        emitted: getLegacyEmittedCount(),
+        lastFrame,
+      });
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const devicesWithConnection: DeviceInfo[] = registered.map((d) => ({
     id: d.id,
@@ -220,9 +254,26 @@ export default function Device() {
                   <span className="w-4 h-4 rounded-full border flex items-center justify-center text-xs">i</span>
                 </button>
               </div>
-              <div className="text-sm mb-4" style={{ color: '#999999' }}>
-                배터리 | {device.battery != null ? `${device.battery}%` : '-'} &nbsp;&nbsp; 신호 | {device.signal || '-'}
+              <div className="text-sm mb-2" style={{ color: '#999999' }}>
+                배터리 | {device.battery != null ? `${device.battery}%` : '측정 미지원'} &nbsp;&nbsp; 신호 | {device.signal || '측정 미지원'}
               </div>
+              {/* BLE 진단 한 줄 — "연결됨 표시인데 점등이 안 들어옴" 같은 모호한
+                  상태를 화면에서 즉시 식별할 수 있게 펌웨어 ready / 레거시 모드 /
+                  누적 송신 횟수 / 마지막 송신 프레임을 노출한다. 트레이닝 화면의
+                  진단 라인과 동일 정보 — 두 화면 어디서나 같은 단서로 추적 가능.
+                  - FW=X → bleBridge 가 모든 write 를 silent skip → 점등 0건 원인 1순위.
+                  - 송신=0 → 트레이닝 자체가 시작 안 됨 / 본 화면에서는 정상.
+                  - 마지막 프레임 hex → 송신은 됐는데 본체가 안 깜빡이면 본체측 무시. */}
+              {device.isConnected && (
+                <div
+                  className="text-[10px] font-mono mb-4"
+                  style={{ color: '#666' }}
+                  data-testid={`device-ble-diag-${device.id}`}
+                >
+                  BLE: FW={bleDiag.fwLabel} · L={bleDiag.legacyLabel} · 송신={bleDiag.emitted}
+                  {bleDiag.lastFrame ? ` · ${bleDiag.lastFrame}` : ''}
+                </div>
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={() => handleConnectAction(device)}
