@@ -145,7 +145,14 @@ export default function TrainingSessionPlay() {
     legacyLabel: string;
     emitted: number;
     lastFrame: string;
-  }>({ fwLabel: '?', legacyLabel: '?', emitted: 0, lastFrame: '' });
+    received: number;
+    lastRx: string;
+  }>({ fwLabel: '?', legacyLabel: '?', emitted: 0, lastFrame: '', received: 0, lastRx: '' });
+  // BLE notify 수신 진단 — onBridge 에서 모든 ble.notify 가 들어올 때마다 카운트 +
+  // 마지막 raw hex 를 보관. 1Hz 폴링으로 화면에 노출해 "송신은 74건인데 입력 0건"
+  // 같은 한쪽 단절 케이스를 즉시 추적할 수 있게 한다 (특히 NFC 태그 텍스트가
+  // 펌웨어가 보내는 raw ASCII 와 매핑되는지 hex 로 확인).
+  const notifyDiagRef = useRef<{ count: number; lastHex: string }>({ count: 0, lastHex: '' });
   useEffect(() => {
     const tick = () => {
       const fw = getBleFirmwareReady();
@@ -153,11 +160,15 @@ export default function TrainingSessionPlay() {
       // 일으키지 않도록 앞 20자만 노출 (LED 11B = 33자, IR 5B = 14자 등).
       const raw = getLegacyLastEmittedFrameHex() || '';
       const lastFrame = raw.length > 20 ? `${raw.slice(0, 20)}…` : raw;
+      const rxRaw = notifyDiagRef.current.lastHex;
+      const lastRx = rxRaw.length > 20 ? `${rxRaw.slice(0, 20)}…` : rxRaw;
       setBleDiag({
         fwLabel: fw === true ? 'O' : fw === false ? 'X' : '?',
         legacyLabel: getLegacyBleMode() ? 'ON' : 'OFF',
         emitted: getLegacyEmittedCount(),
         lastFrame,
+        received: notifyDiagRef.current.count,
+        lastRx,
       });
     };
     tick();
@@ -571,6 +582,20 @@ export default function TrainingSessionPlay() {
       //     또는 NFC NDEF Text Record. base64 페이로드를 직접 분류 → 매핑 → 엔진 입력.
       //     payload.touch 가 함께 와서 (1) 에서 이미 처리된 경우는 중복 방지를 위해 스킵.
       if (detail.type === 'ble.notify' && detail.payload.key === 'notify') {
+        // 분류 전 모든 notify 를 진단 카운터에 우선 반영. 분류 실패(매핑 안 되는
+        // NFC 텍스트/예상 외 패턴)도 화면에서 hex 로 확인할 수 있어야 NFC 태그
+        // 인식 디버깅이 가능하다.
+        try {
+          const bin = atob(detail.payload.base64Value);
+          let hex = '';
+          for (let i = 0; i < bin.length; i++) {
+            hex += (i ? ' ' : '') + bin.charCodeAt(i).toString(16).padStart(2, '0');
+          }
+          notifyDiagRef.current.count += 1;
+          notifyDiagRef.current.lastHex = hex;
+        } catch {
+          // base64 디코딩 실패는 사일런트 — 진단 라인은 비울 뿐 화면 흐름에 영향 없음.
+        }
         if (detail.payload.touch) return; // (1) 에서 이미 처리됨
         const ev = tryParseAnyNotifyBase64(detail.payload.base64Value);
         if (!ev) return;
@@ -1040,8 +1065,7 @@ export default function TrainingSessionPlay() {
             style={{ color: '#555' }}
             data-testid="ble-diag"
           >
-            BLE: FW={bleDiag.fwLabel} · L={bleDiag.legacyLabel} · 송신={bleDiag.emitted}
-            {bleDiag.lastFrame ? ` · ${bleDiag.lastFrame}` : ''}
+            BLE: FW={bleDiag.fwLabel} · L={bleDiag.legacyLabel} · TX={bleDiag.emitted}{bleDiag.lastFrame ? ` ${bleDiag.lastFrame}` : ''} · RX={bleDiag.received}{bleDiag.lastRx ? ` ${bleDiag.lastRx}` : ''}
           </p>
         </div>
 

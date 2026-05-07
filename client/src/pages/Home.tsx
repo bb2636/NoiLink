@@ -437,8 +437,14 @@ function StreakSection({
               />
             </svg>
             <div className="text-center">
-              <div className="text-white font-bold text-xl leading-none">{streakDays}일</div>
-              <div className="text-base mt-1">🔥</div>
+              <div className="font-bold text-xl leading-none" style={{ color: '#AAED10' }}>{streakDays}일</div>
+              <div
+                className="text-base mt-1"
+                style={{ filter: 'hue-rotate(75deg) saturate(2.2) brightness(1.1)' }}
+                aria-label="연속 트레이닝"
+              >
+                🔥
+              </div>
             </div>
           </div>
         ) : (
