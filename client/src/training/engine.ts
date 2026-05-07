@@ -117,6 +117,27 @@ export interface EnginePhaseInfo {
   ruleColor?: LogicColor; // COMPREHENSION 규칙
 }
 
+/**
+ * 자유 트레이닝(FREE) 자유설정 (Task #154).
+ *
+ * FREE 는 점수 산출이 없는 "연습 모드" 라 단일 자극 패턴을 강제하지 않고
+ * 사용자가 색·진행 방식을 직접 고른다. 합계 시간/스트릭 랭킹에는 다른 세션과
+ * 동일하게 합산되지만 (server/routes/rankings.ts 의 totalTimeRanking /
+ * streakInWindow 가 모드 필터 없이 모든 세션을 합산), 6대 지표 점수는
+ * 산출되지 않는다 (submitTrainingRun 의 `mode === 'FREE'` 분기로 metrics
+ * 호출 자체를 스킵).
+ *
+ * - color: 점등 색상 (사용자가 setup 화면에서 선택). 단일 색만 사용한다.
+ * - sequenceMode:
+ *     'RANDOM'     — 매 박마다 무작위 pod 한 개 점등 (집중 연습)
+ *     'SEQUENTIAL' — 0→1→2→3→0… 라운드로빈 (리듬 연습)
+ *     'SIMUL'      — 모든 선택 pod 동시 점등 (반응 연습)
+ */
+export interface EngineFreeConfig {
+  color: LogicColor;
+  sequenceMode: 'RANDOM' | 'SEQUENTIAL' | 'SIMUL';
+}
+
 export interface EngineConfig {
   mode: TrainingMode; // COMPOSITE 면 5사이클 진행, 그 외는 단일 모드
   bpm: number;
@@ -124,6 +145,12 @@ export interface EngineConfig {
   totalDurationMs: number;
   podCount: number; // 보통 4
   isComposite: boolean;
+  /**
+   * FREE 모드 전용 자유설정. mode === 'FREE' 일 때만 의미가 있다 (그 외 모드는
+   * 무시). 미지정이면 기본값 `{ color: 'GREEN', sequenceMode: 'RANDOM' }` 으로
+   * 동작 — 단위 테스트나 마이그레이션 안 된 호출 경로 호환.
+   */
+  freeConfig?: EngineFreeConfig;
   onPodStates: (states: PodState[]) => void;
   onElapsedMs: (ms: number) => void;
   onPhaseChange: (info: EnginePhaseInfo) => void;
@@ -286,6 +313,11 @@ export class TrainingEngine {
   private compositePlan: { type: 'RHYTHM' | 'COGNITIVE'; cognitiveMode?: TrainingMode; durationMs: number }[] = [];
   private currentPlanIdx = 0;
   private currentCognitiveMode: TrainingMode = 'FOCUS';
+  /**
+   * FREE 모드 SEQUENTIAL 진행 시 다음 점등할 pod 인덱스 (Task #154).
+   * RANDOM/SIMUL 분기에서는 사용하지 않는다.
+   */
+  private freeSeqCursor = 0;
   private currentRule: LogicColor = 'GREEN';
   private rhythmStep = 0;
   private memoryQueue: number[] = []; // 현재 보여줄 시퀀스
@@ -438,7 +470,14 @@ export class TrainingEngine {
       safeBleWriteControl(CTRL_START);
       this.runNextPlan();
     } else {
-      this.currentCognitiveMode = this.cfg.mode === 'FREE' ? 'FOCUS' : this.cfg.mode;
+      // Task #154: FREE 모드는 더 이상 FOCUS 로 폴백하지 않는다 — 자유설정
+      // (color/sequenceMode) 가 fireFreeTick 분기에서 직접 반영되도록 cognitive
+      // mode 도 FREE 그대로 유지한다. 점수 산출은 submitTrainingRun 의 FREE
+      // 분기에서 metrics 호출 자체가 스킵되므로 채점 누적기는 의미 없다.
+      this.currentCognitiveMode = this.cfg.mode;
+      // SEQUENTIAL 진행 시작 위치를 항상 0번 pod 부터 — 재시작/start() 재호출
+      // 에서도 결정적 동작.
+      this.freeSeqCursor = 0;
       this.currentBlePhase = SESSION_PHASE_COGNITIVE;
       safeBleWriteSession({
         bpm: clampBpmForBle(this.cfg.bpm),
@@ -807,6 +846,9 @@ export class TrainingEngine {
           case 'MEMORY':
             // SHOW/RECALL은 위에서 별도 스케줄
             break;
+          case 'FREE':
+            this.fireFreeTick(beatMs);
+            break;
           default:
             this.fireFocusTick(beatMs);
         }
@@ -1105,6 +1147,49 @@ export class TrainingEngine {
     }
     this.pods = this.pods.map(p => ({ ...p, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null, tickId: 0 }));
     this.cfg.onPodStates(this.pods);
+  }
+
+  /**
+   * FREE 모드 1박 점등 (Task #154).
+   *
+   * 점수 산출이 없으므로 누적기(`fTargetCount`/`fTargetHits` 등)는 건드리지
+   * 않는다 — submitTrainingRun 의 FREE 분기에서 metrics 호출 자체가 스킵되어
+   * acc 값은 어차피 서버로 가지 않는다. handleTap 의 모드별 switch 도 FREE
+   * 케이스가 없어 default 폴백 없이 곧장 종단의 `allOff()` 만 거친다 (탭 →
+   * LED 끔). FREE 점등을 단일 색·단일 패턴(default 'GREEN'/RANDOM)으로 두어
+   * 사용자가 setup 화면에서 자유 설정한 색·진행 방식이 fireFreeTick 에서만
+   * 일관되게 반영되도록 한다.
+   */
+  private fireFreeTick(beatMs: number): void {
+    const cfg = this.cfg.freeConfig ?? { color: 'GREEN' as LogicColor, sequenceMode: 'RANDOM' as const };
+    // pod 가 1개 이하면 SIMUL/SEQUENTIAL 도 RANDOM 과 동일하게 동작 (점등할 다른
+    // pod 가 없음) — 사용자가 1 pod 만 선택한 케이스 안전망.
+    const nPods = this.cfg.podCount;
+    if (nPods <= 0) return;
+    const onMs = beatMs * 0.9;
+    if (cfg.sequenceMode === 'SIMUL' && nPods >= 2) {
+      // 모든 pod 동시 점등. lightTwoPods 는 두 개만 받으므로 직접 BLE 송신.
+      const now = Date.now();
+      const expiresAt = now + onMs;
+      const onMsClamped = Math.min(0xffff, Math.round(onMs));
+      this.pods = this.pods.map(p => {
+        const tickId = this.nextTickId();
+        safeBleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode(cfg.color), onMs: onMsClamped });
+        return { ...p, fill: cfg.color, isTarget: true, litAt: now, expiresAt, tickId };
+      });
+      this.cfg.onPodStates(this.pods);
+      this.schedule(() => this.allOff(), onMs);
+      return;
+    }
+    let podId: number;
+    if (cfg.sequenceMode === 'SEQUENTIAL') {
+      podId = this.freeSeqCursor % nPods;
+      this.freeSeqCursor = (this.freeSeqCursor + 1) % nPods;
+    } else {
+      // RANDOM (또는 SIMUL with nPods=1)
+      podId = Math.floor(Math.random() * nPods);
+    }
+    this.lightSinglePod(podId, cfg.color, onMs, true);
   }
 
   private flashAll(color: LogicColor, ms: number): void {

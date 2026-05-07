@@ -22,9 +22,10 @@ import { STORAGE_KEYS } from '../utils/constants';
 import { TRAINING_BY_ID } from '../utils/trainingConfig';
 import { ensureDemoDevicesSeeded } from '../utils/seedDemoDevices';
 import MemberSelectModal from '../components/MemberSelectModal/MemberSelectModal';
-import type { User, Level, TrainingMode } from '@noilink/shared';
+import type { User, Level, TrainingMode, LogicColor } from '@noilink/shared';
 import { SESSION_MAX_MS, BPM_MIN, BPM_MAX } from '@noilink/shared';
 import type { TrainingRunState } from './TrainingSessionPlay';
+import type { EngineFreeConfig } from '../training/engine';
 
 const MAX_PODS_PER_USER = 4;
 const TOTAL_POD_SLOTS = 8;
@@ -45,6 +46,46 @@ const COLOR_OPTIONS = [
   // 어두운 배경 위에서 식별되도록 매우 옅은 회색 테두리로 그려질 것이다.
   { id: 'white',  color: '#FFFFFF' },
 ] as const;
+
+/**
+ * 동그라미 id → 엔진 LogicColor 매핑 (Task #154 / FREE 자유설정).
+ * FREE 모드에서 사용자가 고른 색상을 그대로 BLE 점등 색으로 흘려보내기 위함.
+ * 다른 모드에서는 화면 표시용으로만 쓰이고 엔진까지 가지 않으므로 영향 없다.
+ */
+const COLOR_ID_TO_LOGIC: Record<string, LogicColor> = {
+  red:    'RED',
+  green:  'GREEN',
+  yellow: 'YELLOW',
+  blue:   'BLUE',
+  white:  'WHITE',
+};
+
+/**
+ * FREE 진행 방식 옵션 (Task #154).
+ * - random:     매 박마다 무작위 pod 한 개 점등 (집중 연습)
+ * - sequential: 0→1→2→3→0… 라운드로빈 (리듬 연습)
+ * - simul:      모든 선택 pod 동시 점등 (반응 연습)
+ */
+const FREE_SEQUENCE_OPTIONS: ReadonlyArray<{
+  id: EngineFreeConfig['sequenceMode'];
+  label: string;
+  desc: string;
+}> = [
+  { id: 'RANDOM',     label: '랜덤',   desc: '매 박마다 무작위 한 개' },
+  { id: 'SEQUENTIAL', label: '순차',   desc: '1→2→3→4 순서대로' },
+  { id: 'SIMUL',      label: '동시',   desc: '모든 Pod 동시 점등' },
+];
+
+/**
+ * FREE 트레이닝 시간 옵션 (초). "무제한" 은 SESSION_MAX_MS(=300s) 캡으로
+ * 동작하며 사용자가 화면에서 종료를 눌러 끝낸다 — 펌웨어 세션 메타에 무한
+ * 시간을 보낼 수 없으므로 기술적 상한을 5분으로 둔다.
+ */
+const FREE_DURATION_OPTIONS: ReadonlyArray<{ sec: number; label: string }> = [
+  { sec: 60,  label: '1분' },
+  { sec: 180, label: '3분' },
+  { sec: SESSION_MAX_MS / 1000, label: '무제한 (최대 5분)' },
+];
 
 /**
  * 트레이닝별 "기본 선택 색상".
@@ -153,11 +194,21 @@ export default function TrainingSetup() {
 
   // ─── 세션 설정 (간소화) ──────────────────────────────────────
   const [level] = useState<Level>(3);
-  // 트레이닝 시간: 풀세션(종합/COMPOSITE/TAU)만 300초, 나머지는 모두 45초
+
+  // ─── FREE 자유설정 (Task #154) ────────────────────────────────
+  // FREE 모드에서만 노출되는 추가 컨트롤. 다른 모드에서는 state 만 들고 있고
+  // 화면/엔진 어디에도 흘려보내지 않으므로 영향 없음.
+  const [freeSequenceMode, setFreeSequenceMode] =
+    useState<EngineFreeConfig['sequenceMode']>('RANDOM');
+  const [freeDurationSec, setFreeDurationSec] = useState<number>(60);
+
+  // 트레이닝 시간: 풀세션(종합/COMPOSITE/TAU)만 300초, FREE 는 사용자가 선택,
+  // 나머지는 모두 45초 고정.
   const totalDurationSec = useMemo(() => {
     if (isComposite) return SESSION_MAX_MS / 1000;
+    if (isFree) return freeDurationSec;
     return 45;
-  }, [isComposite]);
+  }, [isComposite, isFree, freeDurationSec]);
 
   // ─── 시작 가능 조건 ──────────────────────────────────────────
   // BPM 은 펌웨어 스키마(60~200) 안에 들어와야 native 가 ack 거부 없이
@@ -186,6 +237,16 @@ export default function TrainingSetup() {
       level,
       yieldsScore: !isFree,
       isComposite: isComposite || info.apiMode === 'COMPOSITE',
+      // Task #154: FREE 모드일 때만 자유설정을 함께 흘려보낸다. 다른 모드에서는
+      // undefined 로 두어 엔진 폴백이 의미 있는 동작을 하지 않도록 한다.
+      ...(isFree
+        ? {
+            freeConfig: {
+              color: COLOR_ID_TO_LOGIC[color] ?? 'GREEN',
+              sequenceMode: freeSequenceMode,
+            },
+          }
+        : {}),
     };
     // 펌웨어가 11바이트 TOUCH notify (A5 81 + tickId + pod + channel + deltaMs + flags) 로
     // 입력 신호를 보내고, mobile dispatcher 가 이를 ble.touch 로 변환해 트레이닝 엔진이
@@ -369,6 +430,60 @@ export default function TrainingSetup() {
             ))}
           </div>
         </section>
+
+        {/* FREE 자유설정 — 진행 방식 + 시간 (Task #154).
+              FREE 모드에서만 노출되어 사용자가 무작위/순차/동시 패턴과
+              세션 길이를 선택할 수 있다. 색상은 위 색상 섹션을 그대로 재사용. */}
+        {isFree && (
+          <>
+            <section className="mb-6">
+              <h2 className="text-sm font-semibold text-white mb-3">진행 방식</h2>
+              <div className="grid grid-cols-3 gap-2">
+                {FREE_SEQUENCE_OPTIONS.map((opt) => {
+                  const selected = freeSequenceMode === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => setFreeSequenceMode(opt.id)}
+                      className="rounded-xl px-2 py-3 text-left transition-all"
+                      style={{
+                        backgroundColor: selected ? '#AAED10' : '#1A1A1A',
+                        color: selected ? '#000' : '#CCC',
+                        border: selected ? 'none' : '1.5px solid #2A2A2A',
+                      }}
+                    >
+                      <div className="text-sm font-semibold">{opt.label}</div>
+                      <div className="text-[11px] opacity-80 mt-0.5">{opt.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="mb-6">
+              <h2 className="text-sm font-semibold text-white mb-3">시간</h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                {FREE_DURATION_OPTIONS.map((opt) => {
+                  const selected = freeDurationSec === opt.sec;
+                  return (
+                    <button
+                      key={opt.sec}
+                      onClick={() => setFreeDurationSec(opt.sec)}
+                      className="rounded-full px-4 py-2 text-sm transition-all"
+                      style={{
+                        backgroundColor: selected ? '#AAED10' : '#1A1A1A',
+                        color: selected ? '#000' : '#CCC',
+                        border: selected ? 'none' : '1.5px solid #2A2A2A',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          </>
+        )}
 
         {/* 시작하기 */}
         <button

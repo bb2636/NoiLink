@@ -100,6 +100,15 @@ export type TrainingRunState = {
   level: Level;
   yieldsScore: boolean;
   isComposite: boolean;
+  /**
+   * 자유 트레이닝(FREE) 자유설정 (Task #154).
+   * apiMode === 'FREE' 일 때만 의미가 있으며, 그 외 모드에서는 무시된다.
+   * 미지정이면 엔진이 `{ color: 'GREEN', sequenceMode: 'RANDOM' }` 폴백.
+   */
+  freeConfig?: {
+    color: import('../training/engine').EngineFreeConfig['color'];
+    sequenceMode: import('../training/engine').EngineFreeConfig['sequenceMode'];
+  };
 };
 
 // 기존 PHASE_LABEL/COG_LABEL 라벨 맵은 큰 원형 게이지 디자인에서 화면에 노출되지 않게
@@ -280,6 +289,10 @@ export default function TrainingSessionPlay() {
       totalDurationMs: totalMs,
       podCount: 4,
       isComposite: state.isComposite || state.apiMode === 'COMPOSITE',
+      // Task #154: FREE 자유설정(색·진행 방식) 을 엔진까지 흘려보낸다. 미지정
+      // 시 엔진이 'GREEN'/RANDOM 폴백으로 동작 — TrainingSetup 의 FREE 분기가
+      // 항상 freeConfig 를 채워 보내므로 정상 흐름에서는 폴백을 타지 않는다.
+      freeConfig: state.freeConfig,
       onPodStates: (states) => {
         // 화면에 그리지 않는다 — LED 송신은 엔진 내부에서 BLE 로 직접 처리.
         // 다만 현행 NINA-B1 펌웨어가 보내는 5바이트 IR 진동 패킷은 어느 pod 가
