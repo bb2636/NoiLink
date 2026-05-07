@@ -184,7 +184,7 @@ interface ModeAcc {
   jDoubleHit: number;
   jImpulse: number;
 
-  // AGILITY (손/발)
+  // AGILITY (손/발) — 명세 F. 멀티태스킹
   aHandCount: number;
   aHandHit: number;
   aFootCount: number;
@@ -192,6 +192,16 @@ interface ModeAcc {
   aSimulCount: number;
   aSimulHit: number;
   aRTs: number[];
+  /**
+   * 채널 침범(cross-channel) 오답 누적 — 명세 F: 손=Touch/GREEN 앵커, 발=NFC/BLUE·YELLOW.
+   * - GREEN(앵커) 자극에 NFC 입력이 도달 → 손으로 쳐야 할 앵커를 발로 친 것 → +1
+   * - BLUE/YELLOW(발) 자극에 Touch 입력이 도달 → 발로 차야 할 자극을 손으로 친 것 → +1
+   * 채널 침범은 hit 으로 인정하지 않으며(hand/foot/simul hit 누적 안 됨), 자극은
+   * 그대로 종료(allOff) — 결과적으로 footAccuracy / handRate 가 자연스럽게 깎인다.
+   * source 가 명시되지 않은 호출(단위 테스트, 미마이그레이션 호출 경로)은 채널 검증
+   * 자체를 스킵해 기존 동작과 호환을 유지한다.
+   */
+  aCrossChannelErrors: number;
 
   // ENDURANCE 구간 (Early/Mid/Late) — composite도 누적
   earlyHits: number;
@@ -227,6 +237,7 @@ function emptyAcc(): ModeAcc {
     cTotal: 0, cCorrect: 0, cSwitchCount: 0, cSwitchFirstRTs: [], cSwitchErrors: 0, cSwitchAttempts: 0, cRTs: [],
     jGoCount: 0, jGoHit: 0, jGoRTs: [], jNoGoCount: 0, jNoGoSuccess: 0, jDoubleCount: 0, jDoubleHit: 0, jImpulse: 0,
     aHandCount: 0, aHandHit: 0, aFootCount: 0, aFootHit: 0, aSimulCount: 0, aSimulHit: 0, aRTs: [],
+    aCrossChannelErrors: 0,
     earlyHits: 0, earlyTotal: 0, earlyRTs: [],
     midHits: 0, midTotal: 0, midRTs: [],
     lateHits: 0, lateTotal: 0, lateRTs: [],
@@ -1105,7 +1116,19 @@ export class TrainingEngine {
    * @returns true: 입력이 실제로 채점에 반영됨 / false: stale/중복/소등 상태로 무시됨
    *          (UI 카운터 증분 여부 판단용)
    */
-  handleTap(podId: number, opts?: { deltaMs?: number; tickId?: number }): boolean {
+  /**
+   * 외부에서 들어온 입력 한 건을 채점한다.
+   *
+   * `opts.source` — 명세 F. 멀티태스킹의 손(Touch) / 발(NFC) 채널 구분 파라미터:
+   *   - `'touch'`: BLE TOUCH 11B 프레임 / IR 진동 카운트 (진동센서는 손 입력으로 간주)
+   *   - `'nfc'` : NFC NDEF Text 또는 raw ASCII 페이로드
+   *   - 미지정(`undefined`): 단위 테스트 / 마이그레이션 안 된 호출 경로 — 채널 검증을
+   *     스킵해 기존 동작 그대로 채점한다(하위 호환).
+   *
+   * AGILITY(=멀티태스킹) 모드의 `handleAgilityTap` 만 source 를 사용하며, 다른 모드는
+   * 영향을 받지 않는다.
+   */
+  handleTap(podId: number, opts?: { deltaMs?: number; tickId?: number; source?: 'touch' | 'nfc' }): boolean {
     if (this.destroyed) return false;
     const now = Date.now();
     const pod = this.pods.find(p => p.id === podId);
@@ -1173,7 +1196,7 @@ export class TrainingEngine {
         this.handleJudgmentTap(pod, now, isDoubleTap, opts?.deltaMs);
         break;
       case 'AGILITY':
-        this.handleAgilityTap(pod, now, opts?.deltaMs);
+        this.handleAgilityTap(pod, now, opts?.deltaMs, opts?.source);
         break;
       case 'MEMORY':
         this.handleMemoryTap(pod, now);
@@ -1261,11 +1284,25 @@ export class TrainingEngine {
     }
   }
 
-  private handleAgilityTap(pod: PodState, now: number, deltaMs?: number): void {
+  private handleAgilityTap(pod: PodState, now: number, deltaMs?: number, source?: 'touch' | 'nfc'): void {
     const rt = this.rtFromTap(pod, now, deltaMs);
     this.acc.aRTs.push(rt);
-    if (pod.fill === 'GREEN') this.acc.aHandHit += 1;
-    else if (pod.fill === 'BLUE' || pod.fill === 'YELLOW') this.acc.aFootHit += 1;
+    const isHand = pod.fill === 'GREEN';
+    const isFoot = pod.fill === 'BLUE' || pod.fill === 'YELLOW';
+    // 명세 F. 멀티태스킹: 손(Touch)=GREEN 앵커, 발(NFC)=BLUE 오른발 / YELLOW 왼발.
+    // source 가 명시된 경우 색상-채널 정합성을 검증해 채널 침범(cross-channel)을
+    // hit 에서 제외한다. source 미지정 호출(단위 테스트 / 미마이그레이션 경로)은
+    // 기존 동작 유지 — 색상만으로 hand/foot 판정.
+    const channelOk =
+      source === undefined ||
+      (isHand && source === 'touch') ||
+      (isFoot && source === 'nfc');
+    if (!channelOk) {
+      this.acc.aCrossChannelErrors += 1;
+      return;
+    }
+    if (isHand) this.acc.aHandHit += 1;
+    else if (isFoot) this.acc.aFootHit += 1;
     // 동시 이벤트 케이스: 다른 Pod도 켜져 있으면 simul 성공
     const other = this.pods.find(p => p.id !== pod.id && p.fill !== 'OFF');
     if (other) this.acc.aSimulHit += 1;

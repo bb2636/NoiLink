@@ -581,7 +581,7 @@ export const TRAINING_CATALOG: readonly TrainingCatalogEntry[] = [
   {
     id: 'AGILITY',
     title: '멀티태스킹',
-    desc: '손·발 채널 동시 수행. API 모드 AGILITY(순발/멀티).',
+    desc: '손=패드(GREEN 앵커), 발=NFC(BLUE 오른발 / YELLOW 왼발). 채널 침범은 오답.',
     apiMode: 'AGILITY',
     kind: 'agility',
   },

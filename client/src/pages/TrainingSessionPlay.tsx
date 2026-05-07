@@ -573,7 +573,8 @@ export default function TrainingSessionPlay() {
       if (detail.type === 'ble.touch') {
         const t = detail.payload.touch;
         const useDelta = t.deviceDeltaValid ? t.deltaMs : undefined;
-        const accepted = engineRef.current?.handleTap(t.pod, { deltaMs: useDelta, tickId: t.tickId }) ?? false;
+        // 명세 F. 멀티태스킹: BLE TOUCH 는 손(Touch) 채널 입력으로 분류한다.
+        const accepted = engineRef.current?.handleTap(t.pod, { deltaMs: useDelta, tickId: t.tickId, source: 'touch' }) ?? false;
         if (accepted) bumpTapCount(t.pod, t.tickId);
         return;
       }
@@ -601,8 +602,9 @@ export default function TrainingSessionPlay() {
         if (!ev) return;
         if (ev.type === 'TOUCH') {
           // 분류기가 TOUCH 로 잡았는데 payload.touch 가 비어 있는 케이스 — 동일 데이터로 채점.
+          // 명세 F: 손(Touch) 채널 입력으로 분류.
           const useDelta = ev.deviceDeltaValid ? ev.deltaMs : undefined;
-          const accepted = engineRef.current?.handleTap(ev.pod, { deltaMs: useDelta, tickId: ev.tickId }) ?? false;
+          const accepted = engineRef.current?.handleTap(ev.pod, { deltaMs: useDelta, tickId: ev.tickId, source: 'touch' }) ?? false;
           if (accepted) bumpTapCount(ev.pod, ev.tickId);
           return;
         }
@@ -618,8 +620,9 @@ export default function TrainingSessionPlay() {
           const targetPod = litPodIdsRef.current[0];
           if (targetPod === undefined) return;
           // 펌웨어 한 패킷에 delta>1 이 들어오는 경우(loss 보상)는 같은 pod 에 N회 친 것으로 간주.
+          // 명세 F: IR 진동 센서 입력은 손(Touch) 채널로 분류한다 (진동 = 손으로 두드린 것).
           for (let i = 0; i < delta; i++) {
-            const accepted = engineRef.current?.handleTap(targetPod) ?? false;
+            const accepted = engineRef.current?.handleTap(targetPod, { source: 'touch' }) ?? false;
             if (accepted) bumpTapCount(targetPod, undefined);
           }
           return;
@@ -627,9 +630,10 @@ export default function TrainingSessionPlay() {
         if (ev.type === 'NFC_TEXT') {
           // NFC 태그 텍스트(예: "left", "1")를 두 컨벤션 모두 인식해 pod 로 매핑 (사용자 정책 2=C).
           // 매칭 안 되면 무시 — 사용자가 자유 라벨링해도 잘못된 입력이 발생하지 않는다.
+          // 명세 F: NFC 입력은 발(NFC) 채널로 분류한다.
           const pod = nfcTextToPod(ev.text);
           if (pod === null) return;
-          const accepted = engineRef.current?.handleTap(pod) ?? false;
+          const accepted = engineRef.current?.handleTap(pod, { source: 'nfc' }) ?? false;
           if (accepted) bumpTapCount(pod, undefined);
           return;
         }

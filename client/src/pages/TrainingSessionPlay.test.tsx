@@ -1278,7 +1278,8 @@ describe('TrainingSessionPlay — 현행 펌웨어 입력 라우팅 (IR / NFC)',
     dispatchBridge(notifyMessage(irPacket(7))); // baseline
     dispatchBridge(notifyMessage(irPacket(8))); // delta=1
     expect(eng.handleTap).toHaveBeenCalledTimes(1);
-    expect(eng.handleTap).toHaveBeenCalledWith(2);
+    // 명세 F: IR 진동 = 손(Touch) 채널.
+    expect(eng.handleTap).toHaveBeenCalledWith(2, { source: 'touch' });
   });
 
   it('IR delta>1 (펌웨어 누락 보상) → 같은 pod 에 N회 handleTap', () => {
@@ -1288,9 +1289,9 @@ describe('TrainingSessionPlay — 현행 펌웨어 입력 라우팅 (IR / NFC)',
     dispatchBridge(notifyMessage(irPacket(0))); // baseline
     dispatchBridge(notifyMessage(irPacket(3))); // delta=3
     expect(eng.handleTap).toHaveBeenCalledTimes(3);
-    expect(eng.handleTap).toHaveBeenNthCalledWith(1, 0);
-    expect(eng.handleTap).toHaveBeenNthCalledWith(2, 0);
-    expect(eng.handleTap).toHaveBeenNthCalledWith(3, 0);
+    expect(eng.handleTap).toHaveBeenNthCalledWith(1, 0, { source: 'touch' });
+    expect(eng.handleTap).toHaveBeenNthCalledWith(2, 0, { source: 'touch' });
+    expect(eng.handleTap).toHaveBeenNthCalledWith(3, 0, { source: 'touch' });
   });
 
   it('IR touchCount 증가했지만 점등 pod 가 없으면 무시', () => {
@@ -1316,14 +1317,15 @@ describe('TrainingSessionPlay — 현행 펌웨어 입력 라우팅 (IR / NFC)',
     const eng = getFakeEngine();
     dispatchBridge(notifyMessage(ndefTextPacket('left')));
     expect(eng.handleTap).toHaveBeenCalledTimes(1);
-    expect(eng.handleTap).toHaveBeenCalledWith(0);
+    // 명세 F: NFC = 발(NFC) 채널.
+    expect(eng.handleTap).toHaveBeenCalledWith(0, { source: 'nfc' });
   });
 
   it('NFC NDEF "3" → handleTap(2)', () => {
     renderApp();
     const eng = getFakeEngine();
     dispatchBridge(notifyMessage(ndefTextPacket('3')));
-    expect(eng.handleTap).toHaveBeenCalledWith(2);
+    expect(eng.handleTap).toHaveBeenCalledWith(2, { source: 'nfc' });
   });
 
   it('NFC NDEF 매칭 안 되는 텍스트("foo") → 무시', () => {
