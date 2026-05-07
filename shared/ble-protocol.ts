@@ -502,7 +502,19 @@ export function encodeLegacyControlStopFrame(): Uint8Array {
 //   [..]   선택적 종료자 0x0A
 // ---------------------------------------------------------------------------
 
-export const LEGACY_IR_FRAME_BYTES = 5;
+// NINA-B1-FB55CE 펌웨어가 보내는 IR+진동 패킷은 5바이트(초기 명세) 또는
+// 6바이트(실기기 관측 — reserved 1바이트 추가) 두 가지 길이로 들어온다.
+//   5B: [IR_HI, IR_LO, TOUCH_CNT, 0x0D, 0x0A]
+//   6B: [IR_HI, IR_LO, TOUCH_CNT, 0x00, 0x0D, 0x0A]   (예: `06 BD 00 00 0D 0A`)
+// 첨부 firmware 명세표의 데이터(`06 9C 00 00 0D 0A` 등)는 모두 6바이트이며,
+// 5바이트만 인정하던 과거 파서는 실기기 패킷을 IR 로 분류하지 못해 raw ASCII
+// fallback 까지 떨어졌다가 0x06(비-printable)에서 또 실패해 모두 드롭됐다 —
+// 진단 line 의 RX 카운트는 늘지만 실제 채점 입력이 0회로 잡히는 회귀의
+// 직접 원인이었다. 길이 무관하게 마지막 두 바이트 == 0x0D 0x0A 만으로 판정.
+export const LEGACY_IR_FRAME_BYTES_MIN = 5;
+export const LEGACY_IR_FRAME_BYTES_MAX = 6;
+/** @deprecated 호환용 — 새 코드는 LEGACY_IR_FRAME_BYTES_MIN/MAX 를 사용한다. */
+export const LEGACY_IR_FRAME_BYTES = LEGACY_IR_FRAME_BYTES_MIN;
 export const LEGACY_IR_TERMINATOR_0 = 0x0d;
 export const LEGACY_IR_TERMINATOR_1 = 0x0a;
 
@@ -514,11 +526,14 @@ export interface LegacyIrEvent {
   touchCount: number;
 }
 
-/** 5바이트 IR 패킷 파싱. 종료자(0x0D 0x0A) 불일치/길이 부족이면 null */
+/** 5/6바이트 IR 패킷 파싱. 종료자(0x0D 0x0A) 불일치/길이 부족이면 null */
 export function tryParseLegacyIrBytes(bytes: Uint8Array): LegacyIrEvent | null {
-  if (bytes.length < LEGACY_IR_FRAME_BYTES) return null;
-  if (bytes[3] !== LEGACY_IR_TERMINATOR_0) return null;
-  if (bytes[4] !== LEGACY_IR_TERMINATOR_1) return null;
+  if (bytes.length !== LEGACY_IR_FRAME_BYTES_MIN && bytes.length !== LEGACY_IR_FRAME_BYTES_MAX) {
+    return null;
+  }
+  // 마지막 두 바이트가 0x0D 0x0A 종료자여야 한다 — 5B/6B 모두 동일 규약.
+  if (bytes[bytes.length - 2] !== LEGACY_IR_TERMINATOR_0) return null;
+  if (bytes[bytes.length - 1] !== LEGACY_IR_TERMINATOR_1) return null;
   const distanceMm = ((bytes[0]! << 8) | bytes[1]!) & 0xffff;
   const touchCount = bytes[2]!;
   return { type: 'IR', distanceMm, touchCount };
