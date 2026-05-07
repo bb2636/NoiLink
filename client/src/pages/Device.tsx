@@ -11,9 +11,12 @@ import { ensureDemoDevicesSeeded } from '../utils/seedDemoDevices';
 import {
   bleConnect,
   bleDisconnect,
+  bleWriteLed,
+  bleWriteControl,
   getLegacyEmittedCount,
   getLegacyLastEmittedFrameHex,
 } from '../native/bleBridge';
+import { COLOR_CODE, CTRL_START, CTRL_STOP } from '@noilink/shared';
 import { getBleFirmwareReady } from '../native/bleFirmwareReady';
 import { getLegacyBleMode } from '../native/legacyBleMode';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
@@ -80,6 +83,35 @@ export default function Device() {
     emitted: number;
     lastFrame: string;
   }>({ fwLabel: '?', legacyLabel: '?', emitted: 0, lastFrame: '' });
+  // 테스트 점등 진행 중 표시 — 다중 클릭 방지 + 버튼 라벨 전환에 사용.
+  const [testBlinkRunning, setTestBlinkRunning] = useState(false);
+
+  /**
+   * 테스트 점등 — 트레이닝 화면에 진입하지 않고도 점등 신호가 실제로
+   * 기기에 도달해 LED 가 켜지는지 즉시 확인할 수 있는 진단 도구.
+   * START → Pod 1~4 순차 RED 점등 → STOP 순으로 보낸다.
+   * 레거시 모드 ON 이면 `4eXX0d`/`aa55`/`ff` 형식, OFF 이면 NoiPod 정식
+   * 12바이트 프레임으로 송신된다(`bleWriteLed`/`bleWriteControl` 분기).
+   *
+   * "기기 연결은 됐는데 점등이 안 들어옴"과 "기기가 아예 안 받음" 을
+   * 사용자가 스스로 분리할 수 있게 한다 — 점등이 한 개라도 들어오면
+   * BLE 채널은 살아있으므로 트레이닝 측 문제로 좁혀진다.
+   */
+  const handleTestBlink = async () => {
+    if (testBlinkRunning) return;
+    setTestBlinkRunning(true);
+    try {
+      bleWriteControl(CTRL_START);
+      await new Promise((r) => setTimeout(r, 200));
+      for (let pod = 0; pod < 4; pod++) {
+        bleWriteLed({ tickId: pod, pod, colorCode: COLOR_CODE.RED, onMs: 500 });
+        await new Promise((r) => setTimeout(r, 700));
+      }
+      bleWriteControl(CTRL_STOP);
+    } finally {
+      setTestBlinkRunning(false);
+    }
+  };
   useEffect(() => {
     const tick = () => {
       const fw = getBleFirmwareReady();
@@ -273,6 +305,26 @@ export default function Device() {
                   BLE: FW={bleDiag.fwLabel} · L={bleDiag.legacyLabel} · 송신={bleDiag.emitted}
                   {bleDiag.lastFrame ? ` · ${bleDiag.lastFrame}` : ''}
                 </div>
+              )}
+              {/* 테스트 점등 — 연결된 기기에만 노출. 트레이닝에 들어가지 않고도
+                  점등 신호가 실제 기기에 도달해 LED 가 켜지는지 확인할 수 있다.
+                  진단 라인의 송신 카운트가 +5 (START + Pod×4) 증가하지만 LED 가
+                  안 켜지면 펌웨어/하드웨어 측 무응답으로 좁혀진다. */}
+              {device.isConnected && (
+                <button
+                  type="button"
+                  onClick={handleTestBlink}
+                  disabled={testBlinkRunning}
+                  className="mb-3 w-full py-2 rounded-xl text-sm font-semibold transition-opacity"
+                  style={{
+                    backgroundColor: '#0A0A0A',
+                    border: '1px solid #AAED10',
+                    color: '#AAED10',
+                    opacity: testBlinkRunning ? 0.4 : 1,
+                  }}
+                >
+                  {testBlinkRunning ? '테스트 점등 중…' : '테스트 점등 보내기 (Pod 1→4)'}
+                </button>
               )}
               <div className="flex gap-2">
                 <button
