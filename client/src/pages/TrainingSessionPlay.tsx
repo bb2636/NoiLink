@@ -105,10 +105,13 @@ export type TrainingRunState = {
    * apiMode === 'FREE' 일 때만 의미가 있으며, 그 외 모드에서는 무시된다.
    * 미지정이면 엔진이 `{ color: 'GREEN', sequenceMode: 'RANDOM' }` 폴백.
    */
-  freeConfig?: {
-    color: import('../training/engine').EngineFreeConfig['color'];
-    sequenceMode: import('../training/engine').EngineFreeConfig['sequenceMode'];
-  };
+  freeConfig?: import('../training/engine').EngineFreeConfig;
+  /**
+   * FREE 모드에서 사용자가 setup 화면에서 선택한 Pod 수. 다른 모드는 항상 4
+   * (펌웨어 LED 4채널 전제) 로 고정. FREE 만 사용자가 1~4 사이로 선택할 수
+   * 있어 fireFreeTick 의 점등 대상 범위를 결정한다.
+   */
+  podCount?: number;
 };
 
 // 기존 PHASE_LABEL/COG_LABEL 라벨 맵은 큰 원형 게이지 디자인에서 화면에 노출되지 않게
@@ -136,8 +139,18 @@ export default function TrainingSessionPlay() {
   const location = useLocation();
   const state = location.state as TrainingRunState | null;
 
-  const totalSec = state ? Math.min(state.totalDurationSec, SESSION_MAX_MS / 1000) : 0;
-  const totalMs = totalSec * 1000;
+  // FREE 무제한 모드는 SESSION_MAX_MS clamp 와 자동 종료를 모두 우회한다
+  // (Task #154). 엔진은 Number.MAX_SAFE_INTEGER 만큼 totalDurationMs 를
+  // 받지만 startElapsedRaf 가 freeConfig.unlimited 를 보고 complete() 호출을
+  // 스킵하므로 사용자가 화면 "종료" 버튼을 누르기 전까지 계속 진행된다.
+  const isFreeUnlimited =
+    state?.apiMode === 'FREE' && state.freeConfig?.unlimited === true;
+  const totalSec = state
+    ? isFreeUnlimited
+      ? state.totalDurationSec
+      : Math.min(state.totalDurationSec, SESSION_MAX_MS / 1000)
+    : 0;
+  const totalMs = isFreeUnlimited ? Number.MAX_SAFE_INTEGER : totalSec * 1000;
 
   // 화면에 점등 시각화를 그리지 않는다 (정책: 점등 표시는 기기 LED 가 단독으로
   // 담당, 화면은 큰 타이머/안내/결과만). 엔진의 onPodStates 콜백은 LED 신호 송신
@@ -287,7 +300,10 @@ export default function TrainingSessionPlay() {
       bpm: state.bpm,
       level: state.level,
       totalDurationMs: totalMs,
-      podCount: 4,
+      // FREE 모드만 사용자가 setup 화면에서 1~4 사이로 선택 가능 (Task #154).
+      // 다른 모드는 펌웨어 LED 4채널 전제로 항상 4. fireFreeTick 의 nPods<=0
+      // 가드와 함께 두 겹의 보호.
+      podCount: state.apiMode === 'FREE' ? Math.max(1, Math.min(4, state.podCount ?? 4)) : 4,
       isComposite: state.isComposite || state.apiMode === 'COMPOSITE',
       // Task #154: FREE 자유설정(색·진행 방식) 을 엔진까지 흘려보낸다. 미지정
       // 시 엔진이 'GREEN'/RANDOM 폴백으로 동작 — TrainingSetup 의 FREE 분기가
@@ -691,7 +707,13 @@ export default function TrainingSessionPlay() {
         mode: state.apiMode,
         bpm: state.bpm,
         level: state.level,
-        totalDurationSec: totalSec,
+        // FREE 무제한 모드는 사용자가 종료 버튼을 눌러야 끝나므로 totalSec 가
+        // 무의미한 큰 값(MAX_SAFE_INTEGER/1000) 이다. 서버 `Session.duration`
+        // 이 의미 있는 값을 가지도록 실제 경과를 초 단위(올림) 로 덮어쓴다.
+        // 이 값은 totalTimeRanking 의 일별 누적 시간 계산에 그대로 사용된다.
+        totalDurationSec: isFreeUnlimited
+          ? Math.max(1, Math.ceil(elapsedMsRef.current / 1000))
+          : totalSec,
         yieldsScore: state.yieldsScore,
         isComposite: state.isComposite,
         tapCount,
@@ -1120,33 +1142,61 @@ export default function TrainingSessionPlay() {
           >
             취소
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              const eng = engineRef.current;
-              if (!eng) return;
-              if (isPaused) {
-                eng.resume();
-                setIsPaused(false);
-              } else {
-                eng.pause();
-                setIsPaused(true);
-              }
-            }}
-            disabled={submitting || !!engineMetrics}
-            className="rounded-full font-semibold flex items-center justify-center"
-            style={{
-              width: 72,
-              height: 72,
-              backgroundColor: isPaused ? '#AAED10' : '#B8782A',
-              color: isPaused ? '#000' : '#fff',
-              fontSize: 15,
-              opacity: (submitting || !!engineMetrics) ? 0.5 : 1,
-            }}
-            aria-label={isPaused ? '재개' : '일시정지'}
-          >
-            {isPaused ? '재개' : '일시정지'}
-          </button>
+          {isFreeUnlimited ? (
+            // FREE 무제한 모드(Task #154): 자동 완료가 없으므로 사용자가
+            // 직접 "종료" 를 눌러 endNow() → complete() → onComplete 메트릭 →
+            // submit 흐름을 트리거. 이 시점의 elapsed 가 서버 duration 으로
+            // 저장된다. 일시정지/재개는 의미가 없어 종료 한 버튼만 노출.
+            <button
+              type="button"
+              onClick={() => {
+                const eng = engineRef.current;
+                if (!eng) return;
+                eng.endNow();
+              }}
+              disabled={submitting || !!engineMetrics}
+              className="rounded-full font-semibold flex items-center justify-center"
+              style={{
+                width: 72,
+                height: 72,
+                backgroundColor: '#AAED10',
+                color: '#000',
+                fontSize: 15,
+                opacity: (submitting || !!engineMetrics) ? 0.5 : 1,
+              }}
+              aria-label="종료"
+            >
+              종료
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                const eng = engineRef.current;
+                if (!eng) return;
+                if (isPaused) {
+                  eng.resume();
+                  setIsPaused(false);
+                } else {
+                  eng.pause();
+                  setIsPaused(true);
+                }
+              }}
+              disabled={submitting || !!engineMetrics}
+              className="rounded-full font-semibold flex items-center justify-center"
+              style={{
+                width: 72,
+                height: 72,
+                backgroundColor: isPaused ? '#AAED10' : '#B8782A',
+                color: isPaused ? '#000' : '#fff',
+                fontSize: 15,
+                opacity: (submitting || !!engineMetrics) ? 0.5 : 1,
+              }}
+              aria-label={isPaused ? '재개' : '일시정지'}
+            >
+              {isPaused ? '재개' : '일시정지'}
+            </button>
+          )}
         </div>
 
         {submitting && (

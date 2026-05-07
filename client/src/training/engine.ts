@@ -136,6 +136,13 @@ export interface EnginePhaseInfo {
 export interface EngineFreeConfig {
   color: LogicColor;
   sequenceMode: 'RANDOM' | 'SEQUENTIAL' | 'SIMUL';
+  /**
+   * 무제한 진행. true 면 startElapsedRaf 가 elapsed 도달로 complete() 를
+   * 호출하지 않고, 사용자가 화면에서 "종료" 를 눌러 endNow() 가 호출되어야
+   * 세션이 끝난다. 이때 submit 단계에서 실제 경과 시간으로
+   * totalDurationSec 가 갱신되어 서버에 정확한 길이가 저장된다.
+   */
+  unlimited?: boolean;
 }
 
 export interface EngineConfig {
@@ -508,10 +515,20 @@ export class TrainingEngine {
         return;
       }
       const e = Date.now() - this.startedAt;
-      this.cfg.onElapsedMs(Math.min(this.cfg.totalDurationMs, e));
-      if (e >= this.cfg.totalDurationMs) {
-        this.complete();
-        return;
+      // FREE 무제한 모드 (Task #154): elapsed 보고는 그대로 하되 자동 완료를
+      // 막는다. 사용자가 화면에서 "종료" 를 눌러 endNow() 가 호출돼야 세션이
+      // 끝나며, totalDurationMs 는 사실상 의미가 없다(이때는 보고값을 캡하지
+      // 않고 실제 경과를 그대로 흘려보내 UI 타이머가 계속 증가하도록 한다).
+      const freeUnlimited =
+        this.cfg.mode === 'FREE' && this.cfg.freeConfig?.unlimited === true;
+      if (freeUnlimited) {
+        this.cfg.onElapsedMs(e);
+      } else {
+        this.cfg.onElapsedMs(Math.min(this.cfg.totalDurationMs, e));
+        if (e >= this.cfg.totalDurationMs) {
+          this.complete();
+          return;
+        }
       }
       this.rafId = window.requestAnimationFrame(tickElapsed);
     };
@@ -1167,6 +1184,11 @@ export class TrainingEngine {
     const nPods = this.cfg.podCount;
     if (nPods <= 0) return;
     const onMs = beatMs * 0.9;
+    // FREE 는 점수 산출이 없는 연습 모드 — `isTarget=false` 로 점등해
+    // `lightSinglePod` 의 미응답 timeout 분기에서 `recordOmission` 이
+    // 트리거되지 않게 한다. handleTap 도 FREE case 가 없어 채점 누적기를
+    // 건드리지 않으므로 acc 는 항상 0 으로 남고, submitTrainingRun 의 FREE
+    // 분기에서 metrics 호출 자체가 스킵된다.
     if (cfg.sequenceMode === 'SIMUL' && nPods >= 2) {
       // 모든 pod 동시 점등. lightTwoPods 는 두 개만 받으므로 직접 BLE 송신.
       const now = Date.now();
@@ -1175,7 +1197,7 @@ export class TrainingEngine {
       this.pods = this.pods.map(p => {
         const tickId = this.nextTickId();
         safeBleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode(cfg.color), onMs: onMsClamped });
-        return { ...p, fill: cfg.color, isTarget: true, litAt: now, expiresAt, tickId };
+        return { ...p, fill: cfg.color, isTarget: false, litAt: now, expiresAt, tickId };
       });
       this.cfg.onPodStates(this.pods);
       this.schedule(() => this.allOff(), onMs);
@@ -1189,7 +1211,7 @@ export class TrainingEngine {
       // RANDOM (또는 SIMUL with nPods=1)
       podId = Math.floor(Math.random() * nPods);
     }
-    this.lightSinglePod(podId, cfg.color, onMs, true);
+    this.lightSinglePod(podId, cfg.color, onMs, false);
   }
 
   private flashAll(color: LogicColor, ms: number): void {

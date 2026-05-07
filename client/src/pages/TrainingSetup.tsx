@@ -77,14 +77,17 @@ const FREE_SEQUENCE_OPTIONS: ReadonlyArray<{
 ];
 
 /**
- * FREE 트레이닝 시간 옵션 (초). "무제한" 은 SESSION_MAX_MS(=300s) 캡으로
- * 동작하며 사용자가 화면에서 종료를 눌러 끝낸다 — 펌웨어 세션 메타에 무한
- * 시간을 보낼 수 없으므로 기술적 상한을 5분으로 둔다.
+ * FREE 트레이닝 시간 옵션 (초). `sec === 0` 은 "무제한" 센티널 — 엔진의
+ * 자동 완료를 끄고 사용자가 화면 종료 버튼을 누를 때까지 진행되며, 그
+ * 시점의 실제 경과 시간이 서버에 저장된다 (TrainingSessionPlay 가 submit
+ * 시 totalDurationSec 를 실제 elapsed 로 덮어 씌운다).
  */
+const FREE_UNLIMITED_SENTINEL = 0;
 const FREE_DURATION_OPTIONS: ReadonlyArray<{ sec: number; label: string }> = [
   { sec: 60,  label: '1분' },
   { sec: 180, label: '3분' },
-  { sec: SESSION_MAX_MS / 1000, label: '무제한 (최대 5분)' },
+  { sec: 300, label: '5분' },
+  { sec: FREE_UNLIMITED_SENTINEL, label: '무제한' },
 ];
 
 /**
@@ -201,14 +204,17 @@ export default function TrainingSetup() {
   const [freeSequenceMode, setFreeSequenceMode] =
     useState<EngineFreeConfig['sequenceMode']>('RANDOM');
   const [freeDurationSec, setFreeDurationSec] = useState<number>(60);
+  const isFreeUnlimited = isFree && freeDurationSec === FREE_UNLIMITED_SENTINEL;
 
   // 트레이닝 시간: 풀세션(종합/COMPOSITE/TAU)만 300초, FREE 는 사용자가 선택,
-  // 나머지는 모두 45초 고정.
+  // FREE 무제한은 엔진 자동 완료를 끄고 실제 경과를 서버에 저장하므로 여기선
+  // 형식상 1분(60s) 으로 두되 TrainingSessionPlay 가 freeConfig.unlimited 를
+  // 보고 SESSION_MAX_MS clamp 와 자동 종료를 모두 우회한다. 나머지는 45초.
   const totalDurationSec = useMemo(() => {
     if (isComposite) return SESSION_MAX_MS / 1000;
-    if (isFree) return freeDurationSec;
+    if (isFree) return isFreeUnlimited ? 60 : freeDurationSec;
     return 45;
-  }, [isComposite, isFree, freeDurationSec]);
+  }, [isComposite, isFree, isFreeUnlimited, freeDurationSec]);
 
   // ─── 시작 가능 조건 ──────────────────────────────────────────
   // BPM 은 펌웨어 스키마(60~200) 안에 들어와야 native 가 ack 거부 없이
@@ -244,7 +250,13 @@ export default function TrainingSetup() {
             freeConfig: {
               color: COLOR_ID_TO_LOGIC[color] ?? 'GREEN',
               sequenceMode: freeSequenceMode,
+              ...(isFreeUnlimited ? { unlimited: true } : {}),
             },
+            // FREE 는 사용자가 실제로 연결·선택한 Pod 수만 점등 대상으로
+            // 삼는다. 1개 이상 선택돼야 startEnabled 가 true 라 0 은 들어오지
+            // 않지만, 안전망으로 최소 1 로 클램프 (`fireFreeTick` 의 nPods<=0
+            // 가드와 함께 두 겹의 보호).
+            podCount: Math.max(1, Math.min(MAX_PODS_PER_USER, selectedPodIds.size)),
           }
         : {}),
     };
