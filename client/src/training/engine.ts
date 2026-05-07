@@ -525,8 +525,10 @@ export class TrainingEngine {
       // 분기에서 metrics 호출 자체가 스킵되므로 채점 누적기는 의미 없다.
       this.currentCognitiveMode = this.cfg.mode;
       // SEQUENTIAL 진행 시작 위치를 항상 0번 pod 부터 — 재시작/start() 재호출
-      // 에서도 결정적 동작.
+      // 에서도 결정적 동작. MULTI 색 팔레트 커서도 함께 0 으로 리셋해, 동일
+      // 세션 재시작 시 첫 점등 색이 항상 팔레트[0] 부터 시작되도록 한다 (Task #154).
       this.freeSeqCursor = 0;
+      this.freeMultiCursor = 0;
       this.currentBlePhase = SESSION_PHASE_COGNITIVE;
       safeBleWriteSession({
         bpm: clampBpmForBle(this.cfg.bpm),
