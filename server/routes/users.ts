@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
 import type { User } from '@noilink/shared';
+import { isoToKstLocalDate } from '@noilink/shared';
 import { generateToken, extractTokenFromHeader, verifyToken } from '../utils/jwt.js';
 import { hashPassword, comparePassword } from '../utils/password.js';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
@@ -296,12 +297,16 @@ router.get('/me', async (req: Request, res: Response) => {
     // 연속 트레이닝 자동 리셋 (조회 시점 기준)
     // - 마지막 훈련일이 어제·오늘이 아니면 현재 streak 은 0으로 리셋
     // - bestStreak 는 그대로 보관 (랭킹/기록 보존)
+    // Task #151: KST(`Asia/Seoul`) 기준으로 비교. UTC 기준이면 KST 자정 직후 ~
+    //   KST 09:00 사이에 조회한 어제 훈련 기록이 "그제" 로 잘못 분류돼 streak
+    //   가 0 으로 리셋되는 회귀가 있었다.
     if (user.lastTrainingDate && (user.streak ?? 0) > 0) {
-      const today = new Date().toISOString().split('T')[0];
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
-      const lastDate = new Date(user.lastTrainingDate).toISOString().split('T')[0];
+      const today = isoToKstLocalDate(new Date().toISOString())!;
+      const [yy, mm, dd] = today.split('-').map(Number);
+      const yUtc = new Date(Date.UTC(yy, mm - 1, dd));
+      yUtc.setUTCDate(yUtc.getUTCDate() - 1);
+      const yesterdayStr = `${yUtc.getUTCFullYear()}-${String(yUtc.getUTCMonth() + 1).padStart(2, '0')}-${String(yUtc.getUTCDate()).padStart(2, '0')}`;
+      const lastDate = isoToKstLocalDate(user.lastTrainingDate);
       if (lastDate !== today && lastDate !== yesterdayStr) {
         const prevBest = user.bestStreak || 0;
         if (user.streak > prevBest) {

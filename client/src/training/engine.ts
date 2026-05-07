@@ -30,10 +30,34 @@ import {
   judgeRhythmError,
   judgmentDoubleTapWindowMs,
   logicColorToCode,
+  mixedColorRateForLevel,
   rhythmStepsForBeat,
 } from '@noilink/shared';
 
 import { bleWriteControl, bleWriteLed, bleWriteSession } from '../native/bleBridge';
+
+/**
+ * Task #150 — BLE 송신 throw 가 트레이닝 흐름(특히 Composite 의 start →
+ * runNextPlan → fireTick 루프)을 중단시키지 못하게 하는 방어선.
+ *
+ * 사용자 보고: 종합트레이닝(5분) 시작 시 처음부터 끝까지 점등 0건 + 입력 카운터
+ * 0건. 단위 테스트로 Composite 정상 흐름은 모두 통과 → 코드 로직은 OK 였고,
+ * 실제 회귀는 사용자 환경에서 BLE write 가 throw 하여 start() 가 도중에 끊긴
+ * 시나리오로 좁혀졌다 (handleTap 의 OFF 가드 때문에 점등이 안 일어나면 입력
+ * 카운터까지 0 으로 보임).
+ *
+ * native 미연결 환경에서는 어차피 no-op 이고, 연결 환경에서도 BLE 전송 실패가
+ * 트레이닝 채점/시각화 흐름을 막아서는 안 되므로 모든 호출을 try/catch 로 감싼다.
+ */
+function safeBleWriteSession(p: Parameters<typeof bleWriteSession>[0]): void {
+  try { bleWriteSession(p); } catch { /* swallow — 트레이닝 흐름 보호 */ }
+}
+function safeBleWriteControl(p: Parameters<typeof bleWriteControl>[0]): void {
+  try { bleWriteControl(p); } catch { /* swallow */ }
+}
+function safeBleWriteLed(p: Parameters<typeof bleWriteLed>[0]): void {
+  try { bleWriteLed(p); } catch { /* swallow */ }
+}
 
 /**
  * START(`aa 55`) 송신 직후 첫 LED 명령까지의 마진(ms).
@@ -77,7 +101,7 @@ export interface PodState {
   litAt: number | null;
   /** 입력 마감 시각 */
   expiresAt: number | null;
-  /** 현재 점등을 식별하는 monotonic id — BLE TOUCH/UI 입력 중복 처리 방지 */
+  /** 현재 점등을 식별하는 monotonic id — 동일 BLE TOUCH 가 중복 도착해도 1회만 처리 */
   tickId: number;
 }
 
@@ -134,7 +158,8 @@ interface ModeAcc {
   fRTs: number[];
 
   // MEMORY
-  mShown: number;      // 시퀀스 길이 합
+  mShown: number;      // 시퀀스 길이 합 (SHOW 시점 누적)
+  mAttempts: number;   // 사용자가 RECALL 단계에서 누른 입력 수 (정답+오답)
   mCorrect: number;    // 정답 입력 수
   mPerfectSeqs: number; // 시퀀스 완벽 횟수
   mTotalSeqs: number;
@@ -198,7 +223,7 @@ function emptyAcc(): ModeAcc {
     ticks: 0, taps: 0, hits: 0, rtSamples: [],
     rhythmTicks: 0, rPerfect: 0, rGood: 0, rBad: 0, rMiss: 0, rOffsets: [],
     fTargetCount: 0, fTargetHits: 0, fDistractorCount: 0, fCommissions: 0, fOmissions: 0, fRTs: [],
-    mShown: 0, mCorrect: 0, mPerfectSeqs: 0, mTotalSeqs: 0, mRTs: [],
+    mShown: 0, mAttempts: 0, mCorrect: 0, mPerfectSeqs: 0, mTotalSeqs: 0, mRTs: [],
     cTotal: 0, cCorrect: 0, cSwitchCount: 0, cSwitchFirstRTs: [], cSwitchErrors: 0, cSwitchAttempts: 0, cRTs: [],
     jGoCount: 0, jGoHit: 0, jGoRTs: [], jNoGoCount: 0, jNoGoSuccess: 0, jDoubleCount: 0, jDoubleHit: 0, jImpulse: 0,
     aHandCount: 0, aHandHit: 0, aFootCount: 0, aFootHit: 0, aSimulCount: 0, aSimulHit: 0, aRTs: [],
@@ -257,14 +282,23 @@ export class TrainingEngine {
   private memoryPhase: 'SHOW' | 'RECALL' = 'SHOW';
   private memoryRecallStartedAt = 0;
   private memoryLastTapAt = 0;
+  /** 현재 MEMORY phase 의 1박 간격(ms) — runMemorySequence 가 SHOW 시퀀스를 그릴 때 사용. */
+  private memoryTickInterval = 0;
+  /** 다음 MEMORY 시퀀스로의 advance 가 이미 예약됐는지 — RECALL 완료 입력과 window 만료
+   *  schedule 양쪽이 같은 사이클에서 advance 를 두 번 트리거하지 않도록 막는 멱등 플래그. */
+  private memorySequenceAdvancing = false;
   private pendingTimers: number[] = []; // destroy 시 정리 대상
   private lastTapAt: { podId: number; ts: number } | null = null; // 더블탭 감지
   private switchPendingFirst = false; // COMPREHENSION 전환 직후 첫 입력 측정
   private switchedAt = 0;
+  /** COMPREHENSION 규칙 변경 직후 N tick 동안 "혼합색(RED 방해 자극)" 점등 금지.
+   *  명세 B: 변경 직후 2~3 Tick 은 혼합색 금지 — 사용자가 새 규칙에 적응할 시간을 준다.
+   *  매 fireComprehensionTick 시작에서 0 이상이면 1 감소, >0 인 동안은 RED 를 색 풀에서 제외. */
+  private cNoMixedUntilTicks = 0;
   private destroyed = false;
   /** monotonic tick id — BLE LED/TOUCH 매칭과 중복 입력 차단에 사용 */
   private tickIdCounter = 0;
-  /** 이미 처리된 (pod, tickId) — UI tap과 BLE TOUCH가 모두 와도 1회만 */
+  /** 이미 처리된 (pod, tickId) — BLE notify 중복 콜백 등에서 1회만 채점 반영 */
   private consumedTickIds = new Set<string>();
   /** -1: 아직 한 번도 송신 안 됨 (첫 세그먼트에서 무조건 writeSession 보내기 위함) */
   private currentBlePhase: -1 | 0 | 1 = -1;
@@ -326,6 +360,9 @@ export class TrainingEngine {
     this.startedAt = Date.now();
     this.acc = emptyAcc();
     this.consumedTickIds.clear();
+    // 같은 인스턴스를 재시작(restart)하는 경우 이전 세션의 COMPREHENSION 잔여 카운터가
+    // 새 세션 첫 tick 의 RED 풀에 영향 주지 않도록 명시적으로 0 으로 되돌린다.
+    this.cNoMixedUntilTicks = 0;
 
     // BLE 세션 메타 + START (네이티브 셸이 아니면 자동 no-op)
     // 정책:
@@ -342,25 +379,29 @@ export class TrainingEngine {
       if (first) {
         const firstPhase = first.type === 'RHYTHM' ? SESSION_PHASE_RHYTHM : SESSION_PHASE_COGNITIVE;
         this.currentBlePhase = firstPhase;
-        bleWriteSession({
+        // Task #150 — BLE 송신이 throw 해도 runNextPlan() 진입을 막지 못하게 한다.
+        // (사용자 보고: 종합트레이닝 시작 시 첫 점등이 한 번도 안 일어남 → handleTap
+        //  의 OFF 가드에 모든 입력이 막혀 카운터까지 0. 환경 의존 throw 가 start() 흐름을
+        //  중단시키는 회귀 시나리오를 영구 차단.)
+        safeBleWriteSession({
           bpm: clampBpmForBle(this.cfg.bpm),
           level: this.cfg.level,
           phase: firstPhase,
           durationSec: Math.round(first.durationMs / 1000),
         });
       }
-      bleWriteControl(CTRL_START);
+      safeBleWriteControl(CTRL_START);
       this.runNextPlan();
     } else {
       this.currentCognitiveMode = this.cfg.mode === 'FREE' ? 'FOCUS' : this.cfg.mode;
       this.currentBlePhase = SESSION_PHASE_COGNITIVE;
-      bleWriteSession({
+      safeBleWriteSession({
         bpm: clampBpmForBle(this.cfg.bpm),
         level: this.cfg.level,
         phase: SESSION_PHASE_COGNITIVE,
         durationSec: Math.round(this.cfg.totalDurationMs / 1000),
       });
-      bleWriteControl(CTRL_START);
+      safeBleWriteControl(CTRL_START);
       this.cfg.onPhaseChange({ phase: 'COGNITIVE', cognitiveMode: this.currentCognitiveMode, cycleIndex: 0 });
       this.startTickLoop(this.cfg.totalDurationMs);
     }
@@ -407,7 +448,7 @@ export class TrainingEngine {
           this.bleOffPod(p.id, p.tickId);
         }
       }
-      bleWriteControl(CTRL_STOP);
+      safeBleWriteControl(CTRL_STOP);
     }
     this.destroyed = true;
     if (this.rafId) window.cancelAnimationFrame(this.rafId);
@@ -500,6 +541,96 @@ export class TrainingEngine {
     this.pendingTimers.push(id);
   }
 
+  // ───── MEMORY 시퀀스 사이클 ──────────────────────────────────────────
+  /**
+   * MEMORY phase 의 SHOW→RECALL 한 사이클을 schedule 한다.
+   *
+   * - SHOW: tickInterval 마다 시퀀스 한 개씩 GREEN 점등 (Lv1~2 는 연속 동일 Pod 금지).
+   * - RECALL: SHOW 종료 직후 모든 Pod WHITE 로 전환, recallWindow ms 동안 입력 대기.
+   * - RECALL window 가 자연 만료되면 advanceMemorySequence 가 다음 SHOW 를 트리거한다.
+   *   사용자가 시퀀스를 다 채우면 handleMemoryTap 이 같은 헬퍼를 즉시 호출(중복 방지는
+   *   memorySequenceAdvancing 플래그).
+   *
+   * phase 가 이미 종료됐거나(잔여시간 ≤ 0), MEMORY 가 아닌 다른 mode 로 전환됐다면 no-op
+   * — pending advance schedule 이 phase 전환 후에 늦게 발사되더라도 안전.
+   */
+  private runMemorySequence(): void {
+    if (this.destroyed) return;
+    if (this.currentCognitiveMode !== 'MEMORY') return;
+    const elapsed = Date.now() - this.currentPhaseStartedAt;
+    if (elapsed >= this.currentPhaseDurationMs) return;
+    const tickInterval = this.memoryTickInterval;
+    if (tickInterval <= 0) return;
+
+    this.memorySequenceAdvancing = false;
+    this.memoryQueue = [];
+    this.memoryReplay = [];
+    this.memoryPhase = 'SHOW';
+    const seqLen = clamp(this.cfg.level + 2, 3, 6);
+    this.acc.mTotalSeqs += 1;
+    this.acc.mShown += seqLen;
+    // 명세 A.MEMORY: Lv1~2 는 연속 동일 Pod 금지 (학습 진입 부담 완화)
+    const banConsecutive = this.cfg.level <= 2;
+    let prevPod = -1;
+    // 첫 점등은 START(aa 55) 이후 FIRST_TICK_DELAY_MS 만큼 기다린다 — 다른 모드의
+    // fireTick 첫 호출과 같은 마진. 두 번째 사이클부터는 advanceMemorySequence 가
+    // 짧은 휴식(GAP) 후 호출하므로 START 마진은 첫 사이클에서만 의미가 있다.
+    for (let i = 0; i < seqLen; i++) {
+      let podId = Math.floor(Math.random() * this.cfg.podCount);
+      if (banConsecutive && this.cfg.podCount > 1 && podId === prevPod) {
+        podId = (podId + 1) % this.cfg.podCount;
+      }
+      prevPod = podId;
+      this.memoryQueue.push(podId);
+      this.schedule(() => {
+        this.lightSinglePod(podId, 'GREEN', tickInterval * 0.6);
+      }, FIRST_TICK_DELAY_MS + i * tickInterval);
+    }
+    // SHOW 끝나면 RECALL로 전환 (모든 Pod WHITE 신호)
+    const showEnd = FIRST_TICK_DELAY_MS + seqLen * tickInterval;
+    this.schedule(() => {
+      if (this.destroyed) return;
+      if (this.currentCognitiveMode !== 'MEMORY') return;
+      this.memoryPhase = 'RECALL';
+      this.memoryRecallStartedAt = Date.now();
+      this.memoryLastTapAt = 0;
+      this.allOff();
+      // WHITE 입력 신호 — Pod별 monotonic tickId 부여 + BLE 점등
+      // 명세 A.MEMORY: Recall 입력 시간 = on_ms + 250ms (시퀀스 길이만큼 누적)
+      const onMsPerStep = defaultOnMsForLevel(this.cfg.level) + 250;
+      const recallWindow = onMsPerStep * seqLen;
+      const now = Date.now();
+      this.pods = this.pods.map(p => {
+        const tickId = this.nextTickId();
+        safeBleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode('WHITE'), onMs: recallWindow });
+        return { ...p, fill: 'WHITE', isTarget: true, litAt: now, expiresAt: now + recallWindow, tickId };
+      });
+      this.cfg.onPodStates(this.pods);
+      // RECALL window 자연 만료(미완 입력) → 다음 시퀀스로
+      this.schedule(() => this.advanceMemorySequence(), recallWindow);
+    }, showEnd);
+  }
+
+  /**
+   * 다음 MEMORY SHOW 시퀀스를 짧은 휴식(GAP) 후 자동 트리거.
+   * RECALL window 만료 schedule 과 handleMemoryTap 의 시퀀스 완료/오답 양쪽이
+   * 같은 사이클에서 advance 를 두 번 트리거하지 않도록 멱등 플래그로 보호한다.
+   */
+  private advanceMemorySequence(): void {
+    if (this.destroyed) return;
+    // 모드/phase 가드 — RECALL window 만료 schedule 이 phase 전환 후 늦게 발사되더라도
+    // 다른 cognitive mode 의 LED 를 잘못 끄거나 memoryPhase 를 흔들지 않도록 한다.
+    if (this.currentCognitiveMode !== 'MEMORY') return;
+    if (this.memoryPhase !== 'RECALL') return;
+    if (this.memorySequenceAdvancing) return;
+    this.memorySequenceAdvancing = true;
+    this.memoryPhase = 'SHOW'; // RECALL 입력 비활성 — handleMemoryTap 가드
+    this.allOff();
+    // GAP — 사용자가 "다음 시퀀스" 시작을 인지할 수 있는 짧은 휴식(약 한 박)
+    const gap = Math.max(300, Math.min(this.memoryTickInterval || 600, 800));
+    this.schedule(() => this.runMemorySequence(), gap);
+  }
+
   // ───── Composite 플랜 (5사이클 RHYTHM↔COGNITIVE) ────────────────────
   private buildCompositePlan(): void {
     const total = this.cfg.totalDurationMs;
@@ -540,7 +671,7 @@ export class TrainingEngine {
     const blePhase = seg.type === 'RHYTHM' ? SESSION_PHASE_RHYTHM : SESSION_PHASE_COGNITIVE;
     if (blePhase !== this.currentBlePhase) {
       this.currentBlePhase = blePhase;
-      bleWriteSession({
+      safeBleWriteSession({
         bpm: clampBpmForBle(this.cfg.bpm),
         level: this.cfg.level,
         phase: blePhase,
@@ -574,56 +705,21 @@ export class TrainingEngine {
     this.currentPhaseScheduleBased =
       !segIsRhythm && this.currentCognitiveMode === 'MEMORY';
 
-    // MEMORY는 SHOW 단계 먼저 → RECALL
+    // MEMORY는 SHOW 단계 먼저 → RECALL → 다음 SHOW … 를 phase 시간이 끝날 때까지 반복.
+    // 한 사이클(SHOW+RECALL) 의 모든 점등/전환이 schedule()→pendingTimers 에 들어가며,
+    // RECALL 종료(시퀀스 완료 or window 만료) 시 advanceMemorySequence 가 다음 SHOW 를
+    // 자동 트리거한다. (handleMemoryTap 도 시퀀스 완료/오답 시점에 같은 헬퍼를 호출.)
     if (!segIsRhythm && this.currentCognitiveMode === 'MEMORY') {
-      this.memoryQueue = [];
-      this.memoryReplay = [];
-      this.memoryPhase = 'SHOW';
-      const seqLen = clamp(this.cfg.level + 2, 3, 6);
-      this.acc.mTotalSeqs += 1;
-      this.acc.mShown += seqLen;
-      // 시퀀스 보여주기: tickInterval 마다 하나씩 (destroy 시 정리)
-      // 명세 A.MEMORY: Lv1~2 는 연속 동일 Pod 금지 (학습 진입 부담 완화)
-      const banConsecutive = this.cfg.level <= 2;
-      let prevPod = -1;
-      // 첫 점등은 START(aa 55) 이후 FIRST_TICK_DELAY_MS 만큼 기다린다 — 다른 모드의
-      // fireTick 첫 호출과 같은 마진을 부여해, NUS 계열 펌웨어가 START 처리 도중
-      // 들어온 LED 프레임을 잃어버리지 않도록 한다(handleTestBlink 와 동일 정책).
-      for (let i = 0; i < seqLen; i++) {
-        let podId = Math.floor(Math.random() * this.cfg.podCount);
-        if (banConsecutive && this.cfg.podCount > 1 && podId === prevPod) {
-          podId = (podId + 1) % this.cfg.podCount;
-        }
-        prevPod = podId;
-        this.memoryQueue.push(podId);
-        this.schedule(() => {
-          this.lightSinglePod(podId, 'GREEN', tickInterval * 0.6);
-        }, FIRST_TICK_DELAY_MS + i * tickInterval);
-      }
-      // SHOW 끝나면 RECALL로 전환 (모든 Pod WHITE 신호)
-      const showEnd = FIRST_TICK_DELAY_MS + seqLen * tickInterval;
-      this.schedule(() => {
-        this.memoryPhase = 'RECALL';
-        this.memoryRecallStartedAt = Date.now();
-        this.memoryLastTapAt = 0;
-        this.allOff();
-        // WHITE 입력 신호 — Pod별 monotonic tickId 부여 + BLE 점등
-        // 명세 A.MEMORY: Recall 입력 시간 = on_ms + 250ms (시퀀스 길이만큼 누적)
-        const onMsPerStep = defaultOnMsForLevel(this.cfg.level) + 250;
-        const recallWindow = onMsPerStep * seqLen;
-        const now = Date.now();
-        this.pods = this.pods.map(p => {
-          const tickId = this.nextTickId();
-          bleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode('WHITE'), onMs: recallWindow });
-          return { ...p, fill: 'WHITE', isTarget: true, litAt: now, expiresAt: now + recallWindow, tickId };
-        });
-        this.cfg.onPodStates(this.pods);
-      }, showEnd);
+      this.memoryTickInterval = tickInterval;
+      this.memorySequenceAdvancing = false;
+      this.runMemorySequence();
     }
 
-    // COMPREHENSION 시작 시 규칙 결정
+    // COMPREHENSION 시작 시 규칙 결정 + "전환 직후 혼합색 금지" 카운터 초기화
+    // (Composite 의 이전 COMPREHENSION 페이즈 잔여값이 다음 페이즈로 새지 않게 한다.)
     if (!segIsRhythm && this.currentCognitiveMode === 'COMPREHENSION') {
       this.currentRule = Math.random() < 0.5 ? 'GREEN' : 'BLUE';
+      this.cNoMixedUntilTicks = 0;
     }
 
     const fireTick = () => {
@@ -677,6 +773,12 @@ export class TrainingEngine {
     this.currentTickFire = fireTick;
     // 첫 tick은 살짝 딜레이(준비). 디바이스 점등 진단의 START→LED 마진과 동일하게 두어
     // NUS 계열 펌웨어가 START(`aa 55`) 를 처리할 충분한 시간을 보장한다.
+    // Task #150 — 직전 페이즈의 tickTimer 가 살아있으면 cancel. runNextPlan 으로
+    // 페이즈가 빠르게 전환될 때 두 fireTick 루프가 겹치는 것을 막는다.
+    if (this.tickTimer) {
+      window.clearTimeout(this.tickTimer);
+      this.tickTimer = null;
+    }
     this.tickTimer = window.setTimeout(fireTick, FIRST_TICK_DELAY_MS);
   }
 
@@ -709,7 +811,7 @@ export class TrainingEngine {
     this.pendingTimers.forEach((t) => window.clearTimeout(t));
     this.pendingTimers = [];
     // 펌웨어에 정지 통보 — 재개 시 다시 START 를 보낼 것이다.
-    bleWriteControl(CTRL_STOP);
+    safeBleWriteControl(CTRL_STOP);
     this.pausedAt = Date.now();
     this.isPaused = true;
   }
@@ -735,7 +837,7 @@ export class TrainingEngine {
     this.isPaused = false;
     this.pausedAt = 0;
     // 펌웨어 재시작 — pause 시점에 STOP 을 보냈으므로 다시 START 가 필요하다.
-    bleWriteControl(CTRL_START);
+    safeBleWriteControl(CTRL_START);
     // elapsed RAF 재시작.
     this.startElapsedRaf();
     // 자극 루프 재개 — 남은 phase 시간이 양수면 다음 fireTick 을 setTimeout 으로 발사.
@@ -801,15 +903,21 @@ export class TrainingEngine {
   }
 
   private fireFocusTick(beatMs: number): void {
-    // 60% 타겟(BLUE), 40% 방해(RED/YELLOW)
-    // 명세 C.FOCUS: Lv3+ 는 타겟+방해 동시 점등 (방해 자극 속에서 타겟만 선택)
+    // 60% 타겟(BLUE), 40% 방해.
+    // 명세 C.FOCUS:
+    //   - Lv3+ 는 타겟+방해 동시 점등 (방해 자극 속에서 타겟만 선택)
+    //   - 혼합색(YELLOW = 물리 RG 합성) 사용률은 레벨에 따라 Lv1=0% → Lv5=35% 선형 증가.
+    //     혼합색 미사용 시에는 단색 RED 만 방해 자극으로 사용한다.
+    const mixedRate = mixedColorRateForLevel(this.cfg.level);
+    const pickDistractor = (): LogicColor => (Math.random() < mixedRate ? 'YELLOW' : 'RED');
+
     const allowSimul = this.cfg.level >= 3 && this.cfg.podCount >= 2;
     if (allowSimul && Math.random() < 0.3) {
       // 타겟 1 + 방해 1 동시 점등 (서로 다른 Pod)
       const tPod = Math.floor(Math.random() * this.cfg.podCount);
       let dPod = Math.floor(Math.random() * this.cfg.podCount);
       if (dPod === tPod) dPod = (dPod + 1) % this.cfg.podCount;
-      const distractor: LogicColor = Math.random() < 0.5 ? 'RED' : 'YELLOW';
+      const distractor = pickDistractor();
       this.acc.fTargetCount += 1;
       this.acc.fDistractorCount += 1;
       this.recordIntervalCount('total', this.elapsedMs(), 1);
@@ -817,7 +925,7 @@ export class TrainingEngine {
       return;
     }
     const isTarget = Math.random() < 0.6;
-    const color: LogicColor = isTarget ? 'BLUE' : (Math.random() < 0.5 ? 'RED' : 'YELLOW');
+    const color: LogicColor = isTarget ? 'BLUE' : pickDistractor();
     const podId = Math.floor(Math.random() * this.cfg.podCount);
     if (isTarget) {
       this.acc.fTargetCount += 1;
@@ -829,19 +937,36 @@ export class TrainingEngine {
   }
 
   private fireComprehensionTick(beatMs: number, totalMs: number, elapsedInPhase: number): void {
-    // 일정 확률로 규칙 전환 (페이즈당 1~3회)
+    // 명세 B.COMPREHENSION:
+    //   - 페이즈당 규칙 변경 1~3회 (최소 1회 보장).
+    //   - 변경 직후 2~3 Tick 은 혼합색(RED 방해) 금지 — 새 규칙 적응 시간 부여.
+    // 매 tick 시작에서 "혼합색 금지" 카운터를 1 감소시켜 자연 만료시킨다.
+    if (this.cNoMixedUntilTicks > 0) this.cNoMixedUntilTicks -= 1;
+
     const switchProb = 1.5 / Math.max(4, totalMs / beatMs);
-    if (this.acc.cSwitchCount < 3 && Math.random() < switchProb && elapsedInPhase > beatMs * 2) {
+    const probabilisticSwitch = Math.random() < switchProb;
+    // 페이즈 절반(50% 경과)까지 한 번도 전환이 없었다면 강제 1회 전환을 보장한다.
+    // 70% 로 두면 강제 전환이 phase 종료 직전에 일어나 새 규칙으로 시도할 시간이 부족.
+    const forcedFirstSwitch = this.acc.cSwitchCount === 0 && elapsedInPhase > totalMs * 0.5;
+    const wantSwitch = forcedFirstSwitch || probabilisticSwitch;
+    if (wantSwitch && this.acc.cSwitchCount < 3 && elapsedInPhase > beatMs * 2) {
       this.currentRule = this.currentRule === 'GREEN' ? 'BLUE' : 'GREEN';
       this.acc.cSwitchCount += 1;
       this.switchPendingFirst = true;
       this.switchedAt = Date.now();
+      // 변경 직후 3 Tick 동안 RED(혼합색) 방해를 풀에서 제외 (이번 tick 포함 → 카운터=3).
+      this.cNoMixedUntilTicks = 3;
       // WHITE 전환 경고 → 다음 tick에 점등
       this.flashAll('WHITE', 250);
       return;
     }
-    // 규칙 색을 정답으로, 반대색이나 RED를 방해로
-    const colors: LogicColor[] = [this.currentRule, this.currentRule === 'GREEN' ? 'BLUE' : 'GREEN', 'RED'];
+    // 규칙 색을 정답으로, 반대색이나 RED를 방해로.
+    // 단, 전환 직후 cNoMixedUntilTicks > 0 인 동안은 RED 를 풀에서 제외해 사용자가
+    // 새 규칙(GREEN↔BLUE 정답 색)에만 집중할 수 있게 한다.
+    const oppositeRule: LogicColor = this.currentRule === 'GREEN' ? 'BLUE' : 'GREEN';
+    const colors: LogicColor[] = this.cNoMixedUntilTicks > 0
+      ? [this.currentRule, oppositeRule]
+      : [this.currentRule, oppositeRule, 'RED'];
     const c = rand(colors);
     const podId = Math.floor(Math.random() * this.cfg.podCount);
     const isTarget = c === this.currentRule;
@@ -897,7 +1022,7 @@ export class TrainingEngine {
     const tickId = lastTickId > 0 ? lastTickId : this.nextTickId();
     // OFF 프레임은 손실되면 잔상이 남으므로 ack 보장(withResponse) 모드로 송신.
     // 일반 점등 프레임은 저지연 우선이라 기본 'auto'를 유지한다.
-    bleWriteLed({
+    safeBleWriteLed({
       tickId,
       pod: podId,
       colorCode: COLOR_CODE.OFF,
@@ -922,7 +1047,7 @@ export class TrainingEngine {
     // 입력을 받지 않는 시각 신호이므로 BLE는 동기 송신만 (tickId는 부여하지만 consume 추적 X)
     this.pods = this.pods.map(p => {
       const tickId = this.nextTickId();
-      bleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode(color), onMs: ms });
+      safeBleWriteLed({ tickId, pod: p.id, colorCode: logicColorToCode(color), onMs: ms });
       return { ...p, fill: color, isTarget: false, litAt: null, expiresAt: null, tickId: 0 };
     });
     this.cfg.onPodStates(this.pods);
@@ -933,7 +1058,7 @@ export class TrainingEngine {
     const now = Date.now();
     const expiresAt = now + windowMs;
     const tickId = this.nextTickId();
-    bleWriteLed({ tickId, pod: podId, colorCode: logicColorToCode(color), onMs: Math.min(0xffff, Math.round(windowMs)) });
+    safeBleWriteLed({ tickId, pod: podId, colorCode: logicColorToCode(color), onMs: Math.min(0xffff, Math.round(windowMs)) });
     this.pods = this.pods.map(p =>
       p.id === podId
         ? { ...p, fill: color, isTarget, litAt: now, expiresAt, tickId }
@@ -956,8 +1081,8 @@ export class TrainingEngine {
     const tickIdA = this.nextTickId();
     const tickIdB = this.nextTickId();
     const onMsClamped = Math.min(0xffff, Math.round(windowMs));
-    bleWriteLed({ tickId: tickIdA, pod: idA, colorCode: logicColorToCode(colorA), onMs: onMsClamped });
-    bleWriteLed({ tickId: tickIdB, pod: idB, colorCode: logicColorToCode(colorB), onMs: onMsClamped });
+    safeBleWriteLed({ tickId: tickIdA, pod: idA, colorCode: logicColorToCode(colorA), onMs: onMsClamped });
+    safeBleWriteLed({ tickId: tickIdB, pod: idB, colorCode: logicColorToCode(colorB), onMs: onMsClamped });
     this.pods = this.pods.map(p => {
       if (p.id === idA) return { ...p, fill: colorA, isTarget, litAt: now, expiresAt, tickId: tickIdA };
       if (p.id === idB) return { ...p, fill: colorB, isTarget, litAt: now, expiresAt, tickId: tickIdB };
@@ -969,8 +1094,14 @@ export class TrainingEngine {
 
   // ───── 입력 처리 ────────────────────────────────────────────────────
   /**
-   * 입력 처리. opts.deltaMs는 펌웨어가 측정한 (실제 입력 시각 - 점등 목표 시각) 값.
-   * 동일한 (pod, tickId) 입력이 UI tap과 BLE TOUCH 양쪽에서 와도 1회만 처리한다.
+   * 입력 처리. opts.deltaMs 는 펌웨어가 측정한 (실제 입력 시각 - 점등 목표 시각) 값.
+   *
+   * 정책상 production 호출은 BLE TOUCH notify (`ble.touch` 이벤트) 단일 소스에서만
+   * 들어오며, 앱 화면 클릭은 채점 입력으로 인정하지 않는다. 본 메서드는 그 외에도
+   * 단위 테스트가 직접 호출하는 진입점이라 opts 인자를 옵셔널로 둔다.
+   *
+   * 동일한 (pod, tickId) 가 BLE 재전송/native notify 중복 콜백 등으로 두 번 와도
+   * 1회만 채점에 반영한다.
    * @returns true: 입력이 실제로 채점에 반영됨 / false: stale/중복/소등 상태로 무시됨
    *          (UI 카운터 증분 여부 판단용)
    */
@@ -981,14 +1112,24 @@ export class TrainingEngine {
     if (!pod || pod.fill === 'OFF') return false;
 
     // BLE에서 명시 tickId가 왔는데 현재 pod의 점등 tickId와 다르면 stale (구 tick의 지연 입력) → drop.
-    // UI tap은 tickId 미지정이므로 항상 현재 pod.tickId 기준으로 처리.
+    // tickId 미지정 호출(예: 단위 테스트)은 항상 현재 pod.tickId 기준으로 처리.
     if (opts?.tickId && opts.tickId > 0 && pod.tickId > 0 && opts.tickId !== pod.tickId) {
       return false; // stale BLE TOUCH
     }
-    // 중복 처리 차단 — UI(브릿지된 클릭) + BLE TOUCH 동시 도착 케이스
-    const expectedTickId = pod.tickId > 0 ? pod.tickId : (opts?.tickId ?? 0);
-    if (expectedTickId > 0) {
-      const key = `${podId}:${expectedTickId}`;
+    // 중복 처리 차단 — 동일 (pod, tickId) 가 BLE notify 중복 도착하는 케이스 보호.
+    //
+    // 이 dedup 은 BLE TOUCH 11B 프레임(`opts.tickId` 명시) 의 네이티브-웹 중복 디스패치
+    // 보호용이다. NFC raw / IR 진동 / 단위 테스트 호출 등 `opts.tickId` 가 없는
+    // 입력은 dedup 에서 제외한다 — 그렇지 않으면 다음 정상 시나리오가 한 번만 채점된다:
+    //   - MEMORY RECALL 에서 같은 Pod 가 시퀀스에 반복 등장 (예: [0,1,0]) → 사용자가
+    //     같은 Pod 를 두 번째로 누르면 pod.tickId 가 같아 dedup 에 막혀 무시됨 →
+    //     mCorrect 가 안 올라가고 점수가 부당하게 낮게 나오던 버그.
+    //   - JUDGMENT YELLOW 더블탭 → 두 번째 탭이 같은 pod.tickId 라 dedup 에 막혀
+    //     `jDoubleHit` 이 절대 올라가지 않음.
+    // BLE TOUCH 는 펌웨어가 한 입력당 한 frame 씩 발행하므로 같은 (pod, tickId) 가
+    // 두 번 도착하는 건 진짜 중복으로 간주해도 안전하다.
+    if (opts?.tickId && opts.tickId > 0) {
+      const key = `${podId}:${opts.tickId}`;
       if (this.consumedTickIds.has(key)) return false;
       this.consumedTickIds.add(key);
       // 장시간 세션에서 무한히 자라지 않도록 상한(8192) 초과 시 가장 오래된 키부터 prune
@@ -1038,7 +1179,14 @@ export class TrainingEngine {
         this.handleMemoryTap(pod, now);
         break;
     }
-    // tap 처리 후 끄기 (RHYTHM 외)
+    // tap 처리 후 끄기 (RHYTHM 외).
+    // MEMORY RECALL 진행 중에는 다음 입력을 받아야 하므로 끄지 않는다 — 첫 탭 후
+    // 곧바로 allOff 하면 같은 시퀀스의 두 번째 입력이 handleTap 의 OFF 가드에 막힌다.
+    // 시퀀스 완료/오답 시점에는 handleMemoryTap → advanceMemorySequence 가 명시적으로
+    // allOff 를 호출한다.
+    if (this.currentCognitiveMode === 'MEMORY' && this.memoryPhase === 'RECALL') {
+      return true;
+    }
     this.allOff();
     return true;
   }
@@ -1129,6 +1277,11 @@ export class TrainingEngine {
     const idx = this.memoryReplay.length - 1;
     const expected = this.memoryQueue[idx];
     const isHit = expected === pod.id;
+    // 명세 A.MEMORY 점수 산식의 "순서정확도" 정의 — 시도 기준(B):
+    //   seqAcc = mCorrect / mAttempts.
+    // 사용자가 누른 입력 한 건당 분모(시도)와 정답 시 분자(정답) 가 함께 증가하므로,
+    // Lv3+ 즉시실패 정책으로 시도조차 못 한 자극이 분모에 부풀려 들어가지 않는다.
+    this.acc.mAttempts += 1;
     if (isHit) {
       this.acc.mCorrect += 1;
     }
@@ -1137,20 +1290,16 @@ export class TrainingEngine {
     const rt = Math.max(0, now - refTs);
     if (rt > 0) this.acc.mRTs.push(rt);
     this.memoryLastTapAt = now;
-    // 명세 A.MEMORY: Lv3+ 는 오입력 시 즉시 해당 사이클 실패
+    // 명세 A.MEMORY: Lv3+ 는 오입력 시 즉시 해당 사이클 실패 → 다음 시퀀스로 넘어간다.
     if (!isHit && this.cfg.level >= 3) {
-      this.memoryPhase = 'SHOW';
-      this.memoryReplay = [];
-      this.memoryQueue = [];
-      this.allOff();
+      this.advanceMemorySequence();
       return;
     }
     if (this.memoryReplay.length >= this.memoryQueue.length) {
       const allOk = this.memoryReplay.every((p, i) => p === this.memoryQueue[i]);
       if (allOk) this.acc.mPerfectSeqs += 1;
-      this.memoryPhase = 'SHOW';
-      this.memoryReplay = [];
-      this.memoryQueue = [];
+      // 시퀀스 완료 → window 만료를 기다리지 않고 즉시 다음 SHOW 사이클 트리거.
+      this.advanceMemorySequence();
     }
   }
 
@@ -1205,7 +1354,7 @@ export class TrainingEngine {
     if (this.phaseTimer) window.clearTimeout(this.phaseTimer);
     this.allOff();
     // BLE 정상 종료 (bleWriteControl는 native 미연결 시 자동 no-op)
-    bleWriteControl(CTRL_STOP);
+    safeBleWriteControl(CTRL_STOP);
     this.cfg.onPhaseChange({ phase: 'DONE', cycleIndex: 0 });
     this.cfg.onComplete(this.buildMetrics());
   }
@@ -1228,8 +1377,9 @@ export class TrainingEngine {
     const fOmissionRate = (a.fTargetCount - a.fTargetHits) / totalTargets;
 
     // MEMORY
-    const mShown = Math.max(1, a.mShown);
-    const seqAcc = a.mCorrect / mShown;
+    // 순서정확도 = 시도 기준 (mCorrect / mAttempts).
+    // mAttempts=0 인 케이스(아무 입력 없음)는 0 으로 처리.
+    const seqAcc = a.mAttempts > 0 ? a.mCorrect / a.mAttempts : 0;
     const mTotalSeqs = Math.max(1, a.mTotalSeqs);
     const perfectRecall = a.mPerfectSeqs / mTotalSeqs;
 

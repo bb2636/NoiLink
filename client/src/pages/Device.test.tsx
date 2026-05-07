@@ -91,6 +91,15 @@ vi.mock('../utils/reportAckBannerEvent', () => ({
 vi.mock('../native/bleBridge', () => ({
   bleConnect: vi.fn(),
   bleDisconnect: vi.fn(),
+  // BLE 진단 라인이 1Hz 폴링으로 호출하는 getter — 테스트에선 정적 값으로 충분.
+  getLegacyEmittedCount: () => 0,
+  getLegacyLastEmittedFrameHex: () => '',
+}));
+vi.mock('../native/bleFirmwareReady', () => ({
+  getBleFirmwareReady: () => null,
+}));
+vi.mock('../native/legacyBleMode', () => ({
+  getLegacyBleMode: () => true,
 }));
 
 vi.mock('../native/initNativeBridge', () => ({

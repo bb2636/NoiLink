@@ -13,7 +13,7 @@
       "backgroundColor": "#ffffff"
     },
     "android": {
-      "package": "com.noilink.mobile",
+      "package": "com.noilink.app",
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -31,7 +31,7 @@
       ]
     },
     "ios": {
-      "bundleIdentifier": "com.noilink.mobile",
+      "bundleIdentifier": "com.noilink.app",
       "supportsTablet": true,
       "infoPlist": {
         "NSBluetoothAlwaysUsageDescription": "NoiPod 트레이닝 기기와 연결해 반응 신호를 기록하기 위해 블루투스가 필요합니다.",

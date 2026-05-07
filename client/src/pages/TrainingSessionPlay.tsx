@@ -1,24 +1,46 @@
 /**
- * 트레이닝 진행 화면 — 가상 Pod 게임 엔진 기반
+ * 트레이닝 진행 화면 — 점등 신호 송신 + 타이머 + 결과 수집의 단일 진입점.
  *
- * - 4개 가상 Pod 그리드, BPM 박자에 맞춰 점등
- * - 모드별 룰(FOCUS/MEMORY/COMPREHENSION/JUDGMENT/AGILITY/ENDURANCE/COMPOSITE/RHYTHM/FREE) 실시간 진행
- * - 종료 시 엔진이 산출한 원시 메트릭을 서버로 제출
+ * 정책(사용자 결정):
+ * - 화면에 4개 패널 시각화는 그리지 않는다. 점등 표시는 기기(NoiPod) LED 가
+ *   단독으로 담당한다 (앱 → BLE LED frame).
+ * - 화면은 큰 타이머 + 페이즈/모드 안내 + 일시정지/재개/취소/뒤로 버튼만 노출.
+ * - 모든 채점 입력은 기기의 11바이트 BLE TOUCH notify 단일 소스로 들어온다
+ *   (`ble.touch` → `engine.handleTap`). 화면 클릭은 입력으로 인정하지 않는다.
+ * - 트레이닝 시간이 끝나면 자동으로 결과 화면(`/result`) 으로 넘어간다.
+ *
+ * 동작:
+ * - 모드별 룰(FOCUS/MEMORY/COMPREHENSION/JUDGMENT/AGILITY/ENDURANCE/COMPOSITE/RHYTHM/FREE)
+ *   을 `TrainingEngine` 이 실시간 진행하며, 점등 시점마다 BLE LED frame 을 직접 송신.
+ * - 종료 시 엔진이 산출한 원시 메트릭을 서버로 제출 → 개인 리포트/랭킹/기업 리포트 자동 연동.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/Layout';
 import ConfirmModal from '../components/ConfirmModal/ConfirmModal';
-import PodGrid from '../components/PodGrid/PodGrid';
 import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
 import type { Level, NativeToWebMessage, RawMetrics, TrainingMode } from '@noilink/shared';
-import { SESSION_MAX_MS, partialThresholdForMode, resolveBleStabilityThresholds } from '@noilink/shared';
+import {
+  SESSION_MAX_MS,
+  partialThresholdForMode,
+  resolveBleStabilityThresholds,
+  tryParseAnyNotifyBase64,
+  nfcTextToPod,
+  irTouchCountDelta,
+} from '@noilink/shared';
 import { submitCompletedTrainingWithRetry } from '../utils/submitTrainingRun';
 import { createPendingLocalId, enqueuePendingRun } from '../utils/pendingTrainingRuns';
 import { reportBleAbortFireAndForget } from '../utils/reportBleAbort';
-import { TrainingEngine, type EnginePhaseInfo, type PodState } from '../training/engine';
-import { bleReconnectNow, bleSubscribeCharacteristic, bleUnsubscribeCharacteristic } from '../native/bleBridge';
+import { TrainingEngine, type EnginePhaseInfo } from '../training/engine';
+import {
+  bleReconnectNow,
+  bleSubscribeCharacteristic,
+  bleUnsubscribeCharacteristic,
+  getLegacyEmittedCount,
+  getLegacyLastEmittedFrameHex,
+} from '../native/bleBridge';
 import { getBleFirmwareReady } from '../native/bleFirmwareReady';
+import { getLegacyBleMode } from '../native/legacyBleMode';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { subscribeAckErrorBanner, type AckBannerSubscription } from '../native/nativeAckErrors';
 import { isBleUnstableForAbort, type TrainingAbortReason } from './trainingAbortReason';
@@ -80,23 +102,25 @@ export type TrainingRunState = {
   isComposite: boolean;
 };
 
-const PHASE_LABEL: Record<string, string> = {
-  IDLE: '준비',
-  RHYTHM: '리듬 유지',
-  COGNITIVE: '인지 과제',
-  DONE: '완료',
-};
+// 기존 PHASE_LABEL/COG_LABEL 라벨 맵은 큰 원형 게이지 디자인에서 화면에 노출되지 않게
+// 정리되어 함께 제거됨 — 페이즈/모드 정보는 LED + BPM 배지로 통합 표현한다.
 
-const COG_LABEL: Record<TrainingMode, string> = {
-  MEMORY: '기억력',
-  COMPREHENSION: '이해력',
-  FOCUS: '집중력',
-  JUDGMENT: '판단력',
-  AGILITY: '순발력',
-  ENDURANCE: '지구력',
-  COMPOSITE: '종합',
-  FREE: '자유',
-};
+// 모드별 입력 안내 — 게이지 아래의 디버깅/확인 라인에서 사용한다.
+// 사용자가 "이 모드에서 기기에 어떤 입력을 줘야 하나?" 를 화면에서 즉시 보고
+// 그 결과(입력 N회 카운트)와 매칭해 NFC/IR/TOUCH 가 채점에 잘 들어오는지 확인.
+function modeHintText(mode: string): string {
+  switch (mode) {
+    case 'RHYTHM':        return '점등 순간 정확히 탭! · P0 → P1 → P2 → P3';
+    case 'FOCUS':         return '🔵 파랑(BLUE)만 탭. 빨강/노랑은 무시.';
+    case 'MEMORY':        return '초록 순서를 외우고, 흰 신호 뒤 같은 순서로 탭.';
+    case 'COMPREHENSION': return '현재 규칙 색만 탭. 흰색 신호 후 규칙 변경.';
+    case 'JUDGMENT':      return '🟢 초록=1탭, 🔴 빨강=참기, 🟡 노랑=2탭(더블).';
+    case 'AGILITY':       return '🟢 초록=손, 🔵 파랑/🟡 노랑=발. Lv4부터 동시.';
+    case 'ENDURANCE':     return '🔵 파랑(BLUE) 타겟을 일정 속도로 끝까지 탭.';
+    case 'FREE':          return '자유롭게 탭 (점수는 기록되지 않음).';
+    default:              return '';
+  }
+}
 
 export default function TrainingSessionPlay() {
   const navigate = useNavigate();
@@ -106,14 +130,43 @@ export default function TrainingSessionPlay() {
   const totalSec = state ? Math.min(state.totalDurationSec, SESSION_MAX_MS / 1000) : 0;
   const totalMs = totalSec * 1000;
 
-  const [pods, setPods] = useState<PodState[]>(
-    Array.from({ length: 4 }, (_, i) => ({
-      id: i, fill: 'OFF', isTarget: false, litAt: null, expiresAt: null, tickId: 0,
-    }))
-  );
+  // 화면에 점등 시각화를 그리지 않는다 (정책: 점등 표시는 기기 LED 가 단독으로
+  // 담당, 화면은 큰 타이머/안내/결과만). 엔진의 onPodStates 콜백은 LED 신호 송신
+  // 용도로 내부에서만 쓰이므로 React 상태로 보관할 필요가 없다.
   const [elapsedMs, setElapsedMs] = useState(0);
   const [phaseInfo, setPhaseInfo] = useState<EnginePhaseInfo>({ phase: 'IDLE', cycleIndex: 0 });
   const [tapCount, setTapCount] = useState(0);
+  // BLE 송신 진단 — 1Hz 폴링으로 화면 하단 한 줄에 노출. 점등이 안 들어올 때
+  // (펌웨어 미준비 / 잘못된 모드 / 송신 0건 / 마지막 프레임 hex) 를 사용자/QA 가
+  // 화면에서 즉시 확인할 수 있게 한다. 폴링 주기를 짧게 잡아도 비용은 무시 가능
+  // (모두 단순 ref/storage 읽기).
+  const [bleDiag, setBleDiag] = useState<{
+    fwLabel: string;
+    legacyLabel: string;
+    emitted: number;
+    lastFrame: string;
+  }>({ fwLabel: '?', legacyLabel: '?', emitted: 0, lastFrame: '' });
+  useEffect(() => {
+    const tick = () => {
+      const fw = getBleFirmwareReady();
+      // 마지막 프레임 hex 가 길어 좁은 화면(360px) 에서 가로 오버플로/줄바꿈을
+      // 일으키지 않도록 앞 20자만 노출 (LED 11B = 33자, IR 5B = 14자 등).
+      const raw = getLegacyLastEmittedFrameHex() || '';
+      const lastFrame = raw.length > 20 ? `${raw.slice(0, 20)}…` : raw;
+      setBleDiag({
+        fwLabel: fw === true ? 'O' : fw === false ? 'X' : '?',
+        legacyLabel: getLegacyBleMode() ? 'ON' : 'OFF',
+        emitted: getLegacyEmittedCount(),
+        lastFrame,
+      });
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  // 사용자가 일시정지/재개를 화면에서 직접 토글할 수 있도록 상태로 들고 간다.
+  // 엔진의 pause()/resume() 와 동기화 (자동 백그라운드 일시정지 분기는 동일 메서드를 호출).
+  const [isPaused, setIsPaused] = useState(false);
   const [engineMetrics, setEngineMetrics] = useState<Omit<RawMetrics, 'sessionId' | 'userId'> | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -124,6 +177,13 @@ export default function TrainingSessionPlay() {
   const [partialProgressPct, setPartialProgressPct] = useState(0);
 
   const engineRef = useRef<TrainingEngine | null>(null);
+  // 현재 점등 중인 pod 인덱스(엔진 onPodStates 콜백이 매 점등마다 갱신).
+  // 5바이트 IR 진동 패킷은 어느 pod 인지 정보가 없으므로 이 ref 의 첫 항목으로
+  // 매핑해 engine.handleTap 에 흘려보낸다 — 사용자 정책 1=A.
+  const litPodIdsRef = useRef<number[]>([]);
+  // 현행 펌웨어 IR 5바이트 패킷의 누적 touchCount 직전 값 (u8 wrap).
+  // 첫 패킷은 baseline 만 잡고 입력으로 인정하지 않는다 (irTouchCountDelta).
+  const prevIrTouchCountRef = useRef<number | null>(null);
   const submitLock = useRef(false);
   // finalizeNow는 visibilitychange/pagehide 콜백 안에서 호출되므로 React 클로저가
   // 캡처한 elapsedMs가 stale할 수 있다. 가장 최근 진행 시간을 ref로 동기 추적해
@@ -209,7 +269,16 @@ export default function TrainingSessionPlay() {
       totalDurationMs: totalMs,
       podCount: 4,
       isComposite: state.isComposite || state.apiMode === 'COMPOSITE',
-      onPodStates: (s) => setPods(s),
+      onPodStates: (states) => {
+        // 화면에 그리지 않는다 — LED 송신은 엔진 내부에서 BLE 로 직접 처리.
+        // 다만 현행 NINA-B1 펌웨어가 보내는 5바이트 IR 진동 패킷은 어느 pod 가
+        // 눌렸는지 정보를 싣지 않으므로(touchCount 만 증가), "현재 점등된 pod"
+        // 를 ref 에 저장해 두었다가 진동 입력을 받을 때 그 첫 점등 pod 로 매핑한다
+        // (사용자 정책 1=A: 현재 점등 pod 자동 매핑).
+        litPodIdsRef.current = states
+          .filter((p) => p.fill !== 'OFF' && p.litAt !== null)
+          .map((p) => p.id);
+      },
       onElapsedMs: (ms) => {
         elapsedMsRef.current = ms;
         setElapsedMs(ms);
@@ -354,9 +423,10 @@ export default function TrainingSessionPlay() {
       const detail = (e as CustomEvent<NativeToWebMessage>).detail;
       if (!detail) return;
       if (detail.type === 'ble.connection') {
-        // 펌웨어 미탑재 기기(예: NINA-B1 디폴트)는 idle 단절이 빈번하고
-        // 트레이닝 흐름과 무관하게 화면 PodGrid + 화면 탭만으로 완주되어야 한다.
-        // 따라서 단절 알림 자체를 무시하고 트레이닝을 그대로 진행시킨다.
+        // 펌웨어 미탑재 기기(예: NINA-B1 디폴트)는 idle 단절이 빈번하다.
+        // 단절 알림 자체를 무시하고 트레이닝을 그대로 진행시킨다 — 그 사이의
+        // 입력은 채점에서 빠질 수 있으나, 단절이 끝나면 다시 BLE TOUCH 가
+        // 정상 수신되어 트레이닝이 끊김 없이 이어진다.
         if (getBleFirmwareReady() === false) return;
         if (detail.payload.connected !== null) {
           // 재연결 성공 — 그레이스 중이면 배너/타이머/진행정보를 정리하고 트레이닝을 계속 진행한다.
@@ -455,7 +525,9 @@ export default function TrainingSessionPlay() {
     return () => clearInterval(id);
   }, [bleReconnecting, reconnectInfo]);
 
-  // 동일 자극(pod, tickId)에 UI tap과 BLE TOUCH가 둘 다 와도 카운트는 1회만.
+  // BLE TOUCH 는 단일 입력 소스이지만, 네이티브 측 재전송/notify 중복 콜백으로
+  // 동일 (pod, tickId) 가 두 번 도착해도 카운트는 1회만 증가하도록 dedup 한다.
+  // (엔진 단의 `consumedTickIds` 와 별개로 UI 카운터 보호용.)
   const tapDedupRef = useRef<Set<string>>(new Set());
   const bumpTapCount = useCallback((podId: number, tickId: number | undefined) => {
     if (tickId && tickId > 0) {
@@ -471,16 +543,11 @@ export default function TrainingSessionPlay() {
     setTapCount((n) => n + 1);
   }, []);
 
-  const handleTap = useCallback((podId: number) => {
-    // UI tap 시점의 현재 점등 tickId를 dedup 키로 사용
-    const currentTickId = pods.find((p) => p.id === podId)?.tickId ?? 0;
-    // 엔진이 실제로 채점에 반영한 경우만 카운트 (stale/중복/소등 입력은 미반영)
-    const accepted = engineRef.current?.handleTap(podId) ?? false;
-    if (accepted) bumpTapCount(podId, currentTickId);
-  }, [pods, bumpTapCount]);
-
   // ── BLE TOUCH notify 구독 + 이벤트 수신 ──
-  // 트레이닝 화면이 떠 있는 동안에만 디바이스 입력을 받는다.
+  // 모든 채점 입력의 단일 소스 — 기기(NoiPod) 의 11바이트 TOUCH notify
+  // (A5 81 + tickId u32 + pod + channel + deltaMs i16 + flags) 만 채점에 반영한다.
+  // 앱 화면에는 4개 패널 시각화 자체를 그리지 않으므로 화면 클릭으로 인한
+  // 잘못된 채점 입력 가능성도 원천 차단된다.
   // 네이티브 셸이 아니거나 디바이스 미연결이면 ble.subscribeCharacteristic은 자동 no-op.
   useEffect(() => {
     const subscriptionId = `training-touch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -488,12 +555,60 @@ export default function TrainingSessionPlay() {
 
     const onBridge = (e: Event) => {
       const detail = (e as CustomEvent<NativeToWebMessage>).detail;
-      if (!detail || detail.type !== 'ble.touch') return;
-      const t = detail.payload.touch;
-      const useDelta = t.deviceDeltaValid ? t.deltaMs : undefined;
-      // 엔진이 실제로 채점에 반영한 경우만 카운트 (stale 등 거부 입력 제외)
-      const accepted = engineRef.current?.handleTap(t.pod, { deltaMs: useDelta, tickId: t.tickId }) ?? false;
-      if (accepted) bumpTapCount(t.pod, t.tickId);
+      if (!detail) return;
+
+      // (1) 차세대 NoiPod 11바이트 TOUCH 프레임 — 네이티브 디스패처가 미리 파싱해
+      //     `ble.touch` 메시지로 보낸다. pod/deltaMs/tickId 가 모두 들어있어 그대로 사용.
+      if (detail.type === 'ble.touch') {
+        const t = detail.payload.touch;
+        const useDelta = t.deviceDeltaValid ? t.deltaMs : undefined;
+        const accepted = engineRef.current?.handleTap(t.pod, { deltaMs: useDelta, tickId: t.tickId }) ?? false;
+        if (accepted) bumpTapCount(t.pod, t.tickId);
+        return;
+      }
+
+      // (2) 현행 NINA-B1-FB55CE 펌웨어의 raw notify (`ble.notify`) — 5바이트 IR 패킷
+      //     또는 NFC NDEF Text Record. base64 페이로드를 직접 분류 → 매핑 → 엔진 입력.
+      //     payload.touch 가 함께 와서 (1) 에서 이미 처리된 경우는 중복 방지를 위해 스킵.
+      if (detail.type === 'ble.notify' && detail.payload.key === 'notify') {
+        if (detail.payload.touch) return; // (1) 에서 이미 처리됨
+        const ev = tryParseAnyNotifyBase64(detail.payload.base64Value);
+        if (!ev) return;
+        if (ev.type === 'TOUCH') {
+          // 분류기가 TOUCH 로 잡았는데 payload.touch 가 비어 있는 케이스 — 동일 데이터로 채점.
+          const useDelta = ev.deviceDeltaValid ? ev.deltaMs : undefined;
+          const accepted = engineRef.current?.handleTap(ev.pod, { deltaMs: useDelta, tickId: ev.tickId }) ?? false;
+          if (accepted) bumpTapCount(ev.pod, ev.tickId);
+          return;
+        }
+        if (ev.type === 'IR') {
+          // 펌웨어 누적 touchCount 가 증가한 만큼만 진동 입력으로 인정. 첫 패킷은
+          // baseline (delta=0) 으로 흡수해 잘못된 입력 폭주를 막는다.
+          const prev = prevIrTouchCountRef.current;
+          const delta = irTouchCountDelta(prev, ev.touchCount);
+          prevIrTouchCountRef.current = ev.touchCount;
+          if (delta <= 0) return;
+          // 현재 점등 pod 가 없으면 채점할 수 없으므로 무시 (대기 구간/페이즈 전환 등).
+          // 점등이 한 개 이상이면 첫 점등 pod 로 매핑 — 단순/예측 가능한 정책.
+          const targetPod = litPodIdsRef.current[0];
+          if (targetPod === undefined) return;
+          // 펌웨어 한 패킷에 delta>1 이 들어오는 경우(loss 보상)는 같은 pod 에 N회 친 것으로 간주.
+          for (let i = 0; i < delta; i++) {
+            const accepted = engineRef.current?.handleTap(targetPod) ?? false;
+            if (accepted) bumpTapCount(targetPod, undefined);
+          }
+          return;
+        }
+        if (ev.type === 'NFC_TEXT') {
+          // NFC 태그 텍스트(예: "left", "1")를 두 컨벤션 모두 인식해 pod 로 매핑 (사용자 정책 2=C).
+          // 매칭 안 되면 무시 — 사용자가 자유 라벨링해도 잘못된 입력이 발생하지 않는다.
+          const pod = nfcTextToPod(ev.text);
+          if (pod === null) return;
+          const accepted = engineRef.current?.handleTap(pod) ?? false;
+          if (accepted) bumpTapCount(pod, undefined);
+          return;
+        }
+      }
     };
     window.addEventListener('noilink-native-bridge', onBridge as EventListener);
     return () => {
@@ -647,8 +762,8 @@ export default function TrainingSessionPlay() {
   const ss = String(elapsedSec % 60).padStart(2, '0');
   const progress = totalMs > 0 ? Math.min(1, elapsedMs / totalMs) : 0;
 
-  const phaseLabel = PHASE_LABEL[phaseInfo.phase] ?? '진행';
-  const cogLabel = phaseInfo.cognitiveMode ? COG_LABEL[phaseInfo.cognitiveMode] : '';
+  // 페이즈/모드 라벨은 큰 원형 게이지 디자인에서 화면에 노출하지 않는다 — 진행 정보는
+  // 원형 게이지(시간) + BPM 배지(난이도/사이클) 로 통합. 페이즈 전환은 LED 가 시각화한다.
   const isComposite = state.isComposite || state.apiMode === 'COMPOSITE';
 
   // 사용자가 명시적으로 화면을 떠날 때(뒤로/취소) 사용할 핸들러.
@@ -691,20 +806,48 @@ export default function TrainingSessionPlay() {
     }
   };
 
+  // 원형 진행 게이지 — 이미지 디자인의 큰 라임색 원. SVG stroke-dashoffset 으로 진행률 표시.
+  const RING_SIZE = 280;
+  const RING_STROKE = 14;
+  const RING_R = (RING_SIZE - RING_STROKE) / 2;
+  const RING_C = 2 * Math.PI * RING_R;
+  const ringDashOffset = RING_C * (1 - progress);
+
   return (
     <MobileLayout hideBottomNav>
       <div
-        className="max-w-md mx-auto px-4 pb-6 flex flex-col min-h-screen"
-        style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '40px', color: '#fff' }}
+        data-testid="training-session-play"
+        className="max-w-md mx-auto px-5 flex flex-col"
+        style={{
+          // 화면을 한 화면에 딱 맞추고 스크롤은 막는다 — 트레이닝 중에 스크롤이
+          // 발생하면 사용자가 게이지/타이머에 집중하지 못하고 화면이 흔들리는 인상을
+          // 준다. 모든 콘텐츠는 안드로이드 status bar/제스처 바를 피하면서 한 뷰포트
+          // 안에 들어가도록 위/아래 safe-area 만 최소로 확보한다.
+          //
+          // 사용자 보고: 모바일 WebView 에서 입력 카운터가 화면 밖으로 밀려 안 보임.
+          // 100vh 는 iOS Safari/안드로이드 WebView 의 동적 주소창 영역까지 포함한
+          // "전체 뷰포트" 라서 실제 보이는 영역(가시 viewport)을 초과해 콘텐츠가
+          // 잘렸다. 100dvh(동적 viewport)로 바꿔 주소창 노출 여부와 무관하게
+          // 게이지·힌트·카운터·버튼이 한 화면에 모두 들어오게 한다. dvh 미지원
+          // 구형 브라우저는 100vh 로 자연 폴백된다.
+          height: '100dvh',
+          minHeight: '100vh',
+          overflow: 'hidden',
+          paddingTop: 'calc(0.25rem + env(safe-area-inset-top))',
+          // 하단 버튼이 iOS 홈 인디케이터/안드로이드 제스처 바에 가리지 않도록 safe-area + 여유.
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 1rem)',
+          color: '#fff',
+          backgroundColor: '#0A0A0A',
+        }}
       >
-        {/* 헤더 */}
-        <div className="flex items-center gap-3 mb-4">
-          <button onClick={leaveToList} className="text-white" aria-label="뒤로">
+        {/* 헤더 — "< 트레이닝 진행" */}
+        <div className="flex items-center gap-3 mb-2">
+          <button onClick={leaveToList} className="text-white -ml-1 p-1" aria-label="뒤로">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <h1 className="text-lg font-semibold">{state.title}</h1>
+          <h1 className="text-base font-semibold">트레이닝 진행</h1>
         </div>
 
         {/* BLE 재연결 회복 중 임시 안내 — 그레이스 기간 동안만 노출.
@@ -774,55 +917,132 @@ export default function TrainingSessionPlay() {
           );
         })()}
 
-        {/* 페이즈/모드 표시 */}
-        <div className="flex items-center justify-center gap-2 mb-4">
-          <span
-            className="px-3 py-1 rounded-full text-xs font-semibold"
-            style={{ backgroundColor: phaseInfo.phase === 'RHYTHM' ? '#3B82F6' : '#AAED10', color: '#000' }}
+        {/* BPM 배지 — 라임 테두리 라운드 박스. 종합 모드는 사이클 정보를 함께 보여준다. */}
+        <div className="flex items-center justify-center mt-3 mb-6">
+          <div
+            className="px-8 py-2.5 rounded-full text-base font-semibold tabular-nums"
+            style={{ border: '1.5px solid #AAED10', color: '#AAED10' }}
+            aria-label={`BPM ${state.bpm}`}
           >
-            {phaseLabel}
-          </span>
-          {phaseInfo.phase === 'COGNITIVE' && cogLabel && (
-            <span className="px-3 py-1 rounded-full text-xs font-semibold border" style={{ borderColor: '#2A2A2A' }}>
-              {cogLabel}
-            </span>
-          )}
-          {isComposite && (
-            <span className="px-3 py-1 rounded-full text-xs" style={{ color: '#888' }}>
-              사이클 {phaseInfo.cycleIndex + 1}
-            </span>
-          )}
+            BPM&nbsp;&nbsp;{state.bpm}
+            {isComposite && (
+              <span className="ml-3 text-xs font-normal" style={{ color: '#7BA80B' }}>
+                · 사이클 {phaseInfo.cycleIndex + 1}
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* 진행 바 */}
-        <div className="mb-4">
-          <div className="flex justify-between text-xs mb-1" style={{ color: '#888' }}>
-            <span>BPM {state.bpm} · Lv {state.level}</span>
-            <span className="tabular-nums">{mm}:{ss} / {totalSec}초</span>
-          </div>
-          <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: '#2A2A2A' }}>
+        {/*
+          큰 원형 진행 게이지 — 화면의 메인 콘텐츠.
+          정책: 트레이닝 진행 중 화면은 "기기에 점등 신호를 보내고, 시간을 보여주고,
+          끝나면 결과로 넘어가는" 역할만 한다. 4개 패널(PodGrid) 같은 시각 동조는
+          사용자가 화면을 누르고 싶게 만들기 때문에 노출하지 않는다 — 점등 표시는
+          기기(NoiPod) 의 LED 가 담당하고, 모든 입력은 기기 BLE notify 단일 소스로 받는다.
+          원 안: "총 N초" 작은 회색 + "MM:SS" 큰 흰색.
+        */}
+        {/*
+          게이지 컨테이너 — 이전엔 flex-1 로 빈 공간을 다 차지해서 하단 버튼이
+          화면 끝까지 밀려갔다. 사용자 요청에 따라 flex-1 을 제거해 게이지·힌트·
+          버튼이 자연스럽게 위에서부터 쌓이고, 버튼이 타이머 바로 아래에 붙게 한다.
+        */}
+        <div className="flex flex-col items-center justify-center">
+          <div className="relative" style={{ width: RING_SIZE, height: RING_SIZE }}>
+            <svg
+              width={RING_SIZE}
+              height={RING_SIZE}
+              className="-rotate-90"
+              aria-hidden="true"
+            >
+              {/* 배경 트랙 */}
+              <circle
+                cx={RING_SIZE / 2}
+                cy={RING_SIZE / 2}
+                r={RING_R}
+                stroke="#2A2A2A"
+                strokeWidth={RING_STROKE}
+                fill="none"
+              />
+              {/* 진행 라임 */}
+              <circle
+                cx={RING_SIZE / 2}
+                cy={RING_SIZE / 2}
+                r={RING_R}
+                stroke={isPaused ? '#666' : '#AAED10'}
+                strokeWidth={RING_STROKE}
+                fill="none"
+                strokeLinecap="round"
+                strokeDasharray={RING_C}
+                strokeDashoffset={ringDashOffset}
+                style={{ transition: 'stroke-dashoffset 0.2s linear' }}
+              />
+            </svg>
             <div
-              className="h-full"
-              style={{
-                width: `${progress * 100}%`,
-                backgroundColor: '#AAED10',
-                transition: 'width 0.2s linear',
-              }}
-            />
+              className="absolute inset-0 flex flex-col items-center justify-center"
+              aria-live="off"
+              aria-label={`총 ${totalSec}초 중 ${mm}분 ${ss}초 경과`}
+            >
+              <div className="text-sm" style={{ color: '#888' }}>
+                총 {totalSec}초
+              </div>
+              <div
+                className="text-6xl font-semibold tabular-nums tracking-tight mt-1"
+                style={{ color: '#FFFFFF' }}
+              >
+                {mm}:{ss}
+              </div>
+              {isPaused && (
+                <div className="mt-2 text-xs font-semibold" style={{ color: '#FFD66B' }}>
+                  일시정지됨
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* 가상 Pod 그리드 */}
-        <div className="my-6">
-          <PodGrid pods={pods} onTap={handleTap} />
-        </div>
-
-        {/* 안내 문구 */}
-        <ModeHint mode={phaseInfo.phase === 'RHYTHM' ? 'RHYTHM' : (phaseInfo.cognitiveMode ?? state.apiMode)} />
-
-        {/* 카운트 */}
-        <div className="mt-4 text-center text-xs" style={{ color: '#666' }}>
-          입력 {tapCount}회
+        {/*
+          디버깅/확인용 안내 — 사용자가 기기(IR/NFC/TOUCH) 입력이 채점에 잘
+          잡히는지 화면에서 즉시 알 수 있게 두 줄을 노출한다:
+            1) 현재 모드에서 어떤 입력이 유효한지 (모드별 힌트)
+            2) 실시간 입력 누적 카운트 (tapCount) — 기기를 누를 때마다 +1 되어야
+               신호가 정상적으로 들어오는 것.
+          디자인을 해치지 않게 작은 폰트/회색으로만 표기한다.
+        */}
+        <div className="mt-3 text-center" aria-live="polite">
+          <p className="text-xs leading-relaxed" style={{ color: '#7BA80B' }}>
+            {modeHintText(
+              phaseInfo.phase === 'RHYTHM'
+                ? 'RHYTHM'
+                : (phaseInfo.cognitiveMode ?? state.apiMode),
+            )}
+          </p>
+          <p
+            className="mt-1 text-xs tabular-nums"
+            style={{ color: '#888' }}
+            data-testid="tap-count-debug"
+          >
+            입력 {tapCount}회
+          </p>
+          {/* BLE 송신 진단 한 줄 — 점등이 안 들어오는 원인을 사용자/QA 가 화면에서
+              즉시 식별할 수 있게 노출. 펌웨어 ready 여부, 레거시 모드, 누적 송신
+              횟수, 마지막 송신 프레임을 한 줄로 보여준다.
+              - 펌웨어 미준비(FW=X) → bleBridge 가 모든 LED/SESSION/CONTROL write
+                를 silent skip → 점등 0건의 가장 흔한 원인.
+              - 레거시 모드(L=ON/OFF) → 현행 NINA-B1 펌웨어는 ON, NoiPod 신규
+                펌웨어는 OFF. 잘못된 모드면 프레임 인코딩이 달라져 본체가 무시.
+              - 송신=0 → 엔진이 LED 호출조차 안 하는 상태(트레이닝 자체가 멈춤).
+              - 마지막 프레임 hex → 본체가 안 깜빡이면 "송신은 됐는데 본체가
+                무시" vs "송신 자체가 안 됨" 을 구분.
+              Task #150 의 safe* wrapper 가 BLE throw 를 silent swallow 하므로
+              이 라인이 사실상 유일한 사용자측 진단 수단이다. */}
+          <p
+            className="mt-1 text-[10px] font-mono"
+            style={{ color: '#555' }}
+            data-testid="ble-diag"
+          >
+            BLE: FW={bleDiag.fwLabel} · L={bleDiag.legacyLabel} · 송신={bleDiag.emitted}
+            {bleDiag.lastFrame ? ` · ${bleDiag.lastFrame}` : ''}
+          </p>
         </div>
 
         {err && (
@@ -839,15 +1059,52 @@ export default function TrainingSessionPlay() {
           </div>
         )}
 
-        {/* 하단 버튼: 종료 */}
-        <div className="mt-auto pt-6">
+        {/* 원형 버튼 — 타이머/모드 안내 바로 아래에 붙도록 mt 만 살짝. 좌 취소(회색)
+            + 우 일시정지/재개(주황). 빈 공간은 자연스럽게 화면 하단으로 남는다. */}
+        <div className="mt-6 flex items-center justify-between px-4">
           <button
+            type="button"
             onClick={leaveToList}
             disabled={submitting}
-            className="w-full py-3 rounded-xl font-semibold text-white"
-            style={{ backgroundColor: '#2A2A2A' }}
+            className="rounded-full font-semibold flex items-center justify-center"
+            style={{
+              width: 72,
+              height: 72,
+              backgroundColor: '#2A2A2A',
+              color: '#fff',
+              fontSize: 15,
+              opacity: submitting ? 0.5 : 1,
+            }}
+            aria-label="취소"
           >
             취소
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const eng = engineRef.current;
+              if (!eng) return;
+              if (isPaused) {
+                eng.resume();
+                setIsPaused(false);
+              } else {
+                eng.pause();
+                setIsPaused(true);
+              }
+            }}
+            disabled={submitting || !!engineMetrics}
+            className="rounded-full font-semibold flex items-center justify-center"
+            style={{
+              width: 72,
+              height: 72,
+              backgroundColor: isPaused ? '#AAED10' : '#B8782A',
+              color: isPaused ? '#000' : '#fff',
+              fontSize: 15,
+              opacity: (submitting || !!engineMetrics) ? 0.5 : 1,
+            }}
+            aria-label={isPaused ? '재개' : '일시정지'}
+          >
+            {isPaused ? '재개' : '일시정지'}
           </button>
         </div>
 
@@ -909,22 +1166,3 @@ export default function TrainingSessionPlay() {
   );
 }
 
-function ModeHint({ mode }: { mode: string }) {
-  const text = (() => {
-    switch (mode) {
-      case 'RHYTHM':       return '점등되는 순간에 정확히 탭! P0 → P1 → P2 → P3';
-      case 'FOCUS':        return '🔵 파랑(BLUE)만 탭. 빨강·노랑은 무시.';
-      case 'MEMORY':       return '초록 순서를 외우고, 흰 신호 후 같은 순서로 탭.';
-      case 'COMPREHENSION':return '현재 규칙 색만 탭. 흰색 신호 후 규칙이 바뀝니다.';
-      case 'JUDGMENT':     return '🟢 초록=1탭, 🔴 빨강=참기, 🟡 노랑=2탭(더블탭)';
-      case 'AGILITY':      return '🟢 초록=손, 🔵 파랑/🟡 노랑=발. Lv4부터 동시 자극.';
-      case 'ENDURANCE':    return '파랑(BLUE) 타겟을 끝까지 일정한 속도로 탭.';
-      case 'FREE':         return '자유롭게 탭. 점수는 기록되지 않습니다.';
-      default:             return '';
-    }
-  })();
-  if (!text) return null;
-  return (
-    <p className="text-center text-sm mt-2" style={{ color: '#AAED10' }}>{text}</p>
-  );
-}

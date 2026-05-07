@@ -126,17 +126,23 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
         //   - 오늘 처음 훈련: 어제 훈련 기록 있으면 streak + 1, 없으면 streak = 1 (중간에 빠진 경우 초기화)
         //   - bestStreak 는 역대 최고 기록이라 절대 감소하지 않음 (리셋 시에도 보관)
         //   - 같은 날 추가 세션: streak 변화 없음 (중복 카운트 방지)
+        // Task #151: "오늘/어제" 비교는 반드시 KST(`Asia/Seoul`) 기준 — 서버
+        //   기본 UTC 로 묶으면 KST 자정 직후(=UTC 15:00 직후) 의 두 번째 날
+        //   훈련이 같은 UTC 일자로 묶여 streak 가 1 에서 멈추는 회귀가 발생.
         const userIndex = users.findIndex((u: User) => u.id === userId);
         if (userIndex !== -1) {
-          const today = new Date().toISOString().split('T')[0];
+          const nowIso = new Date().toISOString();
+          const today = isoToKstLocalDate(nowIso)!;
           const lastDate = users[userIndex].lastTrainingDate
-            ? new Date(users[userIndex].lastTrainingDate).toISOString().split('T')[0]
+            ? isoToKstLocalDate(users[userIndex].lastTrainingDate as string)
             : null;
 
           if (lastDate !== today) {
-            const yesterday = new Date();
-            yesterday.setDate(yesterday.getDate() - 1);
-            const yesterdayStr = yesterday.toISOString().split('T')[0];
+            // KST 기준 어제: today(YYYY-MM-DD) 에서 1일 빼기
+            const [yy, mm, dd] = today.split('-').map(Number);
+            const yUtc = new Date(Date.UTC(yy, mm - 1, dd));
+            yUtc.setUTCDate(yUtc.getUTCDate() - 1);
+            const yesterdayStr = `${yUtc.getUTCFullYear()}-${String(yUtc.getUTCMonth() + 1).padStart(2, '0')}-${String(yUtc.getUTCDate()).padStart(2, '0')}`;
 
             if (lastDate === yesterdayStr) {
               users[userIndex].streak = (users[userIndex].streak || 0) + 1;

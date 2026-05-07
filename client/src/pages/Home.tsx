@@ -34,20 +34,23 @@ type HomeVariant = 'first-time' | 'streak-active' | 'streak-broken' | 'enterpris
  *  - 그 외 모든 개인 회원(기업 소속 여부와 무관) → 일반 개인 홈(트레이닝 요약 / 나의 트렌드)
  */
 function resolveVariant(
-  user: { userType?: string; organizationId?: string; streak?: number; lastTrainingDate?: string } | null,
+  user: { userType?: string; organizationId?: string } | null,
+  streakDays: number,
 ): HomeVariant {
   if (!user) return 'first-time';
   if (user.userType === 'ORGANIZATION') return 'enterprise';
-  // TODO: 실 데이터 도입 시 first-time 분기 복구.
-  // 데모: 첨부 이미지(연속 트레이닝이 끊긴 상태) 와 동일 화면을 보여주기 위해
-  //       streak-broken 으로 노출 — 🔥 + "시작하기" 버튼이 함께 표시된다.
-  return 'streak-broken';
+  // Task #151: 홈 "연속 트레이닝 트렌드" 의 표시 모드는 실제 streak 일수로 결정.
+  //   streak > 0 이면 active(원형 진행도 + 일수 + 🔥), 0 이면 broken(🔥 + 시작하기).
+  //   실데이터가 도착하기 전(streak = 0 초기) 에는 broken 으로 표시되며, 1회라도
+  //   훈련을 마치면 카드 엔드포인트가 KST 기준 14일 창에서 1 이상을 돌려준다.
+  return streakDays > 0 ? 'streak-active' : 'streak-broken';
 }
 
 export default function Home() {
   const { user } = useAuth();
   const home = useHome(user?.id || null);
-  const variant = resolveVariant(user as any);
+  const card = useUserRankingCard(user?.id || null);
+  const variant = resolveVariant(user as any, card.streakDays);
 
   if (home.loading) {
     return (
@@ -65,7 +68,36 @@ export default function Home() {
     return <EnterpriseHome home={home} user={user as any} />;
   }
 
-  return <StandardHome variant={variant} home={home} user={user as any} />;
+  return <StandardHome variant={variant} home={home} user={user as any} streakDays={card.streakDays} />;
+}
+
+// Task #151 — 랭킹 카드 4종 stat 중 streakDays 만 홈 화면에서 사용 (다른 stat 은
+//   기존 useUserStats / useHome 가 담당). 같은 14일 창 / 같은 dayKey(KST) 규칙으로
+//   계산되어 랭킹 페이지의 "나의 랭킹" 카드와 항상 동일한 일수를 보장한다.
+//   응답 도착 전에는 0 — 변경되면 streakDays > 0 일 때 active variant 로 자연 전환.
+function useUserRankingCard(userId: string | null): { streakDays: number } {
+  const [streakDays, setStreakDays] = useState(0);
+  useEffect(() => {
+    if (!userId) {
+      setStreakDays(0);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.getMyRankingCard(userId);
+        if (!cancelled && res.success && res.data) {
+          setStreakDays(res.data.streakDays ?? 0);
+        }
+      } catch {
+        /* 네트워크 실패시 0 유지 — UI 는 broken variant 로 안전하게 표시 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+  return { streakDays };
 }
 
 // =============================================================================
@@ -122,9 +154,10 @@ interface StandardProps {
   variant: 'streak-active' | 'streak-broken' | 'enterprise';
   home: ReturnType<typeof useHome>;
   user: { id: string; nickname?: string; name?: string; streak?: number } | null;
+  streakDays: number;
 }
 
-function StandardHome({ variant, home, user }: StandardProps) {
+function StandardHome({ variant, home, user, streakDays }: StandardProps) {
   const navigate = useNavigate();
   const { banners, condition } = home;
   const stats = useUserStats(user?.id ?? null);
@@ -154,7 +187,9 @@ function StandardHome({ variant, home, user }: StandardProps) {
   const scoreUpDelta = stats.scoreUpDelta ?? MOCK_HOME.scoreUpDelta;
   const trendPoints = stats.trendPoints.length > 0 ? stats.trendPoints : MOCK_HOME.trendPoints;
   const topTrainings = stats.topTrainings.length > 0 ? stats.topTrainings : MOCK_HOME.topTrainings;
-  const streakDays = user?.streak ?? MOCK_HOME.streakDays;
+  // Task #151 — streakDays 는 부모(`Home`) 가 `/api/rankings/user/:id/card` 에서
+  //   받아 내려준 값을 사용. 과거 `user.streak` 는 로그인 시 캐시된 값이라 새 세션을
+  //   완료해도 자동 갱신되지 않아 홈 카운터가 0 에서 멈추는 회귀가 있었다(Task #151).
   const nickname = user?.nickname || user?.name || '회원';
   const brainimalInfo = getBrainimalIcon(MOCK_HOME.brainimalType);
 
