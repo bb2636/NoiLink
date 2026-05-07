@@ -855,7 +855,13 @@ export default function TrainingSessionPlay() {
             mode: state.apiMode,
             bpm: state.bpm,
             level: state.level,
-            totalDurationSec: totalSec,
+            // FREE 무제한 모드는 totalSec 가 형식상 placeholder(60s) 라
+            // 큐로 그대로 적재하면 다음 background drain 이 잘못된 길이를
+            // 서버에 영속화한다. runSubmit 과 동일하게 elapsedMsRef 기준
+            // 실제 경과(초)로 덮어 정확한 duration 이 보존되도록 한다 (Task #154).
+            totalDurationSec: isFreeUnlimited
+              ? Math.max(1, Math.ceil(elapsedMsRef.current / 1000))
+              : totalSec,
             yieldsScore: state.yieldsScore,
             isComposite: state.isComposite,
             tapCount,
