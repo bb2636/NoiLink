@@ -416,6 +416,118 @@ router.put('/me', async (req: Request, res: Response) => {
 });
 
 /**
+ * DELETE /api/users/me
+ * 회원탈퇴 — 인증된 사용자 본인 계정 + 관련 데이터 삭제 (cascade).
+ *
+ * 삭제 대상:
+ *  - users[]              본인 레코드
+ *  - passwords[]          본인 자격증명
+ *  - sessions[]           본인이 1차 사용자(userId) 또는 동시 진행 멤버
+ *                         (participantIds) 인 트레이닝 세션 기록
+ *  - metricsScores[]      본인의 누적 점수 스냅샷
+ *  - inquiries[]          본인이 작성한 1:1 문의 (관리자 답변 본문도 함께 사라짐)
+ *
+ * 주의:
+ *  - 기업 관리자(ORGANIZATION userType) 가 탈퇴해도 같은 조직 멤버 계정은
+ *    보존된다 — 멤버의 organizationId 만 끊는 것은 별도 정책 결정이라
+ *    이 단순 탈퇴 플로우에서는 손대지 않는다 (관리자는 멤버 이관 후 탈퇴
+ *    필요).
+ *  - users / passwords 동시성 보호를 위해 기존 KV_LOCK 사용. 다른 키
+ *    (sessions/metricsScores/inquiries) 는 read-modify-write 사이 다른
+ *    요청이 끼어들 수 있지만, 회원탈퇴는 사용자가 명시적으로 1회 호출하는
+ *    경로라 충돌 가능성이 낮아 락 없이 best-effort 로 정리한다.
+ */
+router.delete('/me', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
+    let deletedUser: any = null;
+    await withKeyLock(KV_LOCK.USERS, async () => {
+      const users = (await db.get('users')) || [];
+      const idx = users.findIndex((u: any) => u.id === userId);
+      if (idx === -1) return;
+      deletedUser = users[idx];
+      users.splice(idx, 1);
+      await db.set('users', users);
+    });
+
+    if (!deletedUser) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    await withKeyLock(KV_LOCK.PASSWORDS, async () => {
+      const passwords = (await db.get('passwords')) || [];
+      const filtered = passwords.filter(
+        (p: any) => p.userId !== userId && p.email !== deletedUser?.email,
+      );
+      if (filtered.length !== passwords.length) {
+        await db.set('passwords', filtered);
+      }
+    });
+
+    try {
+      const sessions = (await db.get('sessions')) || [];
+      const filteredSessions = sessions.filter((s: any) => {
+        if (s.userId === userId) return false;
+        if (Array.isArray(s.participantIds) && s.participantIds.includes(userId)) return false;
+        return true;
+      });
+      if (filteredSessions.length !== sessions.length) {
+        await db.set('sessions', filteredSessions);
+      }
+    } catch {
+      /* sessions 삭제 실패는 탈퇴 자체를 막지 않음 — 잔여 데이터는 다음 cleanup 에서 정리 */
+    }
+
+    try {
+      const metricsScores = (await db.get('metricsScores')) || [];
+      const filtered = metricsScores.filter((m: any) => m.userId !== userId);
+      if (filtered.length !== metricsScores.length) {
+        await db.set('metricsScores', filtered);
+      }
+    } catch {
+      /* best-effort */
+    }
+
+    try {
+      const inquiries = (await db.get('inquiries')) || [];
+      const filtered = inquiries.filter((i: any) => i.userId !== userId);
+      if (filtered.length !== inquiries.length) {
+        await db.set('inquiries', filtered);
+      }
+    } catch {
+      /* best-effort */
+    }
+
+    // 추가 cascade — 모두 `userId` 필드 보유 (server/routes/home.ts,
+    // routes/reports.ts, routes/metrics.ts 에서 확인). 누락 시 탈퇴 후에도
+    // 일별 컨디션/미션, 개인 리포트, 원시 메트릭이 orphaned 로 남아 다음
+    // 같은 id 가 재발급될 일은 없지만 서버 디스크와 통계가 부풀어진다.
+    for (const key of ['dailyConditions', 'dailyMissions', 'reports', 'rawMetrics']) {
+      try {
+        const arr = (await db.get(key)) || [];
+        const filtered = arr.filter((r: any) => r.userId !== userId);
+        if (filtered.length !== arr.length) {
+          await db.set(key, filtered);
+        }
+      } catch {
+        /* best-effort — 한 컬렉션 실패가 나머지 cleanup 을 막지 않음 */
+      }
+    }
+
+    res.json({ success: true, message: '회원탈퇴가 완료되었습니다.' });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
  * POST /api/users/me/organization-approval-request
  * 기업(ORGANIZATION) 회원 기관 승인 요청 — approvalStatus → PENDING
  */

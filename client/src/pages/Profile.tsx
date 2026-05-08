@@ -17,6 +17,7 @@ export default function Profile() {
   const location = useLocation();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
   const [showSuccessBanner, setShowSuccessBanner] = useState(false);
   const [bannerMessage, setBannerMessage] = useState('프로필이 성공적으로 수정되었습니다.');
   const [orgApprovalLoading, setOrgApprovalLoading] = useState(false);
@@ -94,9 +95,22 @@ export default function Profile() {
   };
 
   const handleWithdraw = async () => {
-    // TODO: 회원탈퇴 API 구현
-    console.log('회원탈퇴');
-    setShowWithdrawModal(false);
+    if (withdrawing) return;
+    setWithdrawing(true);
+    try {
+      const res = await api.deleteAccount();
+      if (res.success) {
+        // ConfirmModal 닫고 logout() 이 /login 으로 이동시킨다.
+        setShowWithdrawModal(false);
+        logout();
+      } else {
+        alert(res.error || '회원탈퇴에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      }
+    } catch {
+      alert('회원탈퇴 처리 중 오류가 발생했습니다. 네트워크 상태를 확인해주세요.');
+    } finally {
+      setWithdrawing(false);
+    }
   };
 
   return (

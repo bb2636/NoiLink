@@ -451,6 +451,16 @@ class ApiClient {
     });
   }
 
+  /**
+   * 회원탈퇴 — 본인 계정 + 관련 데이터(passwords/sessions/metricsScores/inquiries)
+   * 를 cascade 로 삭제한다. 성공 시 호출 측에서 logout() + /login 으로 이동.
+   */
+  async deleteAccount(): Promise<ApiResponse<null> & { message?: string }> {
+    return this.request<null>('/users/me', {
+      method: 'DELETE',
+    }) as Promise<ApiResponse<null> & { message?: string }>;
+  }
+
   /** 기업 회원 기관 승인 요청(서버에서 approvalStatus → PENDING) */
   async requestOrganizationApproval(): Promise<ApiResponse<User> & { message?: string }> {
     return this.request<User>('/users/me/organization-approval-request', {
