@@ -94,24 +94,45 @@ export default function Support() {
 
   return (
     <MobileLayout>
-      <div style={{ backgroundColor: '#0A0A0A', paddingTop: 'env(safe-area-inset-top)', paddingBottom: '100px' }}>
-        <div className="max-w-md mx-auto px-4 py-6">
-          {/* 헤더 */}
-          <div className="mb-6 flex items-center gap-4">
+      <div
+        className="min-h-screen"
+        style={{
+          backgroundColor: '#0A0A0A',
+          touchAction: 'pan-y',
+          overscrollBehavior: 'none',
+          position: 'relative',
+        }}
+      >
+        {/* 통일 헤더 — Profile.tsx 와 동일 패턴 (sticky + safe-area-inset-top + h-12)
+            과거 외부 div 에 paddingTop 만 주고 헤더를 normal flow 에 두면 iOS WebView
+            상단 status bar 에 헤더(뒤로가기/제목)가 가려지는 회귀가 있었다 (2026-05). */}
+        <div
+          className="sticky top-0 z-30"
+          style={{
+            backgroundColor: '#0A0A0A',
+            borderBottom: '1px solid #1A1A1A',
+            paddingTop: 'env(safe-area-inset-top)',
+          }}
+        >
+          <div className="max-w-md mx-auto px-4 h-12 flex items-center gap-3">
             <button
               onClick={() => navigate('/profile')}
               className="flex items-center"
               style={{ color: '#FFFFFF' }}
+              aria-label="뒤로가기"
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
             </button>
-            <h1 className="text-2xl font-bold" style={{ color: '#FFFFFF' }}>
-              고객센터
-            </h1>
+            <h1 className="text-[15px] font-semibold text-white">고객센터</h1>
           </div>
+        </div>
 
+        <div
+          className="max-w-md mx-auto px-4 pt-4"
+          style={{ paddingBottom: 'calc(130px + env(safe-area-inset-bottom))' }}
+        >
           {/* 탭 */}
           <div className="flex mb-6">
             <button

@@ -45,25 +45,30 @@ export default function TermsModal({ isOpen, onClose, terms, title }: TermsModal
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex flex-col h-full">
-              {/* 헤더 */}
-              <div 
-                className="flex items-center gap-4 px-4 py-6"
-                style={{ 
-                  paddingTop: `calc(24px + env(safe-area-inset-top))`,
+              {/* 헤더 — Profile/Support 와 동일한 통일 sticky 헤더 패턴 (h-12).
+                  과거 py-6 + 추가 24px 로 상단바 영역이 다른 페이지보다 두 배 가까이
+                  컸고, 헤더 아래(본문 시작) 여백도 비대해 보였다 (2026-05). */}
+              <div
+                style={{
+                  borderBottom: '1px solid #1A1A1A',
+                  paddingTop: 'env(safe-area-inset-top)',
                 }}
               >
-                <button
-                  onClick={onClose}
-                  className="flex items-center"
-                  style={{ color: '#FFFFFF' }}
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                </button>
-                <h1 className="text-2xl font-bold" style={{ color: '#FFFFFF' }}>
-                  {title || terms?.title || '약관'}
-                </h1>
+                <div className="max-w-md mx-auto px-4 h-12 flex items-center gap-3">
+                  <button
+                    onClick={onClose}
+                    className="flex items-center"
+                    style={{ color: '#FFFFFF' }}
+                    aria-label="뒤로가기"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <h1 className="text-[15px] font-semibold text-white">
+                    {title || terms?.title || '약관'}
+                  </h1>
+                </div>
               </div>
 
               {/* 내용
