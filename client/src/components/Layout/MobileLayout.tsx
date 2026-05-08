@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactNode, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../hooks/useAuth';
@@ -12,6 +12,17 @@ interface MobileLayoutProps {
 export default function MobileLayout({ children, hideBottomNav = false }: MobileLayoutProps) {
   const location = useLocation();
   const { user } = useAuth();
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // 라우트 변경 시 외부 스크롤 컨테이너를 최상단으로 리셋.
+  // 없으면 이전 페이지 스크롤 위치가 그대로 유지되어, 새 페이지의 sticky 헤더가
+  // viewport 위로 밀려 iOS status bar 영역에 묻히는 회귀가 발생한다 (2026-05,
+  // 마이페이지 → 고객센터 진입 시 헤더 잘림 사용자 보고).
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+    }
+  }, [location.pathname]);
 
   // 가운데 버튼: 기업 회원이면 기관 리포트, 그 외에는 개인 리포트
   const reportPath =
@@ -85,6 +96,7 @@ export default function MobileLayout({ children, hideBottomNav = false }: Mobile
   
   return (
     <div 
+      ref={scrollRef}
       className="min-h-screen overflow-y-auto scrollbar-hide" 
       style={{ 
         backgroundColor: '#0A0A0A',
