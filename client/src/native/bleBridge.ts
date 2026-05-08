@@ -60,9 +60,18 @@ function post(message: WebToNativeMessage): void {
 // 원인. 테스트 점등(`Device.handleTestBlink`) 은 매 송신 사이 `await sleep(1000)`
 // 으로 자연스럽게 직렬화돼 잘 동작했다.
 //
-// 본 큐는 레거시 분기에서 `bleWriteCharacteristic` 호출을 50ms 간격으로 흩뿌려,
+// 본 큐는 레거시 분기에서 `bleWriteCharacteristic` 호출을 일정 간격으로 흩뿌려,
 // 가장 빠른 박자 (BPM 200 = 300ms 간격) 에서도 안정적으로 들어가게 만든다.
-const LEGACY_WRITE_INTERVAL_MS = 50;
+//
+// 사용자 보고 (2026-05): 50ms 간격에서도 사용자 패드 펌웨어가 LED 명령을 자주
+// 무시하는 현상 발견. "한 번 됐다가 다시 안 되는" 일관성 없는 증상으로
+// 펌웨어 측 GATT 처리 capacity 가 우리 가정보다 더 좁은 것으로 추정됨.
+// 우회: 간격을 120ms 로 늘려 펌웨어 처리 시간을 충분히 확보. BPM 200 (300ms)
+// 에서도 한 박당 2회 송신까지는 여유. 단순 박자 패턴(RHYTHM/FOCUS)는 영향 없음.
+// 빠른 연속 송신이 잦은 COMPREHENSION 의 flashAll(WHITE) 같은 경우 podCount=4
+// 면 480ms 분산 → 250ms ON 보다 길어 LED 가 분산 점등될 수 있는데, 펌웨어가
+// 명령 자체를 무시하는 것보다는 분산이라도 들어가는 편이 낫다.
+const LEGACY_WRITE_INTERVAL_MS = 120;
 type LegacyJob = { fn: () => void; hex: string };
 let legacyWriteQueue: LegacyJob[] = [];
 let legacyWriteTimer: ReturnType<typeof setTimeout> | null = null;
