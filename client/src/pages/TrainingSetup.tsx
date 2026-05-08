@@ -152,7 +152,21 @@ export default function TrainingSetup() {
       ensureDemoDevicesSeeded();
       const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_DEVICES);
       const list: RegisteredDevice[] = raw ? JSON.parse(raw) : [];
-      setRegistered(Array.isArray(list) ? list.slice(0, TOTAL_POD_SLOTS) : []);
+      const sliced = Array.isArray(list) ? list.slice(0, TOTAL_POD_SLOTS) : [];
+      setRegistered(sliced);
+
+      // 기기관리에서 BLE 연결된 Pod 을 트레이닝 진입 시 자동 선택.
+      // 사용자 보고 (2026-05): "기기관리에서 연결 확인 후 트레이닝 들어가면
+      // 기기 선택이 꺼져있다" — 매번 수동 토글해야 하는 마찰 제거.
+      // 등록 목록에 해당 id 가 존재할 때만 선택해 stale state 가 들어가지 않게 한다.
+      const connRaw = localStorage.getItem(STORAGE_KEYS.CONNECTED_DEVICE);
+      if (connRaw) {
+        const conn = JSON.parse(connRaw);
+        const connId: string | undefined = conn?.id;
+        if (connId && sliced.some((d) => d.id === connId)) {
+          setSelectedPodIds((prev) => (prev.size > 0 ? prev : new Set([connId])));
+        }
+      }
     } catch {
       setRegistered([]);
     }
