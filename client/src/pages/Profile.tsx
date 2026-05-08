@@ -100,9 +100,14 @@ export default function Profile() {
     try {
       const res = await api.deleteAccount();
       if (res.success) {
-        // ConfirmModal 닫고 logout() 이 /login 으로 이동시킨다.
+        // ConfirmModal 먼저 닫고 SuccessBanner 표시 → 짧게 머문 뒤 logout()
+        // (logout() 이 /login 으로 즉시 이동시키므로 배너를 미리 보여줘야 한다)
         setShowWithdrawModal(false);
-        logout();
+        setBannerMessage('회원탈퇴가 완료되었습니다.');
+        setShowSuccessBanner(true);
+        setTimeout(() => {
+          logout();
+        }, 1500);
       } else {
         alert(res.error || '회원탈퇴에 실패했습니다. 잠시 후 다시 시도해주세요.');
       }
