@@ -446,16 +446,19 @@ export default function SignUp() {
         overscrollBehaviorY: 'contain',
       }}
     >
+      {/* 통일 sticky 헤더 — Profile/Support 와 동일 패턴.
+          외곽 자체 스크롤 컨테이너의 직접 자식이어야 sticky 가 정상
+          동작한다 (안쪽 padded 박스에 두면 그 박스 자체가 스크롤되지 않아
+          sticky 가 부모 기준이 되어 어색하게 잘림). */}
       <div
-        className="px-4 sm:px-6 py-4 sm:py-6 max-w-md mx-auto w-full"
+        className="sticky top-0 z-30"
         style={{
-          // 회원가입 버튼이 모바일 홈 인디케이터/제스처 바에 묻히지 않도록
-          // safe-area 합산. select 단계의 fixed footer 와도 겹치지 않게 충분히.
-          paddingBottom: 'calc(96px + env(safe-area-inset-bottom))',
+          backgroundColor: '#0A0A0A',
+          borderBottom: '1px solid #1A1A1A',
+          paddingTop: 'env(safe-area-inset-top)',
         }}
       >
-        {/* 네비게이션 바 */}
-        <div className="flex items-center mb-6">
+        <div className="max-w-md mx-auto px-4 h-12 flex items-center">
           <button
             onClick={() => {
               if (step === 'form') {
@@ -468,14 +471,25 @@ export default function SignUp() {
                 navigate('/login');
               }
             }}
-            className="mr-4 text-gray-400 hover:text-white transition-colors"
+            className="mr-3 text-gray-400 hover:text-white transition-colors"
+            aria-label="뒤로가기"
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <h1 className="text-lg font-semibold">회원가입</h1>
+          <h1 className="text-[15px] font-semibold text-white">회원가입</h1>
         </div>
+      </div>
+
+      <div
+        className="px-4 sm:px-6 pt-4 sm:pt-6 max-w-md mx-auto w-full"
+        style={{
+          // 회원가입 버튼이 모바일 홈 인디케이터/제스처 바에 묻히지 않도록
+          // safe-area 합산. select 단계의 fixed footer 와도 겹치지 않게 충분히.
+          paddingBottom: 'calc(96px + env(safe-area-inset-bottom))',
+        }}
+      >
         
         {/* 1단계: 회원 타입 선택 */}
         <AnimatePresence mode="wait">
