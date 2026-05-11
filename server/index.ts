@@ -55,6 +55,12 @@ import homeRoutes from './routes/home.js';
 import adminRoutes from './routes/admin.js';
 import termsRoutes from './routes/terms.js';
 import configRoutes from './routes/config.js';
+import authRoutes from './routes/auth.js';
+
+// 네이버 OAuth 콜백 URL 은 `/auth/naver/callback` (네이버 개발자센터 등록값) 로
+// 고정되어 있어 `/api` prefix 없이 top-level 에 마운트한다. SPA catch-all 보다
+// 먼저 등록되어야 인증창에서 돌아온 요청이 정적 index.html 로 빠지지 않는다.
+app.use('/auth', authRoutes);
 
 app.use('/api/training', trainingRoutes);
 app.use('/api/scores', scoreRoutes);
@@ -74,7 +80,11 @@ const clientDist = join(serverRoot, '..', 'client', 'dist');
 if (existsSync(clientDist)) {
   app.use(express.static(clientDist));
   app.get('*', (req: Request, res: Response, next: Function) => {
-    if (req.path.startsWith('/api/') || req.path === '/health') {
+    if (
+      req.path.startsWith('/api/') ||
+      req.path === '/health' ||
+      req.path.startsWith('/auth/')
+    ) {
       return next();
     }
     res.sendFile(join(clientDist, 'index.html'));

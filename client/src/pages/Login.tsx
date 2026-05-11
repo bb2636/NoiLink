@@ -206,13 +206,12 @@ export default function Login() {
             </svg>
           </button>
           
-          {/* 네이버 */}
+          {/* 네이버 — 같은 origin 의 `/auth/naver` 로 이동(WebView 호환 A안). */}
           <button
             type="button"
             className="w-12 h-12 rounded-full bg-green-500 flex items-center justify-center hover:scale-110 transition-transform"
             onClick={() => {
-              // TODO: 네이버 로그인 구현
-              console.log('네이버 로그인');
+              window.location.href = '/auth/naver';
             }}
           >
             <span className="text-lg font-bold text-white">N</span>

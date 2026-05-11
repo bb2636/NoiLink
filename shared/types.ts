@@ -96,6 +96,8 @@ export interface User {
   pendingOrganizationId?: string;       // 가입 신청 중인 기업 ID (개인 회원)
   pendingOrganizationName?: string;     // 가입 신청 중인 기업명 (개인 회원)
   pendingRequestedAt?: string;          // 가입 신청 일시
+  socialProvider?: 'naver' | 'kakao' | 'google'; // 소셜 로그인 공급자 (없으면 이메일/비밀번호 가입)
+  socialId?: string;                    // 소셜 공급자 측 사용자 식별자 (provider+id 로 unique)
 }
 
 /** 조직 정보 (기업 회원용) */

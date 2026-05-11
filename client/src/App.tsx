@@ -33,6 +33,7 @@ import InquiryDetail from './pages/InquiryDetail';
 import Login from './pages/Login';
 import SignUp from './pages/SignUp';
 import FindPassword from './pages/FindPassword';
+import SocialLoginComplete from './pages/SocialLoginComplete';
 import Ranking from './pages/Ranking';
 import Report from './pages/Report';
 import OrganizationReport from './pages/OrganizationReport';
@@ -142,6 +143,7 @@ function AppRoutes() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/find-password" element={<FindPassword />} />
+        <Route path="/login/social/complete" element={<SocialLoginComplete />} />
         <Route
           path="/admin"
           element={

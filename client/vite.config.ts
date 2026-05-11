@@ -19,6 +19,11 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
+      // 네이버 OAuth 콜백 (`/auth/naver/callback`) 도 dev 환경에서 백엔드로 전달.
+      '/auth': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
     },
   },
 });
