@@ -35,13 +35,15 @@ type HomeVariant = 'first-time' | 'streak-active' | 'streak-broken' | 'enterpris
 function resolveVariant(
   user: { userType?: string; organizationId?: string } | null,
   streakDays: number,
+  hasData: boolean,
 ): HomeVariant {
   if (!user) return 'first-time';
+  // 신규 가입자(트레이닝 기록 0건) — 개인/기업 구분 없이 깔끔한 첫 화면을 보여줘
+  // DEMO_PROFILE 목업 수치(80점/4시간/5일/90% 등)가 노출되지 않도록 한다.
+  if (!hasData) return 'first-time';
   if (user.userType === 'ORGANIZATION') return 'enterprise';
   // Task #151: 홈 "연속 트레이닝 트렌드" 의 표시 모드는 실제 streak 일수로 결정.
   //   streak > 0 이면 active(원형 진행도 + 일수 + 🔥), 0 이면 broken(🔥 + 시작하기).
-  //   실데이터가 도착하기 전(streak = 0 초기) 에는 broken 으로 표시되며, 1회라도
-  //   훈련을 마치면 카드 엔드포인트가 KST 기준 14일 창에서 1 이상을 돌려준다.
   return streakDays > 0 ? 'streak-active' : 'streak-broken';
 }
 
@@ -49,9 +51,10 @@ export default function Home() {
   const { user } = useAuth();
   const home = useHome(user?.id || null);
   const card = useUserRankingCard(user?.id || null);
-  const variant = resolveVariant(user as any, card.streakDays);
+  const stats = useUserStats(user?.id || null);
+  const variant = resolveVariant(user as any, card.streakDays, stats.hasData);
 
-  if (home.loading) {
+  if (home.loading || (user && stats.loading)) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#0A0A0A' }}>
         <div className="text-white">로딩 중...</div>
