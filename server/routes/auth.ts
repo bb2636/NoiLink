@@ -55,6 +55,15 @@ function getEnv(): { clientId: string; clientSecret: string; callbackUrl: string
   return { clientId, clientSecret, callbackUrl };
 }
 
+function getKakaoEnv(): { clientId: string; clientSecret: string; callbackUrl: string } | null {
+  const clientId = process.env.KAKAO_CLIENT_ID;
+  // 카카오는 Client Secret 사용을 활성화한 경우에만 필수 — 비어 있어도 진행 가능.
+  const clientSecret = process.env.KAKAO_CLIENT_SECRET || '';
+  const callbackUrl = process.env.KAKAO_CALLBACK_URL;
+  if (!clientId || !callbackUrl) return null;
+  return { clientId, clientSecret, callbackUrl };
+}
+
 /**
  * GET /auth/naver
  * 네이버 인증창으로 리다이렉트.
@@ -216,6 +225,196 @@ router.get('/naver/callback', async (req: Request, res: Response) => {
     return res.redirect(`/login/social/complete#${params.toString()}`);
   } catch (e) {
     console.error('[naver] callback error', e);
+    return res.redirect('/login?social_error=server_error');
+  }
+});
+
+// =============================================================================
+// 카카오 소셜 로그인 (네이버와 동일한 A안 — WebView 안에서 동일 origin 처리)
+//
+//   GET  /auth/kakao           : state 발급 + 카카오 인증창으로 302 리다이렉트
+//   GET  /auth/kakao/callback  : 카카오 redirect_uri — code 교환 → 사용자 upsert →
+//                                JWT 발급 → /login/social/complete 로 hash fragment 전달
+//
+// 환경변수:
+//   - KAKAO_CLIENT_ID       (REST API 키)
+//   - KAKAO_CLIENT_SECRET   (선택 — 카카오 개발자센터에서 활성화한 경우만 필수)
+//   - KAKAO_CALLBACK_URL    (예: https://noilink.replit.app/auth/kakao/callback)
+//
+// 네이버와 다른 점:
+//   - token 엔드포인트가 POST + x-www-form-urlencoded
+//   - 프로필 응답이 { id, kakao_account: { email, profile: { nickname } } } 형태
+//   - 이메일/닉네임은 사업자 인증 후 활성화된 동의항목만 내려옴 — 둘 다 없을 수 있어
+//     이메일 미수집 사용자는 socialId 단독 키로만 신원 보장한다.
+// =============================================================================
+
+interface KakaoTokenResponse {
+  access_token?: string;
+  refresh_token?: string;
+  token_type?: string;
+  expires_in?: number;
+  scope?: string;
+  error?: string;
+  error_description?: string;
+}
+
+interface KakaoProfileResponse {
+  id?: number;
+  kakao_account?: {
+    email?: string;
+    has_email?: boolean;
+    is_email_valid?: boolean;
+    is_email_verified?: boolean;
+    profile?: {
+      nickname?: string;
+      profile_image_url?: string;
+    };
+  };
+  properties?: {
+    nickname?: string;
+    profile_image?: string;
+  };
+}
+
+router.get('/kakao', (req: Request, res: Response) => {
+  const env = getKakaoEnv();
+  if (!env) {
+    return res
+      .status(500)
+      .send('카카오 로그인 환경변수(KAKAO_CLIENT_ID/CALLBACK_URL) 가 설정되지 않았습니다.');
+  }
+  const state = issueState();
+  const url =
+    'https://kauth.kakao.com/oauth/authorize?response_type=code' +
+    `&client_id=${encodeURIComponent(env.clientId)}` +
+    `&redirect_uri=${encodeURIComponent(env.callbackUrl)}` +
+    `&state=${encodeURIComponent(state)}`;
+  res.redirect(url);
+});
+
+router.get('/kakao/callback', async (req: Request, res: Response) => {
+  const env = getKakaoEnv();
+  if (!env) {
+    return res
+      .status(500)
+      .send('카카오 로그인 환경변수가 설정되지 않았습니다.');
+  }
+
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+  const errorParam = typeof req.query.error === 'string' ? req.query.error : '';
+
+  if (errorParam) {
+    return res.redirect(`/login?social_error=${encodeURIComponent(errorParam)}`);
+  }
+  if (!code || !state) {
+    return res.redirect('/login?social_error=missing_code');
+  }
+  if (!consumeState(state)) {
+    return res.redirect('/login?social_error=invalid_state');
+  }
+
+  try {
+    // 1) code → access_token (POST + form-urlencoded)
+    const tokenBody = new URLSearchParams();
+    tokenBody.set('grant_type', 'authorization_code');
+    tokenBody.set('client_id', env.clientId);
+    tokenBody.set('redirect_uri', env.callbackUrl);
+    tokenBody.set('code', code);
+    if (env.clientSecret) tokenBody.set('client_secret', env.clientSecret);
+
+    const tokenRes = await fetch('https://kauth.kakao.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8' },
+      body: tokenBody.toString(),
+    });
+    const tokenJson = (await tokenRes.json()) as KakaoTokenResponse;
+    if (!tokenJson.access_token) {
+      console.error('[kakao] token exchange failed', tokenJson);
+      return res.redirect('/login?social_error=token_exchange_failed');
+    }
+
+    // 2) access_token → 프로필
+    const profileRes = await fetch('https://kapi.kakao.com/v2/user/me', {
+      headers: {
+        Authorization: `Bearer ${tokenJson.access_token}`,
+        'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8',
+      },
+    });
+    const profileJson = (await profileRes.json()) as KakaoProfileResponse;
+    if (!profileJson.id) {
+      console.error('[kakao] profile fetch failed', profileJson);
+      return res.redirect('/login?social_error=profile_fetch_failed');
+    }
+
+    const kakaoId = String(profileJson.id);
+    const kakaoEmail =
+      profileJson.kakao_account?.is_email_valid && profileJson.kakao_account?.is_email_verified
+        ? profileJson.kakao_account.email
+        : profileJson.kakao_account?.email; // 검증 정보 미동의여도 이메일이 오면 그대로 사용
+    const kakaoNickname =
+      profileJson.kakao_account?.profile?.nickname ||
+      profileJson.properties?.nickname ||
+      `카카오사용자`;
+    const kakaoName = kakaoNickname;
+
+    // 3) users[] upsert (socialProvider+socialId 우선, 없으면 email 매칭)
+    let resolvedUser: User | null = null;
+    await withKeyLock(KV_LOCK_USERS, async () => {
+      const users: any[] = (await db.get('users')) || [];
+      let existing = users.find(
+        (u) => u.socialProvider === 'kakao' && u.socialId === kakaoId,
+      );
+      if (!existing && kakaoEmail) {
+        existing = users.find((u) => u.email && u.email === kakaoEmail);
+        if (existing) {
+          existing.socialProvider = 'kakao';
+          existing.socialId = kakaoId;
+          existing.lastLoginAt = new Date().toISOString();
+        }
+      }
+
+      if (!existing) {
+        const newUser: any = {
+          id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          username: kakaoNickname,
+          email: kakaoEmail,
+          name: kakaoName,
+          nickname: kakaoNickname,
+          userType: 'PERSONAL',
+          socialProvider: 'kakao',
+          socialId: kakaoId,
+          streak: 0,
+          createdAt: new Date().toISOString(),
+          lastLoginAt: new Date().toISOString(),
+        };
+        let suffix = 0;
+        while (users.find((u) => u.username === newUser.username)) {
+          suffix += 1;
+          newUser.username = `${kakaoNickname}_${suffix}`;
+        }
+        users.push(newUser);
+        existing = newUser;
+      } else {
+        existing.lastLoginAt = new Date().toISOString();
+      }
+      await db.set('users', users);
+      resolvedUser = existing as User;
+    });
+
+    if (!resolvedUser) {
+      return res.redirect('/login?social_error=user_upsert_failed');
+    }
+
+    const token = generateToken(resolvedUser);
+    const u = resolvedUser as User;
+    const params = new URLSearchParams();
+    params.set('token', token);
+    params.set('userId', u.id);
+    params.set('username', u.username);
+    return res.redirect(`/login/social/complete#${params.toString()}`);
+  } catch (e) {
+    console.error('[kakao] callback error', e);
     return res.redirect('/login?social_error=server_error');
   }
 });

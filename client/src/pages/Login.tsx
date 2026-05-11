@@ -192,13 +192,12 @@ export default function Login() {
         
         {/* 간편 로그인 버튼들 */}
         <div className="flex justify-center gap-4">
-          {/* 카카오톡 */}
+          {/* 카카오 — 같은 origin 의 `/auth/kakao` 로 이동(WebView 호환 A안). */}
           <button
             type="button"
             className="w-12 h-12 rounded-full bg-yellow-400 flex items-center justify-center hover:scale-110 transition-transform"
             onClick={() => {
-              // TODO: 카카오톡 로그인 구현
-              console.log('카카오톡 로그인');
+              window.location.href = '/auth/kakao';
             }}
           >
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
