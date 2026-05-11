@@ -430,8 +430,30 @@ export default function SignUp() {
   };
   
   return (
-    <div className="min-h-screen text-white" style={{ backgroundColor: '#0A0A0A' }}>
-      <div className="px-4 sm:px-6 py-4 sm:py-6 max-w-md mx-auto w-full pb-24">
+    <div
+      className="text-white overflow-y-auto"
+      style={{
+        backgroundColor: '#0A0A0A',
+        // 모바일 WebView 에서는 부모 SafeAreaView/body 가 100vh 를 잠그는
+        // 경우가 있어 외곽이 그냥 min-h-screen 이면 컨텐츠가 늘어나도
+        // 스크롤이 일어나지 않는다 (사용자 보고: 약관 동의 영역 밑으로
+        // 스크롤 안됨). 자체 스크롤 컨테이너(100dvh + overflow-y-auto)로
+        // 만들어 부모 height 잠금과 무관하게 안에서 스크롤되도록 한다.
+        height: '100dvh',
+        // 100dvh 미지원 브라우저(구형 안드로이드 WebView) fallback
+        minHeight: '100vh',
+        WebkitOverflowScrolling: 'touch',
+        overscrollBehaviorY: 'contain',
+      }}
+    >
+      <div
+        className="px-4 sm:px-6 py-4 sm:py-6 max-w-md mx-auto w-full"
+        style={{
+          // 회원가입 버튼이 모바일 홈 인디케이터/제스처 바에 묻히지 않도록
+          // safe-area 합산. select 단계의 fixed footer 와도 겹치지 않게 충분히.
+          paddingBottom: 'calc(96px + env(safe-area-inset-bottom))',
+        }}
+      >
         {/* 네비게이션 바 */}
         <div className="flex items-center mb-6">
           <button
@@ -757,7 +779,11 @@ export default function SignUp() {
                   </div>
                   <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: '#373C39', border: '1px solid #4B5563' }}>
                     {/* 첫 번째 행: 휴대폰 번호 입력 + 인증번호 전송 */}
-                    <div className="flex items-center gap-3 px-3 py-2 border-b" style={{ borderColor: '#4B5563' }}>
+                    {/* input 에 min-w-0 필수 — flex-1 의 기본 min-width:auto 가
+                        placeholder/value 의 intrinsic width 만큼 확보돼서
+                        whitespace-nowrap 버튼을 컨테이너 밖으로 밀어낸다
+                        (overflow-hidden 으로 잘려 보임). */}
+                    <div className="flex items-center gap-2 px-3 py-2 border-b" style={{ borderColor: '#4B5563' }}>
                       <input
                         id="phone"
                         name="phone"
@@ -765,7 +791,7 @@ export default function SignUp() {
                         value={formData.phone}
                         onChange={handleChange}
                         onBlur={handleBlur}
-                        className="flex-1 bg-transparent text-white placeholder-gray-500 focus:outline-none"
+                        className="flex-1 min-w-0 bg-transparent text-white placeholder-gray-500 focus:outline-none"
                         placeholder="휴대폰 번호"
                         disabled={loading}
                         maxLength={13}
@@ -775,7 +801,7 @@ export default function SignUp() {
                         type="button"
                         onClick={handleSendVerification}
                         disabled={loading}
-                        className="px-5 py-2.5 font-semibold transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="shrink-0 px-4 py-2 text-sm font-semibold transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{ 
                           backgroundColor: '#AAED10',
                           color: '#000000',
@@ -786,7 +812,7 @@ export default function SignUp() {
                       </button>
                     </div>
                     {/* 두 번째 행: 인증번호 입력 + 인증하기 */}
-                    <div className="flex items-center gap-3 px-3 py-2">
+                    <div className="flex items-center gap-2 px-3 py-2">
                       <input
                         id="verificationCode"
                         name="verificationCode"
@@ -794,7 +820,7 @@ export default function SignUp() {
                         value={formData.verificationCode}
                         onChange={handleChange}
                         onBlur={handleBlur}
-                        className="flex-1 bg-transparent text-white placeholder-gray-500 focus:outline-none"
+                        className="flex-1 min-w-0 bg-transparent text-white placeholder-gray-500 focus:outline-none"
                         placeholder="인증번호"
                         disabled={loading || !verificationCodeSent || isVerified}
                         maxLength={6}
@@ -804,7 +830,7 @@ export default function SignUp() {
                         type="button"
                         onClick={handleVerify}
                         disabled={isVerified || !verificationCodeSent || !formData.verificationCode || formData.verificationCode.length !== 6}
-                        className="px-5 py-2.5 font-semibold transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="shrink-0 px-4 py-2 text-sm font-semibold transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{ 
                           backgroundColor: isVerified ? '#373C39' : '#373C39',
                           color: isVerified ? '#ffffff' : ((!verificationCodeSent || !formData.verificationCode || formData.verificationCode.length !== 6) ? '#B6B6B9' : '#ffffff'),
