@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../utils/api';
-import type { Session, PhaseMeta } from '@noilink/shared';
+import type { Session } from '@noilink/shared';
 import Pagination from '../../components/Admin/Pagination';
 import Modal from '../../components/Admin/Modal';
 
@@ -24,8 +24,31 @@ interface ReportData {
   setTime: number;
   difficulty: string;
   progressTime: number;
-  errorCount: number;
-  touchCount: number;
+  /** 이번 트레이닝 점수 (FREE 모드 등 점수 미산출 세션은 null). */
+  score: number | null;
+  /** 같은 사용자의 직전 세션 점수 (없으면 null). */
+  previousScore: number | null;
+  /** 직전 세션 대비 점수 변화 (score - previousScore). 어느 쪽이든 null 이면 null. */
+  scoreDiff: number | null;
+}
+
+/**
+ * 직전 세션 점수 대비 변화량을 색상과 함께 표시한다.
+ *  - 향상(+): 초록  ·  하락(-): 빨강  ·  변동 없음(0): 회색
+ *  - 비교할 직전 점수가 없거나 이번 세션이 점수 미산출(예: FREE)인 경우는 "-".
+ */
+function ScoreDiffCell({ diff }: { diff: number | null }) {
+  if (diff === null) {
+    return <span style={{ color: '#999999' }}>-</span>;
+  }
+  const color = diff > 0 ? '#15803D' : diff < 0 ? '#B91C1C' : '#000000';
+  const sign = diff > 0 ? '+' : '';
+  return (
+    <span style={{ color, fontWeight: 600 }}>
+      {sign}
+      {diff}점
+    </span>
+  );
 }
 
 interface CompanyData {
@@ -106,6 +129,29 @@ export default function AdminReports() {
         const sessions = sessionsResponse.data;
         const users = usersResponse.data;
 
+        // 사용자별로 세션을 createdAt 오름차순 정렬해, 각 세션의 직전 세션 점수를 매핑.
+        // FREE 모드 등 score 가 없는 세션은 비교 기준에서 제외해, "직전 대비" 가
+        // 의미 있는 점수 산출 세션끼리만 연결되도록 한다.
+        const sessionsByUser = new Map<string, Session[]>();
+        for (const s of sessions) {
+          const arr = sessionsByUser.get(s.userId) ?? [];
+          arr.push(s);
+          sessionsByUser.set(s.userId, arr);
+        }
+        const previousScoreBySessionId = new Map<string, number | null>();
+        for (const [, arr] of sessionsByUser) {
+          arr.sort(
+            (a, b) =>
+              new Date(a.createdAt || '').getTime() -
+              new Date(b.createdAt || '').getTime(),
+          );
+          let lastScore: number | null = null;
+          for (const s of arr) {
+            previousScoreBySessionId.set(s.id, lastScore);
+            if (typeof s.score === 'number') lastScore = s.score;
+          }
+        }
+
         const reportData: ReportData[] = sessions
           .map(session => {
             const user = users.find(u => u.id === session.userId);
@@ -115,6 +161,12 @@ export default function AdminReports() {
               return null;
             }
             const validUserType = (userType === 'PERSONAL' || userType === 'ORGANIZATION') ? userType : 'PERSONAL';
+            const score = typeof session.score === 'number' ? session.score : null;
+            const previousScore = previousScoreBySessionId.get(session.id) ?? null;
+            const scoreDiff =
+              score !== null && previousScore !== null
+                ? score - previousScore
+                : null;
             return {
               id: session.id,
               userId: session.userId,
@@ -128,8 +180,9 @@ export default function AdminReports() {
               setTime: session.duration / 1000, // ms to seconds
               difficulty: `Level ${session.level}`,
               progressTime: session.duration / 1000,
-              errorCount: session.phases?.reduce((sum: number, p: PhaseMeta) => sum + (p.missCount || 0), 0) || 0,
-              touchCount: session.phases?.reduce((sum: number, p: PhaseMeta) => sum + (p.tickCount || 0), 0) || 0,
+              score,
+              previousScore,
+              scoreDiff,
             } as ReportData;
           })
           .filter((r): r is ReportData => r !== null);
@@ -598,10 +651,10 @@ export default function AdminReports() {
                     진행 시간
                   </th>
                   <th className="px-6 py-4 text-center text-sm font-semibold" style={{ color: '#767676', backgroundColor: '#F5F5F5' }}>
-                    오류 횟수
+                    이번 점수
                   </th>
                   <th className="px-6 py-4 text-center text-sm font-semibold" style={{ color: '#767676', backgroundColor: '#F5F5F5' }}>
-                    터치 횟수
+                    직전 대비
                   </th>
                   <th className="px-6 py-4 text-center text-sm font-semibold" style={{ color: '#767676', backgroundColor: '#F5F5F5' }}>
                     관리
@@ -637,10 +690,10 @@ export default function AdminReports() {
                         {report.progressTime}초
                       </td>
                       <td className="px-6 py-4 text-sm text-center" style={{ color: '#000000' }}>
-                        {report.errorCount}회
+                        {report.score !== null ? `${report.score}점` : '-'}
                       </td>
-                      <td className="px-6 py-4 text-sm text-center" style={{ color: '#000000' }}>
-                        {report.touchCount}회
+                      <td className="px-6 py-4 text-sm text-center">
+                        <ScoreDiffCell diff={report.scoreDiff} />
                       </td>
                       <td className="px-6 py-4 text-center">
                         <button
@@ -691,10 +744,10 @@ export default function AdminReports() {
                     진행시간
                   </th>
                   <th className="px-6 py-4 text-center text-sm font-semibold" style={{ color: '#767676', backgroundColor: '#F5F5F5' }}>
-                    오류 횟수
+                    이번 점수
                   </th>
                   <th className="px-6 py-4 text-center text-sm font-semibold" style={{ color: '#767676', backgroundColor: '#F5F5F5' }}>
-                    터치 횟수
+                    직전 대비
                   </th>
                   <th className="px-6 py-4 text-center text-sm font-semibold" style={{ color: '#767676', backgroundColor: '#F5F5F5' }}>
                     개인 리포트
@@ -730,10 +783,10 @@ export default function AdminReports() {
                         {report.progressTime}초
                       </td>
                       <td className="px-6 py-4 text-sm text-center" style={{ color: '#000000' }}>
-                        {report.errorCount}회
+                        {report.score !== null ? `${report.score}점` : '-'}
                       </td>
-                      <td className="px-6 py-4 text-sm text-center" style={{ color: '#000000' }}>
-                        {report.touchCount}회
+                      <td className="px-6 py-4 text-sm text-center">
+                        <ScoreDiffCell diff={report.scoreDiff} />
                       </td>
                       <td className="px-6 py-4 text-center">
                         <button
@@ -893,11 +946,11 @@ export default function AdminReports() {
               </div>
               <div>
                 <label className="block text-sm font-semibold mb-2" style={{ color: '#000000' }}>
-                  오류 횟수
+                  이번 점수
                 </label>
                 <input
                   type="text"
-                  value={`${selectedReport.errorCount} 회`}
+                  value={selectedReport.score !== null ? `${selectedReport.score} 점` : '-'}
                   readOnly
                   className="w-full px-4 py-2 border rounded-lg"
                   style={{ backgroundColor: '#F5F5F5', borderColor: '#E5E5E5', color: '#000000' }}
@@ -905,14 +958,31 @@ export default function AdminReports() {
               </div>
               <div>
                 <label className="block text-sm font-semibold mb-2" style={{ color: '#000000' }}>
-                  터치 횟수
+                  직전 대비
                 </label>
                 <input
                   type="text"
-                  value={`${selectedReport.touchCount} 회`}
+                  value={
+                    selectedReport.scoreDiff === null
+                      ? (selectedReport.previousScore === null
+                          ? '직전 기록 없음'
+                          : '점수 미산출 모드')
+                      : `${selectedReport.scoreDiff > 0 ? '+' : ''}${selectedReport.scoreDiff} 점 (직전 ${selectedReport.previousScore}점)`
+                  }
                   readOnly
                   className="w-full px-4 py-2 border rounded-lg"
-                  style={{ backgroundColor: '#F5F5F5', borderColor: '#E5E5E5', color: '#000000' }}
+                  style={{
+                    backgroundColor: '#F5F5F5',
+                    borderColor: '#E5E5E5',
+                    color:
+                      selectedReport.scoreDiff === null
+                        ? '#767676'
+                        : selectedReport.scoreDiff > 0
+                        ? '#15803D'
+                        : selectedReport.scoreDiff < 0
+                        ? '#B91C1C'
+                        : '#000000',
+                  }}
                 />
               </div>
             </div>
