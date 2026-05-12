@@ -12,7 +12,10 @@ import api from '../utils/api';
 export default function EditProfile() {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const [step, setStep] = useState<'verify' | 'edit'>('verify');
+  // 소셜 로그인(네이버/카카오) 사용자는 비밀번호가 없어 verify 단계 통과 불가 →
+  // 바로 edit 단계로 진입. 비밀번호 변경 UI 도 숨김(닉네임만 수정 가능).
+  const isSocialUser = !!user?.socialProvider;
+  const [step, setStep] = useState<'verify' | 'edit'>(isSocialUser ? 'edit' : 'verify');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
@@ -44,6 +47,15 @@ export default function EditProfile() {
       }));
     }
   }, [user, step]);
+
+  // user 가 비동기 로드된 후 소셜 사용자임이 확정되면 verify 단계 스킵.
+  // (초기 렌더에는 user=null 이라 isSocialUser 가 false 로 시작해 'verify' 로
+  // 잡힐 수 있어 effect 로 보정.)
+  useEffect(() => {
+    if (user?.socialProvider && step === 'verify') {
+      setStep('edit');
+    }
+  }, [user?.socialProvider, step]);
 
   if (!user) {
     if (authLoading) {
@@ -334,7 +346,8 @@ export default function EditProfile() {
                 {/* 구분선 */}
                 <div className="border-b" style={{ borderColor: '#2A2A2A', borderWidth: '2px' }}></div>
 
-                {/* 비밀번호 변경 - 구분선과 여백 추가 */}
+                {/* 비밀번호 변경 - 소셜 로그인 사용자에겐 숨김 (비밀번호 미보유) */}
+                {!isSocialUser && (
                 <div className="space-y-5" style={{ marginTop: '24px' }}>
                   <div>
                     <label htmlFor="currentPassword" className="block text-sm font-medium text-white mb-2">
@@ -450,6 +463,7 @@ export default function EditProfile() {
                     )}
                   </div>
                 </div>
+                )}
 
                 {/* 닉네임 - 새 비밀번호와 여백 추가 */}
                 <div style={{ marginTop: '24px' }}>
