@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import type { User } from '@noilink/shared';
 import Logo from '../components/Logo';
+import SuccessBanner from '../components/SuccessBanner/SuccessBanner';
+import { STORAGE_KEYS } from '../utils/constants';
 
 /**
  * 로그인 페이지
@@ -15,8 +17,32 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [withdrawBanner, setWithdrawBanner] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // 네이버 회원탈퇴 콜백(/auth/naver/callback) 이 cascade 삭제 후 본 페이지로
+  // ?withdraw=success 와 함께 redirect 한다. 탈퇴된 사용자의 잔여 토큰이
+  // 같은 기기에 남아 있으면 다음 화면이 인증 만료까지 잘못 자동 로그인된
+  // 것처럼 보이므로, 배너 표시와 함께 localStorage 인증 정보를 즉시 정리한다.
+  // social_error 처리는 form 의 inline error 자리를 차지해 별도 파싱 없이도
+  // 사용자가 재시도할 수 있어 신호만 흡수한다.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('withdraw') === 'success') {
+      try {
+        localStorage.removeItem(STORAGE_KEYS.TOKEN);
+        localStorage.removeItem(STORAGE_KEYS.USER_ID);
+        localStorage.removeItem(STORAGE_KEYS.USERNAME);
+      } catch {
+        /* 스토리지 접근 실패는 무시 — 배너 노출은 유지 */
+      }
+      setWithdrawBanner(true);
+      // 쿼리 제거 (새로고침 시 배너 재노출 방지)
+      window.history.replaceState({}, document.title, location.pathname);
+    }
+  }, [location.pathname, location.search]);
   
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,6 +80,11 @@ export default function Login() {
   
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: '#0A0A0A' }}>
+      <SuccessBanner
+        message="회원탈퇴가 완료되었습니다."
+        isOpen={withdrawBanner}
+        onClose={() => setWithdrawBanner(false)}
+      />
       <div className="px-4 sm:px-6 py-6 sm:py-8 max-w-md mx-auto w-full">
         {/* 로고 */}
         <motion.div

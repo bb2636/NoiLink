@@ -64,6 +64,26 @@ export default function Profile() {
     }
   }, [location.state]);
 
+  // 네이버 회원탈퇴 재인증 실패 시 콜백이 ?withdraw_error=... 로 본 페이지로
+  // 돌려보낸다. 사용자에게 사유와 함께 안내하고 쿼리는 즉시 제거 — 그렇지
+  // 않으면 페이지 이동/새로고침마다 alert 가 반복된다.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const err = params.get('withdraw_error');
+    if (err) {
+      const messages: Record<string, string> = {
+        access_denied: '네이버 재인증이 취소되어 회원탈퇴를 진행하지 못했습니다.',
+        token_exchange_failed: '네이버 인증 토큰 교환에 실패했습니다. 잠시 후 다시 시도해주세요.',
+        profile_fetch_failed: '네이버 프로필 조회에 실패했습니다. 잠시 후 다시 시도해주세요.',
+        account_mismatch:
+          '재인증한 네이버 계정이 현재 로그인된 계정과 달라 탈퇴를 진행하지 않았습니다.',
+        server_error: '회원탈퇴 처리 중 서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
+      };
+      alert(messages[err] || `회원탈퇴를 완료하지 못했습니다 (${err}).`);
+      window.history.replaceState({}, document.title, location.pathname);
+    }
+  }, [location.search, location.pathname]);
+
   if (!user) {
     // 인증 정보 로딩 중에는 안내 문구 대신 빈 화면 유지 (깜빡임 방지)
     if (authLoading) {
@@ -98,6 +118,22 @@ export default function Profile() {
     if (withdrawing) return;
     setWithdrawing(true);
     try {
+      // 네이버 사용자는 어드민 키가 없어 access token 으로만 unlink 가 가능.
+      // 탈퇴 직전 재인증으로 새 access token 을 받아 unlink + cascade 삭제를
+      // 서버 측에서 한 트랜잭션으로 처리한다. 클라이언트는 서버가 주는
+      // authorize URL 로 이동만 시키면 되고, 그 이후 모든 작업은 콜백 내부에서
+      // 끝나므로 여기서 logout 등 후처리를 할 필요가 없다 (콜백이 /login 으로
+      // redirect 하면서 자연스럽게 토큰 효력도 사라진다).
+      if (user?.socialProvider === 'naver') {
+        const res = await api.initNaverWithdraw();
+        if (res.success && res.data?.authorizeUrl) {
+          window.location.href = res.data.authorizeUrl;
+          return;
+        }
+        alert(res.error || '네이버 재인증을 시작할 수 없습니다. 잠시 후 다시 시도해주세요.');
+        return;
+      }
+
       const res = await api.deleteAccount();
       if (res.success) {
         // ConfirmModal 먼저 닫고 SuccessBanner 표시 → 짧게 머문 뒤 logout()
@@ -340,8 +376,12 @@ export default function Profile() {
       <ConfirmModal
         isOpen={showWithdrawModal}
         title="회원탈퇴"
-        message="정말 회원탈퇴 하시겠습니까?"
-        confirmText="확인"
+        message={
+          user?.socialProvider === 'naver'
+            ? '네이버 계정 연결을 끊기 위해 네이버 재인증이 필요합니다.\n계속 진행하시겠습니까?'
+            : '정말 회원탈퇴 하시겠습니까?'
+        }
+        confirmText={user?.socialProvider === 'naver' ? '네이버로 인증하기' : '확인'}
         cancelText="아니요"
         reverseActions
         onConfirm={handleWithdraw}

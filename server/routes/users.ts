@@ -478,6 +478,97 @@ router.put('/me', async (req: Request, res: Response) => {
  *    요청이 끼어들 수 있지만, 회원탈퇴는 사용자가 명시적으로 1회 호출하는
  *    경로라 충돌 가능성이 낮아 락 없이 best-effort 로 정리한다.
  */
+/**
+ * 회원 데이터 cascade 삭제 — 본 모듈의 DELETE /me 와 네이버 재인증 기반
+ * 회원탈퇴 (server/routes/auth.ts 의 /naver/callback withdraw flow) 양쪽에서
+ * 공유한다. 네이버는 어드민 키가 없어 사용자 access token 으로만 unlink 가
+ * 가능하기 때문에 unlink 호출 자체는 호출자 측 (auth.ts) 에서 처리하고,
+ * 이 함수는 순수히 DB cascade + 카카오 unlink (어드민 키 보유) 만 담당한다.
+ *
+ * @returns 삭제된 사용자 레코드. 사용자가 존재하지 않았으면 null.
+ */
+export async function cascadeDeleteUser(userId: string): Promise<any | null> {
+  let deletedUser: any = null;
+  await withKeyLock(KV_LOCK.USERS, async () => {
+    const users = (await db.get('users')) || [];
+    const idx = users.findIndex((u: any) => u.id === userId);
+    if (idx === -1) return;
+    deletedUser = users[idx];
+    users.splice(idx, 1);
+    await db.set('users', users);
+  });
+
+  if (!deletedUser) return null;
+
+  await withKeyLock(KV_LOCK.PASSWORDS, async () => {
+    const passwords = (await db.get('passwords')) || [];
+    const filtered = passwords.filter(
+      (p: any) => p.userId !== userId && p.email !== deletedUser?.email,
+    );
+    if (filtered.length !== passwords.length) {
+      await db.set('passwords', filtered);
+    }
+  });
+
+  try {
+    const sessions = (await db.get('sessions')) || [];
+    const filteredSessions = sessions.filter((s: any) => {
+      if (s.userId === userId) return false;
+      if (Array.isArray(s.participantIds) && s.participantIds.includes(userId)) return false;
+      return true;
+    });
+    if (filteredSessions.length !== sessions.length) {
+      await db.set('sessions', filteredSessions);
+    }
+  } catch {
+    /* sessions 삭제 실패는 탈퇴 자체를 막지 않음 — 잔여 데이터는 다음 cleanup 에서 정리 */
+  }
+
+  try {
+    const metricsScores = (await db.get('metricsScores')) || [];
+    const filtered = metricsScores.filter((m: any) => m.userId !== userId);
+    if (filtered.length !== metricsScores.length) {
+      await db.set('metricsScores', filtered);
+    }
+  } catch {
+    /* best-effort */
+  }
+
+  try {
+    const inquiries = (await db.get('inquiries')) || [];
+    const filtered = inquiries.filter((i: any) => i.userId !== userId);
+    if (filtered.length !== inquiries.length) {
+      await db.set('inquiries', filtered);
+    }
+  } catch {
+    /* best-effort */
+  }
+
+  // 추가 cascade — 모두 `userId` 필드 보유 (server/routes/home.ts,
+  // routes/reports.ts, routes/metrics.ts 에서 확인). 누락 시 탈퇴 후에도
+  // 일별 컨디션/미션, 개인 리포트, 원시 메트릭이 orphaned 로 남아 다음
+  // 같은 id 가 재발급될 일은 없지만 서버 디스크와 통계가 부풀어진다.
+  for (const key of ['dailyConditions', 'dailyMissions', 'reports', 'rawMetrics']) {
+    try {
+      const arr = (await db.get(key)) || [];
+      const filtered = arr.filter((r: any) => r.userId !== userId);
+      if (filtered.length !== arr.length) {
+        await db.set(key, filtered);
+      }
+    } catch {
+      /* best-effort — 한 컬렉션 실패가 나머지 cleanup 을 막지 않음 */
+    }
+  }
+
+  // 카카오 연결 끊기 — DB cleanup 이 모두 끝난 뒤 호출. 실패해도 호출자
+  // 응답을 막지 않는다. 네이버는 access token 이 필요해 호출자가 직접 처리.
+  if (deletedUser.socialProvider === 'kakao') {
+    await unlinkKakaoUser(deletedUser.socialId);
+  }
+
+  return deletedUser;
+}
+
 router.delete('/me', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -485,84 +576,9 @@ router.delete('/me', requireAuth, async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
 
-    let deletedUser: any = null;
-    await withKeyLock(KV_LOCK.USERS, async () => {
-      const users = (await db.get('users')) || [];
-      const idx = users.findIndex((u: any) => u.id === userId);
-      if (idx === -1) return;
-      deletedUser = users[idx];
-      users.splice(idx, 1);
-      await db.set('users', users);
-    });
-
+    const deletedUser = await cascadeDeleteUser(userId);
     if (!deletedUser) {
       return res.status(404).json({ success: false, error: 'User not found' });
-    }
-
-    await withKeyLock(KV_LOCK.PASSWORDS, async () => {
-      const passwords = (await db.get('passwords')) || [];
-      const filtered = passwords.filter(
-        (p: any) => p.userId !== userId && p.email !== deletedUser?.email,
-      );
-      if (filtered.length !== passwords.length) {
-        await db.set('passwords', filtered);
-      }
-    });
-
-    try {
-      const sessions = (await db.get('sessions')) || [];
-      const filteredSessions = sessions.filter((s: any) => {
-        if (s.userId === userId) return false;
-        if (Array.isArray(s.participantIds) && s.participantIds.includes(userId)) return false;
-        return true;
-      });
-      if (filteredSessions.length !== sessions.length) {
-        await db.set('sessions', filteredSessions);
-      }
-    } catch {
-      /* sessions 삭제 실패는 탈퇴 자체를 막지 않음 — 잔여 데이터는 다음 cleanup 에서 정리 */
-    }
-
-    try {
-      const metricsScores = (await db.get('metricsScores')) || [];
-      const filtered = metricsScores.filter((m: any) => m.userId !== userId);
-      if (filtered.length !== metricsScores.length) {
-        await db.set('metricsScores', filtered);
-      }
-    } catch {
-      /* best-effort */
-    }
-
-    try {
-      const inquiries = (await db.get('inquiries')) || [];
-      const filtered = inquiries.filter((i: any) => i.userId !== userId);
-      if (filtered.length !== inquiries.length) {
-        await db.set('inquiries', filtered);
-      }
-    } catch {
-      /* best-effort */
-    }
-
-    // 추가 cascade — 모두 `userId` 필드 보유 (server/routes/home.ts,
-    // routes/reports.ts, routes/metrics.ts 에서 확인). 누락 시 탈퇴 후에도
-    // 일별 컨디션/미션, 개인 리포트, 원시 메트릭이 orphaned 로 남아 다음
-    // 같은 id 가 재발급될 일은 없지만 서버 디스크와 통계가 부풀어진다.
-    for (const key of ['dailyConditions', 'dailyMissions', 'reports', 'rawMetrics']) {
-      try {
-        const arr = (await db.get(key)) || [];
-        const filtered = arr.filter((r: any) => r.userId !== userId);
-        if (filtered.length !== arr.length) {
-          await db.set(key, filtered);
-        }
-      } catch {
-        /* best-effort — 한 컬렉션 실패가 나머지 cleanup 을 막지 않음 */
-      }
-    }
-
-    // 카카오 연결 끊기 — DB cleanup 이 모두 끝난 뒤 호출. 실패해도 사용자
-    // 응답을 막지 않는다 (위 함수 주석 참조).
-    if (deletedUser.socialProvider === 'kakao') {
-      await unlinkKakaoUser(deletedUser.socialId);
     }
 
     res.json({ success: true, message: '회원탈퇴가 완료되었습니다.' });

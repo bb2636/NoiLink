@@ -454,11 +454,45 @@ class ApiClient {
   /**
    * 회원탈퇴 — 본인 계정 + 관련 데이터(passwords/sessions/metricsScores/inquiries)
    * 를 cascade 로 삭제한다. 성공 시 호출 측에서 logout() + /login 으로 이동.
+   *
+   * 주의: 네이버 소셜 사용자는 이 경로 대신 initNaverWithdraw() 로 재인증
+   * flow 를 거쳐야 네이버 계정 unlink 까지 함께 처리된다.
    */
   async deleteAccount(): Promise<ApiResponse<null> & { message?: string }> {
     return this.request<null>('/users/me', {
       method: 'DELETE',
     }) as Promise<ApiResponse<null> & { message?: string }>;
+  }
+
+  /**
+   * 네이버 회원탈퇴 재인증 시작 — 서버가 발급한 네이버 authorize URL 을
+   * 받아온다. 호출 측에서 window.location.href 로 이동시키면 사용자가
+   * 네이버 재로그인 → /auth/naver/callback 의 withdraw 분기에서 unlink +
+   * cascade 삭제 → /login?withdraw=success 로 redirect 된다.
+   *
+   * 본 엔드포인트는 `/api` 가 아닌 top-level `/auth` 에 마운트되어 있어
+   * (server/index.ts: 네이버 콜백 URL 형식 고정) request() 헬퍼의 자동
+   * `/api` prefix 를 우회해 fetch 를 직접 호출한다.
+   */
+  async initNaverWithdraw(): Promise<ApiResponse<{ authorizeUrl: string }>> {
+    try {
+      const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const response = await fetch('/auth/naver/withdraw/init', {
+        method: 'POST',
+        headers,
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        return { success: false, error: errorData.error || `HTTP ${response.status}` };
+      }
+      return (await response.json()) as ApiResponse<{ authorizeUrl: string }>;
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
+    }
   }
 
   /** 기업 회원 기관 승인 요청(서버에서 approvalStatus → PENDING) */
