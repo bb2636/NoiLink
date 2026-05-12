@@ -19,6 +19,47 @@ const KV_LOCK = {
 const isProduction = process.env.NODE_ENV === 'production';
 const SMS_ENABLED = process.env.SMS_ENABLED === 'true';
 
+/**
+ * 카카오 사용자 연결 끊기(unlink) — 회원탈퇴 시 호출.
+ *
+ * 우리 DB 만 비우면 카카오 계정에는 여전히 "NoiLink 와 연결됨" 으로 남아,
+ * 같은 카카오 계정으로 다음 로그인 시 동의 화면이 스킵되고 callback 으로
+ * 바로 통과 → 우리 서버는 이를 신규 가입으로 처리해 사실상 자동 재가입이
+ * 발생한다(회원탈퇴 의도 위반). 어드민 키로 unlink 를 호출해 카카오 쪽
+ * 연결도 함께 끊어, 다음 로그인 시 정상적으로 동의 화면이 다시 뜨고
+ * 사용자가 "신규 가입" 을 명시적으로 인지하도록 한다.
+ *
+ * best-effort: 어드민 키 미설정 / 네트워크 오류 / 카카오 응답 실패는
+ * 콘솔 로그만 남기고 탈퇴 자체를 막지 않는다 (DB 데이터 삭제는 이미 끝남).
+ */
+async function unlinkKakaoUser(socialId: string | undefined): Promise<void> {
+  if (!socialId) return;
+  const adminKey = process.env.KAKAO_ADMIN_KEY;
+  if (!adminKey) {
+    console.warn('[kakao unlink] KAKAO_ADMIN_KEY 미설정 — unlink 스킵');
+    return;
+  }
+  try {
+    const body = new URLSearchParams();
+    body.set('target_id_type', 'user_id');
+    body.set('target_id', socialId);
+    const r = await fetch('https://kapi.kakao.com/v1/user/unlink', {
+      method: 'POST',
+      headers: {
+        Authorization: `KakaoAK ${adminKey}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: body.toString(),
+    });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      console.error('[kakao unlink] failed', r.status, txt);
+    }
+  } catch (e) {
+    console.error('[kakao unlink] error', e);
+  }
+}
+
 function normalizePhone(input: string): string {
   return (input || '').replace(/[^0-9]/g, '');
 }
@@ -516,6 +557,12 @@ router.delete('/me', requireAuth, async (req: AuthRequest, res: Response) => {
       } catch {
         /* best-effort — 한 컬렉션 실패가 나머지 cleanup 을 막지 않음 */
       }
+    }
+
+    // 카카오 연결 끊기 — DB cleanup 이 모두 끝난 뒤 호출. 실패해도 사용자
+    // 응답을 막지 않는다 (위 함수 주석 참조).
+    if (deletedUser.socialProvider === 'kakao') {
+      await unlinkKakaoUser(deletedUser.socialId);
     }
 
     res.json({ success: true, message: '회원탈퇴가 완료되었습니다.' });
