@@ -397,6 +397,17 @@ router.get('/kakao/callback', async (req: Request, res: Response) => {
         existing = newUser;
       } else {
         existing.lastLoginAt = new Date().toISOString();
+        // 기존 카카오 사용자 백필:
+        // 첫 로그인 당시에는 이메일 동의를 안 했거나, 카카오 비즈앱 검수
+        // 이전이라 이메일이 응답에 없을 수 있다. 이 경우 user.email 이
+        // 비어 있는 채로 만들어지고, 마이페이지에 "이메일 없음" 으로 노출된다.
+        // 이후 동의/검수가 추가돼 이메일이 응답에 포함되면, 비어 있던 값을
+        // 자동으로 채워 마이페이지에 정상 표시되도록 한다.
+        // 이미 이메일이 있으면(=사용자가 직접 입력했거나 다른 경로로 채워짐)
+        // 카카오 값으로 덮어쓰지 않는다.
+        if (kakaoEmail && !existing.email) {
+          existing.email = kakaoEmail;
+        }
       }
       await db.set('users', users);
       resolvedUser = existing as User;
