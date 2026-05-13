@@ -5,25 +5,10 @@ import { useHome } from '../hooks/useHome';
 import { useUserStats } from '../hooks/useUserStats';
 import { useNavigate } from 'react-router-dom';
 import Logo from '../components/Logo';
-import { getBrainimalIcon, BRAINIMAL_INFO } from '../utils/brainimalIcons';
+import { getBrainimalIcon, BRAINIMAL_INFO, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
 import { placeholderImage, fallbackImg } from '../utils/imagePlaceholder';
-import { DEMO_PROFILE } from '../utils/demoProfile';
 import { api } from '../utils/api';
 import type { User } from '@noilink/shared';
-
-// 데모 프로필 단일 출처 — 리포트/랭킹과 동일한 수치를 사용
-// TODO: 실제 API 데이터로 교체
-const MOCK_HOME = {
-  brainimalType: DEMO_PROFILE.brainimalType,
-  brainIndex: DEMO_PROFILE.brainIndex,
-  bpmAvg: DEMO_PROFILE.bpmAvg,
-  weeklyChange: DEMO_PROFILE.weeklyChange,
-  scoreUpDelta: DEMO_PROFILE.scoreUpDelta,
-  trendPoints: DEMO_PROFILE.trendPoints,
-  checkedDays: DEMO_PROFILE.checkedDays,
-  streakDays: DEMO_PROFILE.streakDays,
-  topTrainings: DEMO_PROFILE.topTrainings,
-};
 
 type HomeVariant = 'first-time' | 'streak-active' | 'streak-broken' | 'enterprise';
 
@@ -52,7 +37,11 @@ export default function Home() {
   const home = useHome(user?.id || null);
   const card = useUserRankingCard(user?.id || null);
   const stats = useUserStats(user?.id || null);
-  const variant = resolveVariant(user as any, card.streakDays, stats.hasData);
+  // first-time 판정은 "세션이 하나도 없는 진짜 신규" 만 — 점수 산출이 안 된 사용자
+  // (FREE 만 한 케이스 / 채점 실패 케이스) 는 Standard/Enterprise 에 머무르며 부분
+  // 데이터를 "—" + 안내로 가린다. `hasData`(scored.length>0) 로 판정하면 점수만 없는
+  // 사용자도 신규처럼 취급되는 회귀가 생긴다 (Task #156-followup architect 지적).
+  const variant = resolveVariant(user as any, card.streakDays, stats.hasAnySession);
 
   if (home.loading || (user && stats.loading)) {
     return (
@@ -155,7 +144,9 @@ function FirstTimeHome() {
 interface StandardProps {
   variant: 'streak-active' | 'streak-broken' | 'enterprise';
   home: ReturnType<typeof useHome>;
-  user: { id: string; nickname?: string; name?: string; streak?: number } | null;
+  user:
+    | (Partial<User> & { id: string; nickname?: string; name?: string; streak?: number })
+    | null;
   streakDays: number;
 }
 
@@ -191,24 +182,28 @@ function StandardHome({ variant, home, user, streakDays }: StandardProps) {
       : typeof stats.brainIndex === 'number'
         ? stats.brainIndex
         : null;
-  const bpmAvg = stats.bpmAvg ?? MOCK_HOME.bpmAvg;
-  const weeklyChange = stats.weeklyChange ?? MOCK_HOME.weeklyChange;
-  const scoreUpDelta = stats.scoreUpDelta ?? MOCK_HOME.scoreUpDelta;
-  const trendPoints = stats.trendPoints.length > 0 ? stats.trendPoints : MOCK_HOME.trendPoints;
-  const topTrainings = stats.topTrainings.length > 0 ? stats.topTrainings : MOCK_HOME.topTrainings;
+  // 데이터가 없는 항목은 UI 에서 "—" + 안내로 표시한다 (과거 MOCK_HOME 폴백은
+  // 본인 점수가 아닌 데모값을 본인 것처럼 보여주는 신뢰 무너지는 UX 였다).
+  // 신규 가입자는 위쪽 first-time variant 분기에서 별도 처리되므로, 여기서는
+  // "트레이닝은 시작했지만 일부 지표가 아직 산출되지 않은" 부분 데이터 케이스만
+  // 자연스럽게 가린다.
+  const bpmAvg: number | null = stats.bpmAvg;
+  const weeklyChange: number | null = stats.weeklyChange;
+  const scoreUpDelta: number | null = stats.scoreUpDelta;
+  const trendPoints: number[] = stats.trendPoints;
+  const topTrainings: string[] = stats.topTrainings;
   // Task #151 — streakDays 는 부모(`Home`) 가 `/api/rankings/user/:id/card` 에서
   //   받아 내려준 값을 사용. 과거 `user.streak` 는 로그인 시 캐시된 값이라 새 세션을
   //   완료해도 자동 갱신되지 않아 홈 카운터가 0 에서 멈추는 회귀가 있었다(Task #151).
   const nickname = user?.nickname || user?.name || '회원';
-  const brainimalInfo = getBrainimalIcon(MOCK_HOME.brainimalType);
+  // 본인 브레이니멀 타입 — 미산출(가입 직후/리포트 생성 전) 시에는 "알 🥚" 디폴트.
+  const brainimalInfo = user?.brainimalType
+    ? getBrainimalIcon(user.brainimalType)
+    : DEFAULT_BRAINIMAL;
 
-  // 요일 트렌드 (월~일)
+  // 요일 트렌드 (월~일) — 데이터 없으면 모두 미체크
+  const checkedDays = stats.checkedDays;
   const weekdayLabels = ['월', '화', '수', '목', '금', '토', '일'];
-  const checkedDays = useMemo(() => {
-    if (stats.hasData) return stats.checkedDays;
-    if (variant === 'streak-broken') return [true, true, false, false, false, false, false];
-    return MOCK_HOME.checkedDays;
-  }, [variant, stats.hasData, stats.checkedDays]);
 
   return (
     <div style={{ backgroundColor: '#0A0A0A', minHeight: '100vh' }}>
@@ -288,11 +283,17 @@ function StandardHome({ variant, home, user, streakDays }: StandardProps) {
                 className="w-9 h-9 rounded-full flex items-center justify-center overflow-hidden"
                 style={{ backgroundColor: '#1F2A24' }}
               >
-                <img
-                  src={brainimalInfo.icon}
-                  alt={brainimalInfo.name}
-                  className="w-full h-full object-cover"
-                />
+                {brainimalInfo.icon ? (
+                  <img
+                    src={brainimalInfo.icon}
+                    alt={brainimalInfo.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-lg" aria-label={brainimalInfo.name}>
+                    {brainimalInfo.emoji}
+                  </span>
+                )}
               </div>
               <span className="text-white text-sm font-medium">{nickname}님</span>
             </div>
@@ -300,7 +301,11 @@ function StandardHome({ variant, home, user, streakDays }: StandardProps) {
               className="px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1.5"
               style={{ backgroundColor: `${brainimalInfo.color}26`, color: brainimalInfo.color }}
             >
-              <img src={brainimalInfo.icon} alt="" className="w-4 h-4 rounded-full object-cover" />
+              {brainimalInfo.icon ? (
+                <img src={brainimalInfo.icon} alt="" className="w-4 h-4 rounded-full object-cover" />
+              ) : (
+                <span aria-hidden>{brainimalInfo.emoji}</span>
+              )}
               {brainimalInfo.name}
             </span>
           </div>
@@ -317,9 +322,18 @@ function StandardHome({ variant, home, user, streakDays }: StandardProps) {
         <h2 className="text-white text-base font-semibold mb-3">트레이닝 요약</h2>
         <div className="rounded-2xl p-4 mb-6" style={{ backgroundColor: '#0E1812' }}>
           <div className="flex items-center justify-between mb-4">
-            <span className="px-2.5 py-1 rounded-full text-xs font-semibold text-black" style={{ backgroundColor: '#AAED10' }}>
-              주간 성장률 +{weeklyChange}
-            </span>
+            {weeklyChange !== null ? (
+              <span className="px-2.5 py-1 rounded-full text-xs font-semibold text-black" style={{ backgroundColor: '#AAED10' }}>
+                주간 성장률 {weeklyChange >= 0 ? '+' : ''}{weeklyChange}
+              </span>
+            ) : (
+              <span
+                className="px-2.5 py-1 rounded-full text-xs font-medium"
+                style={{ backgroundColor: '#1F2A24', color: '#9CA3AF' }}
+              >
+                주간 성장률 측정 중
+              </span>
+            )}
             {/* 다음(→) 버튼: 본인 프로필이 아닌 본인 리포트로 이동 — 사용자가
                 트레이닝 요약 카드를 누르면 자연스럽게 더 자세한 6대 지표/추이를 볼 수
                 있어야 한다. (개인/기업 홈 모두 동일 정책) */}
@@ -359,21 +373,42 @@ function StandardHome({ variant, home, user, streakDays }: StandardProps) {
                 <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="#AAED10" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 12h3l2-6 4 12 2-6 2 3h5" />
                 </svg>
-                <span className="text-white text-2xl font-bold">{bpmAvg}bpm</span>
+                {bpmAvg !== null ? (
+                  <span className="text-white text-2xl font-bold">{bpmAvg}bpm</span>
+                ) : (
+                  <span
+                    className="text-2xl font-bold"
+                    style={{ color: '#6B7280' }}
+                    title="트레이닝 후 산출됩니다"
+                  >
+                    —
+                  </span>
+                )}
               </div>
+              {bpmAvg === null && (
+                <div className="text-[11px] mt-1" style={{ color: '#9CA3AF' }}>
+                  트레이닝 후 산출돼요
+                </div>
+              )}
             </div>
           </div>
           <div className="text-gray-400 text-xs mb-2">자주하는 트레이닝</div>
           <div className="flex gap-2 flex-wrap">
-            {topTrainings.map((t) => (
-              <span
-                key={t}
-                className="px-3 py-1 rounded-full text-xs"
-                style={{ border: '1px solid #AAED10', color: '#AAED10', backgroundColor: 'transparent' }}
-              >
-                {t}
+            {topTrainings.length > 0 ? (
+              topTrainings.map((t) => (
+                <span
+                  key={t}
+                  className="px-3 py-1 rounded-full text-xs"
+                  style={{ border: '1px solid #AAED10', color: '#AAED10', backgroundColor: 'transparent' }}
+                >
+                  {t}
+                </span>
+              ))
+            ) : (
+              <span className="text-xs" style={{ color: '#6B7280' }}>
+                트레이닝을 진행하시면 자주 하는 모드가 여기에 표시됩니다.
               </span>
-            ))}
+            )}
           </div>
         </div>
 
@@ -401,10 +436,27 @@ function StandardHome({ variant, home, user, streakDays }: StandardProps) {
         {/* 최근 트레이닝 점수 변화 — 최근 10회 트레이닝 기록 반영 */}
         <h2 className="text-white text-base font-semibold mt-6 mb-3">최근 트레이닝 점수 변화 트렌드</h2>
         <div className="rounded-2xl p-4" style={{ backgroundColor: '#0E1812' }}>
-          <div className="text-sm mb-3" style={{ color: '#AAED10' }}>
-            트레이닝 점수가 {scoreUpDelta > 0 ? `${scoreUpDelta}점 상승했네요!` : `${scoreUpDelta}점 변화했어요`}
-          </div>
-          <MiniLineChart points={trendPoints} />
+          {trendPoints.length >= 2 ? (
+            <>
+              {scoreUpDelta !== null && (
+                <div className="text-sm mb-3" style={{ color: '#AAED10' }}>
+                  트레이닝 점수가{' '}
+                  {scoreUpDelta > 0
+                    ? `${scoreUpDelta}점 상승했네요!`
+                    : scoreUpDelta < 0
+                      ? `${Math.abs(scoreUpDelta)}점 하락했어요`
+                      : '동일하게 유지되고 있어요'}
+                </div>
+              )}
+              <MiniLineChart points={trendPoints} />
+            </>
+          ) : (
+            <div className="py-6 text-center text-[13px]" style={{ color: '#9CA3AF' }}>
+              트레이닝을 한 번 더 진행하시면
+              <br />
+              점수 변화 추이가 여기에 표시됩니다.
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -595,10 +647,12 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
     return withDays.slice(0, 4);
   }, [members, user?.id, refNow]);
 
-  // 본인 데이터 (목업 + 실데이터 fallback)
-  const brainIndex = MOCK_HOME.brainIndex;
-  const bpmAvg = MOCK_HOME.bpmAvg;
-  const weeklyChange = MOCK_HOME.weeklyChange;
+  // 본인 데이터 — 데모 폴백 제거. 데이터가 없는 항목은 UI 에서 "—" + 안내로 표시.
+  const stats = useUserStats(user?.id ?? null);
+  const brainIndex: number | null = stats.brainIndex;
+  const bpmAvg: number | null = stats.bpmAvg;
+  const weeklyChange: number | null = stats.weeklyChange;
+  const topTrainings: string[] = stats.topTrainings;
   const orgName = user?.organizationName || '소속 기업';
 
   return (
@@ -723,13 +777,22 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
           ✦ AI 맞춤 트레이닝
         </motion.button>
 
-        {/* 트레이닝 요약 */}
+        {/* 트레이닝 요약 — 데이터 없는 항목은 "—" + 안내. 데모 폴백 제거. */}
         <h2 className="text-white text-base font-semibold mb-3">트레이닝 요약</h2>
         <div className="rounded-2xl p-4 mb-6" style={{ backgroundColor: '#1A1A1A' }}>
           <div className="flex items-center justify-between mb-4">
-            <span className="px-2.5 py-1 rounded-full text-xs font-semibold text-black" style={{ backgroundColor: '#AAED10' }}>
-              주간 성장률 +{weeklyChange}
-            </span>
+            {weeklyChange !== null ? (
+              <span className="px-2.5 py-1 rounded-full text-xs font-semibold text-black" style={{ backgroundColor: '#AAED10' }}>
+                주간 성장률 {weeklyChange >= 0 ? '+' : ''}{weeklyChange}
+              </span>
+            ) : (
+              <span
+                className="px-2.5 py-1 rounded-full text-xs font-medium"
+                style={{ backgroundColor: '#262626', color: '#9CA3AF' }}
+              >
+                주간 성장률 측정 중
+              </span>
+            )}
             <button onClick={() => navigate('/report')} className="text-gray-400 text-lg">→</button>
           </div>
           <div className="grid grid-cols-2 gap-4 mb-4">
@@ -741,8 +804,17 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
                   <path d="M9.5 3a3 3 0 0 0-3 3v.2A3 3 0 0 0 4 9v.5a3 3 0 0 0 1 2.2A3 3 0 0 0 4 14v.5a3 3 0 0 0 3 3 3 3 0 0 0 3 3 V3.7A3 3 0 0 0 9.5 3Z" />
                   <path d="M14.5 3a3 3 0 0 1 3 3v.2A3 3 0 0 1 20 9v.5a3 3 0 0 1-1 2.2 3 3 0 0 1 1 2.3v.5a3 3 0 0 1-3 3 3 3 0 0 1-3 3 V3.7A3 3 0 0 1 14.5 3Z" />
                 </svg>
-                <span className="text-white text-2xl font-bold">{brainIndex}점</span>
+                {brainIndex !== null ? (
+                  <span className="text-white text-2xl font-bold">{brainIndex}점</span>
+                ) : (
+                  <span className="text-2xl font-bold" style={{ color: '#6B7280' }}>—</span>
+                )}
               </div>
+              {brainIndex === null && (
+                <div className="text-[11px] mt-1" style={{ color: '#9CA3AF' }}>
+                  트레이닝 후 산출돼요
+                </div>
+              )}
             </div>
             <div>
               <div className="text-gray-400 text-xs mb-1">BPM 평균</div>
@@ -751,21 +823,36 @@ function EnterpriseHome({ home, user }: EnterpriseProps) {
                 <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="#AAED10" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 12h3l2-6 4 12 2-6 2 3h5" />
                 </svg>
-                <span className="text-white text-2xl font-bold">{bpmAvg}bpm</span>
+                {bpmAvg !== null ? (
+                  <span className="text-white text-2xl font-bold">{bpmAvg}bpm</span>
+                ) : (
+                  <span className="text-2xl font-bold" style={{ color: '#6B7280' }}>—</span>
+                )}
               </div>
+              {bpmAvg === null && (
+                <div className="text-[11px] mt-1" style={{ color: '#9CA3AF' }}>
+                  트레이닝 후 산출돼요
+                </div>
+              )}
             </div>
           </div>
           <div className="text-gray-400 text-xs mb-2">자주하는 트레이닝</div>
           <div className="flex gap-2 flex-wrap">
-            {MOCK_HOME.topTrainings.map((t) => (
-              <span
-                key={t}
-                className="px-3 py-1 rounded-full text-xs"
-                style={{ border: '1px solid #AAED10', color: '#AAED10', backgroundColor: 'transparent' }}
-              >
-                {t}
+            {topTrainings.length > 0 ? (
+              topTrainings.map((t) => (
+                <span
+                  key={t}
+                  className="px-3 py-1 rounded-full text-xs"
+                  style={{ border: '1px solid #AAED10', color: '#AAED10', backgroundColor: 'transparent' }}
+                >
+                  {t}
+                </span>
+              ))
+            ) : (
+              <span className="text-xs" style={{ color: '#6B7280' }}>
+                트레이닝을 진행하시면 자주 하는 모드가 여기에 표시됩니다.
               </span>
-            ))}
+            )}
           </div>
         </div>
 

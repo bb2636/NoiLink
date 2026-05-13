@@ -16,7 +16,15 @@ import {
 } from '@noilink/shared';
 
 export interface DerivedUserStats {
+  /** 점수 산출까지 끝난 세션이 1개 이상 있는가. brainIndex/weeklyChange 등 점수 기반 지표의 표시 가능 여부 판정에 사용. */
   hasData: boolean;
+  /**
+   * 세션이 1개라도 존재하는가(점수 산출 여부 무관). first-time 판정의 단일 출처 —
+   * 점수만 없는 사용자(예: FREE 만 한 케이스, 채점 실패 케이스)도 standard 화면에
+   * 머무르며 부분 데이터는 "—" + 안내로 가린다. `hasData` 로 first-time 을 판정하면
+   * 점수가 없을 뿐 세션 기록은 있는 사용자가 신규처럼 취급되는 회귀가 생긴다.
+   */
+  hasAnySession: boolean;
   trendPoints: number[];
   bpmAvg: number | null;
   weeklyChange: number | null;
@@ -133,6 +141,7 @@ function deriveStats(
 
   return {
     hasData: scored.length > 0,
+    hasAnySession: sessions.length > 0,
     trendPoints,
     bpmAvg,
     weeklyChange,
@@ -147,6 +156,7 @@ function deriveStats(
 
 const EMPTY: DerivedUserStats = {
   hasData: false,
+  hasAnySession: false,
   trendPoints: [],
   bpmAvg: null,
   weeklyChange: null,
