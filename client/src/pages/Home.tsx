@@ -181,9 +181,16 @@ function StandardHome({ variant, home, user, streakDays }: StandardProps) {
   }, [displayBanners.length]);
 
   // 실데이터 우선, 없으면 데모 프로필로 폴백
-  // - brainIndex: 컨디션 점수(서버 계산: 최근 3세션) > 파생 평균 > 데모
+  // - brainIndex: 컨디션 점수(서버 계산: 최근 3세션) > 파생 평균. 데이터가
+  //   전혀 없으면 null 로 두고 UI 에서 "—" + 안내문으로 표시한다 (과거 70점
+  //   디폴트가 사용자에게 본인 점수처럼 보이는 혼동을 일으켜 제거).
   // - bpmAvg/weeklyChange/checkedDays/topTrainings/trendPoints: 세션 파생 우선
-  const brainIndex = condition?.score ?? stats.brainIndex ?? MOCK_HOME.brainIndex;
+  const brainIndex: number | null =
+    typeof condition?.score === 'number'
+      ? condition.score
+      : typeof stats.brainIndex === 'number'
+        ? stats.brainIndex
+        : null;
   const bpmAvg = stats.bpmAvg ?? MOCK_HOME.bpmAvg;
   const weeklyChange = stats.weeklyChange ?? MOCK_HOME.weeklyChange;
   const scoreUpDelta = stats.scoreUpDelta ?? MOCK_HOME.scoreUpDelta;
@@ -327,8 +334,23 @@ function StandardHome({ variant, home, user, streakDays }: StandardProps) {
                   <path d="M9.5 3a3 3 0 0 0-3 3v.2A3 3 0 0 0 4 9v.5a3 3 0 0 0 1 2.2A3 3 0 0 0 4 14v.5a3 3 0 0 0 3 3 3 3 0 0 0 3 3 V3.7A3 3 0 0 0 9.5 3Z" />
                   <path d="M14.5 3a3 3 0 0 1 3 3v.2A3 3 0 0 1 20 9v.5a3 3 0 0 1-1 2.2 3 3 0 0 1 1 2.3v.5a3 3 0 0 1-3 3 3 3 0 0 1-3 3 V3.7A3 3 0 0 1 14.5 3Z" />
                 </svg>
-                <span className="text-white text-2xl font-bold">{brainIndex}점</span>
+                {brainIndex !== null ? (
+                  <span className="text-white text-2xl font-bold">{brainIndex}점</span>
+                ) : (
+                  <span
+                    className="text-2xl font-bold"
+                    style={{ color: '#6B7280' }}
+                    title="종합 트레이닝 후 산출됩니다"
+                  >
+                    —
+                  </span>
+                )}
               </div>
+              {brainIndex === null && (
+                <div className="text-[11px] mt-1" style={{ color: '#9CA3AF' }}>
+                  트레이닝 후 산출돼요
+                </div>
+              )}
             </div>
             <div>
               <div className="text-gray-400 text-xs mb-1">BPM 평균</div>

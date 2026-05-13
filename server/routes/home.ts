@@ -35,20 +35,12 @@ router.get('/condition/:userId', optionalAuth, async (req: Request, res: Respons
         .slice(0, 3);
       
       if (recentSessions.length === 0) {
-        condition = {
-          userId,
-          date: today,
-          score: 70,
-          badge: 'NORMAL',
-          avgReactionTime: 0,
-          avgAccuracy: 0,
-          errorCount: 0,
-          duration: 0,
-          calculatedAt: new Date().toISOString(),
-        };
-        conditions.push(condition);
-        await db.set('dailyConditions', conditions);
-        return res.json({ success: true, data: condition });
+        // 신규 사용자(또는 유효 세션이 없는 사용자) 에게 임의 점수(과거: 70점)
+        // 를 만들어 저장해두면, 사용자는 "내가 첫 트레이닝에서 32점을 받았는데
+        // 홈은 70점이라고 한다 — 어느 게 내 점수냐" 같은 신뢰 무너지는 혼동을
+        // 겪는다. 데이터가 없으면 정직하게 null 을 돌려보내고, 클라이언트가
+        // "데이터 부족 — 트레이닝 후 표시" 빈 상태 UI 로 처리하도록 한다.
+        return res.json({ success: true, data: null });
       }
       
       const metricsScores = await db.get('metricsScores') || [];

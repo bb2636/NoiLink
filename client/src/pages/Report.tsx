@@ -78,24 +78,6 @@ const MOCK_PERSONAL_REPORT: Report = {
   createdAt: new Date().toISOString(),
 };
 
-// TODO: 실제 API 데이터로 교체 — 데모용 변화 추이 (최근 10회)
-const MOCK_TREND_POINTS: TrendPoint[] = Array.from({ length: 10 }).map(
-  (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (9 - i) * 3);
-    const base = 65 + i * 2;
-    return {
-      date: d.toISOString(),
-      memory: base + Math.round(Math.sin(i) * 4) + 6,
-      comprehension: base + Math.round(Math.cos(i) * 3) + 8,
-      focus: base + 10 + Math.round(Math.sin(i + 1) * 3),
-      judgment: base + 2 + Math.round(Math.cos(i + 1) * 4),
-      agility: base + 14 + Math.round(Math.sin(i + 2) * 2),
-      endurance: base - 4 + Math.round(Math.cos(i + 2) * 3),
-    };
-  },
-);
-
 /**
  * 개인 리포트 — 명세: 프로필 요약, 6대 지표(꼭짓점 툴팁), 변화추이, 종합 평가, 롤모델, 면책
  */
@@ -398,13 +380,113 @@ export default function Report() {
   // 소속 인원 현황에서 진입한 경우 → 해당 멤버 정보로 프로필 표기 오버라이드
   const viewingMember = getMockMember(reportId);
 
-  // TODO: 실제 리포트 생성 시 목업 제거 — 데모 환경에서 빈 화면 방지
+  // 본인 리포트가 아직 생성되지 않은 경우 (COMPOSITE 유효 세션 3회 미만 등) —
+  // MOCK_PERSONAL_REPORT (78점/80.3점 등 데모 텍스트) 를 본인 점수처럼 보여주면
+  // 사용자에게 "내가 32점 받았는데 왜 78점이라고 나오냐" 류 신뢰 무너지는 혼동이
+  // 발생한다. 비로그인 빈 카드와 동일한 안내 화면으로 통일해 노출.
+  // (소속 인원 현황에서 더미 멤버를 보는 viewingMember 케이스는 위쪽 `mockMember`
+  //  분기에서 합성 데이터가 들어가므로 여기 도달하지 않는다.)
+  if (!report && !viewingMember) {
+    return (
+      <div
+        className="max-w-md mx-auto px-4"
+        style={{
+          backgroundColor: "#0A0A0A",
+          minHeight: "70vh",
+          paddingTop: "env(safe-area-inset-top)",
+        }}
+      >
+        <div className="flex items-center pt-4 pb-2">
+          <svg
+            className="w-4 h-4 mr-1.5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            style={{ color: "#FFFFFF" }}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 17v-2a4 4 0 014-4h6m-6-4h6M5 7h2m-2 4h2m-2 4h2"
+            />
+          </svg>
+          <h1 className="text-[15px] font-semibold text-white">리포트</h1>
+        </div>
+
+        <div
+          className="rounded-2xl p-5 mt-4"
+          style={{ backgroundColor: "#1A1A1A", border: "1px solid #262626" }}
+        >
+          <div className="flex flex-col items-center text-center">
+            <div
+              className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
+              style={{ backgroundColor: "#262626" }}
+            >
+              <svg
+                className="w-7 h-7"
+                fill="none"
+                stroke="#AAED10"
+                strokeWidth={1.8}
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M9 17v-6h13M9 11V5h13M3 6h.01M3 12h.01M3 18h.01"
+                />
+              </svg>
+            </div>
+            <h3 className="text-white font-semibold text-base mb-2">
+              아직 분석 리포트가 없어요
+            </h3>
+            <p
+              className="text-[13px] leading-relaxed mb-5"
+              style={{ color: "#9CA3AF" }}
+            >
+              <span style={{ color: "#AAED10" }}>종합 트레이닝</span>을{" "}
+              <span style={{ color: "#AAED10" }}>3회 이상</span> 진행하시면
+              <br />
+              6대 지표·강점 분석·뇌지컬 종합 평가가
+              <br />
+              본인의 실제 데이터로 자동 생성됩니다.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => navigate("/training")}
+              className="w-full py-3 rounded-xl font-semibold text-[15px] mb-2"
+              style={{ backgroundColor: "#AAED10", color: "#0A0A0A" }}
+            >
+              트레이닝 하러 가기
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate("/")}
+              className="w-full py-3 rounded-xl font-medium text-[14px]"
+              style={{
+                backgroundColor: "transparent",
+                color: "#E5E7EB",
+                border: "1px solid #2f2f2f",
+              }}
+            >
+              홈으로
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // viewingMember 합성 리포트 또는 실제 본인 리포트가 있는 경우만 이 아래로 도달.
+  // (report 가 null 이면 위에서 이미 빈 상태 카드를 반환했으므로 non-null 보장.)
   const effectiveReport: Report = report ?? {
     ...MOCK_PERSONAL_REPORT,
     userId: user.id,
   };
   // 세션은 있지만 모든 포인트의 6대 지표가 비어있는 경우(점수 미산출)에는
-  // 빈 그래프 대신 MOCK 데이터로 폴백한다.
+  // 변화 추이 그래프를 그릴 의미가 없어 빈 배열로 둔다 (MOCK 폴백 제거 —
+  // 데모 데이터를 본인 트렌드처럼 표시하던 회귀 수정).
   const hasAnyMetric = trendPoints.some(
     (p) =>
       typeof p.memory === 'number' ||
@@ -414,8 +496,7 @@ export default function Report() {
       typeof p.agility === 'number' ||
       typeof p.endurance === 'number',
   );
-  const effectiveTrendPoints: TrendPoint[] =
-    hasAnyMetric ? trendPoints : MOCK_TREND_POINTS;
+  const effectiveTrendPoints: TrendPoint[] = hasAnyMetric ? trendPoints : [];
 
   // 표시용 사용자 정보 — 멤버 보기일 땐 멤버 데이터 사용
   const displayUser = {
@@ -699,17 +780,36 @@ export default function Report() {
 
       {/* 변화추이 — 카드 테두리 제거. 타이틀과 "전체" 드롭다운을 한 줄로 */}
       <section>
-        <MultiTrendChart
-          data={effectiveTrendPoints}
-          height={220}
-          headerLeft={
-            <HelpTooltip
-              text={`최근 ${orgLabel ? `‘${orgLabel}’` : "세션"}을 기준으로 표시된 변화추이 입니다`}
+        {effectiveTrendPoints.length > 0 ? (
+          <MultiTrendChart
+            data={effectiveTrendPoints}
+            height={220}
+            headerLeft={
+              <HelpTooltip
+                text={`최근 ${orgLabel ? `‘${orgLabel}’` : "세션"}을 기준으로 표시된 변화추이 입니다`}
+              >
+                <h3 className="text-lg font-bold text-white">변화 추이</h3>
+              </HelpTooltip>
+            }
+          />
+        ) : (
+          <>
+            <h3 className="text-lg font-bold text-white mb-2">변화 추이</h3>
+            <div
+              className="rounded-2xl p-6 text-center"
+              style={{
+                backgroundColor: "#1A1A1A",
+                border: "1px solid #262626",
+              }}
             >
-              <h3 className="text-lg font-bold text-white">변화 추이</h3>
-            </HelpTooltip>
-          }
-        />
+              <p className="text-[13px]" style={{ color: "#9CA3AF" }}>
+                트레이닝 기록이 더 쌓이면 6대 지표의
+                <br />
+                변화 추이가 여기에 표시됩니다.
+              </p>
+            </div>
+          </>
+        )}
       </section>
 
       {/* 브레이니멀 결과 히어로 카드 */}
