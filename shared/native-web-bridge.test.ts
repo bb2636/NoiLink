@@ -220,8 +220,8 @@ const VALID_WEB_TO_NATIVE: ValidCase[] = [
     msg: { ...baseEnv('ble.writeLed'), payload: { tickId: 1, pod: 0, colorCode: 1, onMs: 100 } },
   },
   {
-    label: 'ble.writeLed (OFF color 0xFF + onMs=0)',
-    msg: { ...baseEnv('ble.writeLed'), payload: { tickId: 1, pod: 0, colorCode: 0xff, onMs: 0 } },
+    label: 'ble.writeLed (OFF color 0x08 + onMs=0)',
+    msg: { ...baseEnv('ble.writeLed'), payload: { tickId: 1, pod: 0, colorCode: 0x08, onMs: 0 } },
   },
   {
     label: 'ble.writeLed (pod=POD_INDEX_MAX 경계값 통과)',
@@ -247,7 +247,7 @@ const VALID_WEB_TO_NATIVE: ValidCase[] = [
     label: 'ble.writeLed (tickId=0, onMs=0, flags=0 하한 경계 통과)',
     msg: {
       ...baseEnv('ble.writeLed'),
-      payload: { tickId: 0, pod: 0, colorCode: 0xff, onMs: 0, flags: 0 },
+      payload: { tickId: 0, pod: 0, colorCode: 0x08, onMs: 0, flags: 0 },
     },
   },
   {

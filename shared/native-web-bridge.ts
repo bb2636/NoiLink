@@ -491,7 +491,12 @@ export function parseBridgeAckError(raw: string): ParsedBridgeAckError {
 
 const NOIPOD_KEY_VALUES = ['notify', 'write'] as const;
 const WRITE_MODE_VALUES = ['auto', 'withResponse', 'withoutResponse'] as const;
-const COLOR_CODE_VALUES = [0, 1, 2, 3, 4, 5, 0xff] as const;
+// 2026-05-19 펌웨어 매핑 정렬: RED=1, BLUE=2, GREEN=3, MAGENTA=4, YELLOW=5,
+// CYAN=6, WHITE=7, OFF=8. 자세한 컨텍스트는 `shared/ble-protocol.ts` 의
+// COLOR_CODE 정의 주석 참고. 새 값 5/6/7/8 이 허용 집합에 누락되면
+// 네이티브 브릿지가 `ble.writeLed:field-enum@payload.colorCode` 로
+// 거부해 트레이닝 도중 LED 가 무반응이 된다 — 회귀 가드 필수.
+const COLOR_CODE_VALUES = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 const SESSION_PHASE_VALUES = [0, 1] as const;
 const CONTROL_CMD_VALUES = [0, 1, 2] as const;
 const BLE_DISCONNECT_REASON_VALUES = ['user', 'unexpected', 'retry-failed'] as const;
