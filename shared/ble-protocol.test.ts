@@ -52,10 +52,10 @@ describe('encodeLedFrame', () => {
       onMs: 300,
       flags: 0,
     });
-    // SYNC, OP_LED, tickId LE (78 56 34 12), pod, color, onMs LE (2C 01), flags, reserved
+    // SYNC, OP_LED, tickId LE (78 56 34 12), pod, color(GREEN=0x03), onMs LE (2C 01), flags, reserved
     expectBytes(
       frame,
-      hex(0xa5, 0x01, 0x78, 0x56, 0x34, 0x12, 0x02, 0x00, 0x2c, 0x01, 0x00, 0x00),
+      hex(0xa5, 0x01, 0x78, 0x56, 0x34, 0x12, 0x02, 0x03, 0x2c, 0x01, 0x00, 0x00),
     );
     expect(frame[0]).toBe(SYNC_BYTE);
     expect(frame[1]).toBe(OP_LED);
@@ -96,11 +96,14 @@ describe('encodeLedFrame', () => {
 
 describe('encodeLedOffFrame — OFF 합의서 테스트 벡터', () => {
   // 정본: docs/firmware/led-off-convention.md §3.1
+  // 2026-05-19 펌웨어 색상 코드 정렬: OFF=0x08 (이전 0xFF), GREEN=0x03 (이전 0x00).
+  // NoiPod 정식 12바이트 프레임은 현재 운영에서 사용하지 않지만, OFF 합의서가
+  // 단일 ColorCode 사전을 공유하므로 골든 벡터도 같이 갱신한다.
   it('vector 1: pod=0, tickId=0, color=OFF, onMs=0', () => {
     const frame = encodeLedOffFrame({ tickId: 0, pod: 0 });
     expectBytes(
       frame,
-      hex(0xa5, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00),
+      hex(0xa5, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00),
     );
   });
 
@@ -108,7 +111,7 @@ describe('encodeLedOffFrame — OFF 합의서 테스트 벡터', () => {
     const frame = encodeLedOffFrame({ tickId: 0x12345678, pod: 2 });
     expectBytes(
       frame,
-      hex(0xa5, 0x01, 0x78, 0x56, 0x34, 0x12, 0x02, 0xff, 0x00, 0x00, 0x00, 0x00),
+      hex(0xa5, 0x01, 0x78, 0x56, 0x34, 0x12, 0x02, 0x08, 0x00, 0x00, 0x00, 0x00),
     );
   });
 
@@ -122,14 +125,14 @@ describe('encodeLedOffFrame — OFF 합의서 테스트 벡터', () => {
     });
     expectBytes(
       frame,
-      hex(0xa5, 0x01, 0x42, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00),
+      hex(0xa5, 0x01, 0x42, 0x00, 0x00, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00),
     );
   });
 
-  it('encodeLedOffFrame는 항상 colorCode=0xFF, onMs=0', () => {
+  it('encodeLedOffFrame는 항상 colorCode=0x08(OFF), onMs=0', () => {
     for (let pod = 0; pod < 4; pod++) {
       const frame = encodeLedOffFrame({ tickId: 0xcafebabe, pod });
-      expect(frame[7]).toBe(0xff);
+      expect(frame[7]).toBe(0x08);
       expect(frame[8]).toBe(0x00);
       expect(frame[9]).toBe(0x00);
       expect(frame[6]).toBe(pod);
@@ -333,7 +336,7 @@ describe('round-trip — encode → bytes layout sanity', () => {
   });
 
   it('hexToBytes/bytesToHex 가 OFF 벡터 1 을 정확히 왕복한다', () => {
-    const expected = 'a50100000000 00ff00000000'.replace(/\s+/g, '');
+    const expected = 'a50100000000 000800000000'.replace(/\s+/g, '');
     const frame = encodeLedOffFrame({ tickId: 0, pod: 0 });
     expect(bytesToHex(frame)).toBe(expected);
     expect(Array.from(hexToBytes(expected))).toEqual(Array.from(frame));
@@ -565,25 +568,47 @@ describe('mixedColorRate — Lv≤1 → 0, Lv≥5 → 0.35, 사이 선형 보간
 // ---------------------------------------------------------------------------
 
 describe('encodeLegacyLedFrame', () => {
-  it('pod 0 → 4e 01 0d', () => {
-    expect(Array.from(encodeLegacyLedFrame({ pod: 0 }))).toEqual([0x4e, 0x01, 0x0d]);
+  // 2026-05-19 펌웨어 실측 검증 매핑. 두 번째 바이트가 pod 인덱스가 아닌
+  // 색상 코드(0x01~0x08) 임을 회귀 가드한다. 과거 구현은 `pod+1` 을 색
+  // 자리에 넣어 의도색과 무관하게 점등됐다.
+  it('RED(0x01) → 4e 01 0d', () => {
+    expect(Array.from(encodeLegacyLedFrame({ colorCode: COLOR_CODE.RED }))).toEqual([
+      0x4e, 0x01, 0x0d,
+    ]);
   });
-  it('pod 1 → 4e 02 0d', () => {
-    expect(Array.from(encodeLegacyLedFrame({ pod: 1 }))).toEqual([0x4e, 0x02, 0x0d]);
+  it('BLUE(0x02) → 4e 02 0d', () => {
+    expect(Array.from(encodeLegacyLedFrame({ colorCode: COLOR_CODE.BLUE }))).toEqual([
+      0x4e, 0x02, 0x0d,
+    ]);
   });
-  it('pod 3 → 4e 04 0d (앱이 사용하는 4 pod 의 마지막)', () => {
-    expect(Array.from(encodeLegacyLedFrame({ pod: 3 }))).toEqual([0x4e, 0x04, 0x0d]);
+  it('GREEN(0x03) → 4e 03 0d (펌웨어가 lookup 으로 G 매핑, R+B 가 아님)', () => {
+    expect(Array.from(encodeLegacyLedFrame({ colorCode: COLOR_CODE.GREEN }))).toEqual([
+      0x4e, 0x03, 0x0d,
+    ]);
   });
-  it('pod 7 → 4e 08 0d (spec §11 COLOR 1..8 상한)', () => {
-    expect(Array.from(encodeLegacyLedFrame({ pod: 7 }))).toEqual([0x4e, 0x08, 0x0d]);
+  it('YELLOW(0x05) → 4e 05 0d', () => {
+    expect(Array.from(encodeLegacyLedFrame({ colorCode: COLOR_CODE.YELLOW }))).toEqual([
+      0x4e, 0x05, 0x0d,
+    ]);
   });
-  it('pod -1 또는 8 → RangeError', () => {
-    expect(() => encodeLegacyLedFrame({ pod: -1 })).toThrow(RangeError);
-    expect(() => encodeLegacyLedFrame({ pod: 8 })).toThrow(RangeError);
+  it('WHITE(0x07) → 4e 07 0d', () => {
+    expect(Array.from(encodeLegacyLedFrame({ colorCode: COLOR_CODE.WHITE }))).toEqual([
+      0x4e, 0x07, 0x0d,
+    ]);
+  });
+  it('OFF(0x08) → 4e 08 0d (단일 LED 라 명시적 OFF 명령으로 색 잔상 제거)', () => {
+    expect(Array.from(encodeLegacyLedFrame({ colorCode: COLOR_CODE.OFF }))).toEqual([
+      0x4e, 0x08, 0x0d,
+    ]);
+  });
+  it('colorCode 0 또는 9+ → RangeError', () => {
+    expect(() => encodeLegacyLedFrame({ colorCode: 0x00 })).toThrow(RangeError);
+    expect(() => encodeLegacyLedFrame({ colorCode: 0x09 })).toThrow(RangeError);
+    expect(() => encodeLegacyLedFrame({ colorCode: 0xff })).toThrow(RangeError);
   });
   it('항상 길이 3', () => {
-    for (let p = 0; p <= 7; p++) {
-      expect(encodeLegacyLedFrame({ pod: p }).length).toBe(3);
+    for (let c = 0x01; c <= 0x08; c++) {
+      expect(encodeLegacyLedFrame({ colorCode: c }).length).toBe(3);
     }
   });
 });

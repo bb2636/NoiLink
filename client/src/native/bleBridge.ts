@@ -231,14 +231,18 @@ export function bleWriteLed(payload: {
   flags?: number;
   mode?: 'auto' | 'withResponse' | 'withoutResponse';
 }): void {
-  // 레거시 모드: NoiPod 12바이트 프레임 대신 savexx 명세 §12.5 의 3바이트
-  // `4e <pod+1> 0d` 로 점등 신호만 전송. OFF 의도(colorCode=OFF 또는 onMs=0)는
-  // 레거시 펌웨어에서 단일 pod OFF 명령이 정의되지 않았으므로 송신 생략.
+  // 레거시 모드: NoiPod 12바이트 프레임 대신 펌웨어 검증된 3바이트 색상 프레임
+  // `0x4E <colorCode> 0x0D` 로 단일 LED 색을 직접 지정한다 (2026-05-19 매핑 정렬).
+  // pod 인덱스는 단일 LED 펌웨어가 받지 않으므로 무시 — engine 의 `safeBleWriteLed`
+  // 호출이 pod 별로 들어와도 모두 같은 connected 기기의 LED 색이 변경된다.
+  // OFF 의도(colorCode=OFF 또는 onMs=0)는 명시적으로 0x08 을 송신해야 잔상이
+  // 남지 않는다 — 과거 "송신 생략" 분기는 매 점등 후 색이 누적되는 회귀를 만들었다.
   if (getLegacyBleMode()) {
     const isOff = payload.colorCode === COLOR_CODE.OFF || payload.onMs === 0;
-    if (isOff) return;
     try {
-      const bytes = encodeLegacyLedFrame({ pod: payload.pod });
+      const bytes = encodeLegacyLedFrame({
+        colorCode: isOff ? COLOR_CODE.OFF : payload.colorCode,
+      });
       const b64 = uint8ArrayToBase64(bytes);
       // NUS 펌웨어는 응답을 보내지 않으므로 명시적으로 'withoutResponse' 로 송신.
       // 'auto' 폴백이 `withResponse` 로 넘어가면 ble-plx 가 응답을 기다리다 timeout

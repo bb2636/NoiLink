@@ -37,20 +37,39 @@ export const CHANNEL_HAND = 0;
 export const CHANNEL_FOOT = 1;
 export type ChannelCode = typeof CHANNEL_HAND | typeof CHANNEL_FOOT;
 
+/**
+ * 펌웨어(NINA-B1-FB55CE) 실측 LED 색상 코드 매핑 (2026-05-19 사용자/하드웨어
+ * 검증 완료, 채팅 컨텍스트 참조). 단일 LED 가 RGB 3원색 비트 합성으로 색을
+ * 표현하지만, 0x03 만 비트 매핑(R+B=Magenta)에서 벗어나 GREEN 으로 정의되어
+ * 있어 lookup table 로 박아 둔다 — 비트 합성으로 일반화하지 말 것.
+ *
+ * 검증된 frame: `0x4E <colorCode> 0x0D` (Write Without Response, Notifications
+ * enabled 후 송신). 자세한 라이브 검증 시나리오는 채팅 컨텍스트 참고.
+ */
 export const COLOR_CODE = {
-  GREEN: 0,
-  RED: 1,
-  BLUE: 2,
-  YELLOW: 3,
-  WHITE: 4,
-  MIXED: 5,
+  RED: 0x01,
+  BLUE: 0x02,
+  GREEN: 0x03,
+  /** Magenta (R+B) — 펌웨어 spec 상 0x04 = "보라". 트레이닝 의미색 사전에는 미사용. */
+  MAGENTA: 0x04,
+  YELLOW: 0x05,
+  /** Cyan (B+G) — 펌웨어 spec 상 0x06 = "하늘". 트레이닝 의미색 사전에는 미사용. */
+  CYAN: 0x06,
+  WHITE: 0x07,
   /**
    * 즉시 소등용 색 코드. 사용자가 점등 onMs 만료 전에 탭하거나 엔진이
    * `allOff()`를 호출했을 때 디바이스 LED도 함께 끄기 위해 사용한다.
-   * 펌웨어는 OFF 색을 받으면 onMs와 무관하게 즉시 LED를 끈다.
+   * 펌웨어는 OFF(0x08) 를 받으면 onMs와 무관하게 즉시 LED를 끈다.
+   * 단일 LED 펌웨어라 OFF 도 명시적으로 송신해야 색이 잔존하지 않는다.
    * onMs=0 컨벤션도 동일한 의미로 해석한다(둘 다 OFF로 간주).
    */
-  OFF: 0xff,
+  OFF: 0x08,
+  /**
+   * @deprecated 펌웨어 매핑 정렬(2026-05-19) 이후 사용 안 함. 의미색 사전에
+   * 등장하지 않고, COMPREHENSION 의 "혼합색" 도 YELLOW/MAGENTA 등 구체 색으로
+   * 풀어 표현한다. 외부 import 호환을 위해 한동안 alias 유지(=YELLOW).
+   */
+  MIXED: 0x05,
 } as const;
 export type ColorCode = (typeof COLOR_CODE)[keyof typeof COLOR_CODE];
 
@@ -265,7 +284,7 @@ export function encodeLedFrame(opts: LedFrameOpts): Uint8Array {
  * 단일 Pod 즉시 소등용 LED 프레임 빌더.
  *
  * 펌웨어와의 약속 (정본: docs/firmware/led-off-convention.md):
- *  - colorCode = `COLOR_CODE.OFF (0xFF)`
+ *  - colorCode = `COLOR_CODE.OFF (0x08)` — 2026-05-19 펌웨어 매핑 정렬
  *  - onMs = 0
  *  - 둘 중 하나만 충족해도 OFF로 해석한다(이중 안전장치).
  *
@@ -457,15 +476,27 @@ export function mixedColorRate(level: number): number {
 // ---------------------------------------------------------------------------
 
 /**
- * 레거시 LED 점등 프레임. pod 0..7 만 허용(spec §11 COLOR 1..8 슬롯).
- * 우리 앱은 pod 0..3 만 사용하지만 향후 확장에 대비해 0..7 허용.
+ * 레거시 LED 점등/소등 프레임 — `0x4E <colorCode> 0x0D` (3바이트).
+ *
+ * 2026-05-19 펌웨어 실측 검증으로 두 번째 바이트가 **색상 코드(0x01~0x08)** 임이
+ * 확정됐다 (이전 구현은 `pod+1` 을 색상 자리에 넣어 "GREEN 켜라" 가 펌웨어에서
+ * "BLUE 색으로 바꿔라" 로 잘못 해석되는 명세 충돌이 있었음 — 우연히 1..4 가
+ * 색 값으로도 유효해 점등은 됐으나 색은 의도와 무관하게 결정됨).
+ *
+ * 현행 펌웨어는 **단일 LED** 라 pod 인덱스를 받지 않는다. 멀티 기기 시나리오는
+ * 각 기기 BLE 연결을 분리해 동일 프레임을 각자 라우팅하는 별도 작업(멀티 기기
+ * 라우팅)에서 다룬다 — 여기서는 한 frame = 연결된 한 기기의 LED 색 변경.
+ *
+ * 송신 조건(펌웨어가 명령을 무시하지 않게 하려면):
+ *  - Notifications enabled (CCCD 활성화) 후 송신
+ *  - Write Without Response 로 송신 (Write With Response 는 무반응)
  */
-export function encodeLegacyLedFrame(opts: { pod: number }): Uint8Array {
-  const pod = opts.pod | 0;
-  if (pod < 0 || pod > 7) {
-    throw new RangeError(`encodeLegacyLedFrame: pod out of range (0..7): ${pod}`);
+export function encodeLegacyLedFrame(opts: { colorCode: number }): Uint8Array {
+  const code = opts.colorCode | 0;
+  if (code < 0x01 || code > 0x08) {
+    throw new RangeError(`encodeLegacyLedFrame: colorCode out of range (0x01..0x08): ${code}`);
   }
-  return new Uint8Array([0x4e, pod + 1, 0x0d]);
+  return new Uint8Array([0x4e, code, 0x0d]);
 }
 
 /** 레거시 START 프레임 `aa 55`. */

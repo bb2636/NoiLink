@@ -90,6 +90,10 @@ export const LOGIC_TO_HARDWARE_COLOR: Record<LogicColor, HardwareColor> = {
  * 의미 색 → 펌웨어 ColorCode (단일 소스: LOGIC_TO_HARDWARE_COLOR 경유)
  * 새 색을 추가하려면 LOGIC_TO_HARDWARE_COLOR와 HARDWARE_TO_COLOR_CODE 양쪽만 갱신하면 됩니다.
  */
+// 2026-05-19 펌웨어 실측 매핑(0x01=R, 0x02=B, 0x03=G, 0x05=R+G=Yellow,
+// 0x07=R+B+G=White) 으로 갱신. 펌웨어가 lookup table 로 색을 정의해 0x03 이
+// 비트 합성에서 벗어나 G 로 잡혀있어 명시적으로 박는다. 자세한 컨텍스트는
+// `COLOR_CODE` 정의 주석 참고.
 const HARDWARE_TO_COLOR_CODE: Record<HardwareColor, ColorCode> = {
   G: COLOR_CODE.GREEN,
   R: COLOR_CODE.RED,
