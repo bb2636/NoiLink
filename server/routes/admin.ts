@@ -557,4 +557,63 @@ router.get('/recovery-stats', async (req: AuthRequest, res: Response) => {
   }
 });
 
+/**
+ * POST /api/admin/reset-training-data
+ * 트레이닝 세션 / 지표 / 랭킹 / telemetry 전체 삭제 (회원 계정은 유지).
+ * 회원 record 의 누적 필드(streak/bestStreak/lastTrainingDate)도 초기화한다.
+ * 운영 DB 초기화 용도 — 호출 후에도 admin 인증으로 계속 보호된다.
+ */
+router.post('/reset-training-data', async (req: AuthRequest, res: Response) => {
+  try {
+    const before = {
+      sessions: ((await db.get('sessions')) || []).length,
+      metricsScores: ((await db.get('metricsScores')) || []).length,
+      rawMetrics: ((await db.get('rawMetrics')) || []).length,
+      rankings: ((await db.get('rankings')) || []).length,
+      reports: ((await db.get('reports')) || []).length,
+      organizationInsightReports: ((await db.get('organizationInsightReports')) || []).length,
+      dailyConditions: ((await db.get('dailyConditions')) || []).length,
+      dailyMissions: ((await db.get('dailyMissions')) || []).length,
+      bleAbortEvents: ((await db.get('bleAbortEvents')) || []).length,
+      ackBannerEvents: ((await db.get('ackBannerEvents')) || []).length,
+    };
+
+    await db.set('sessions', []);
+    await db.set('metricsScores', []);
+    await db.set('rawMetrics', []);
+    await db.set('rankings', []);
+    await db.set('reports', []);
+    await db.set('organizationInsightReports', []);
+    await db.set('dailyConditions', []);
+    await db.set('dailyMissions', []);
+    await db.set('bleAbortEvents', []);
+    await db.set('ackBannerEvents', []);
+
+    const users: User[] = (await db.get('users')) || [];
+    let usersReset = 0;
+    for (const u of users) {
+      const hadStreak = !!(u as any).streak || !!(u as any).bestStreak || !!(u as any).lastTrainingDate;
+      (u as any).streak = 0;
+      (u as any).bestStreak = 0;
+      (u as any).lastTrainingDate = null;
+      if (hadStreak) usersReset++;
+    }
+    await db.set('users', users);
+
+    res.json({
+      success: true,
+      data: {
+        before,
+        usersStreakReset: usersReset,
+        usersKept: users.length,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 export default router;
