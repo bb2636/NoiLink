@@ -175,15 +175,19 @@ const EMPTY: DerivedUserStats = {
 };
 
 export function useUserStats(userId: string | null): DerivedUserStats {
-  const cached = userId ? cache.get(userId) : undefined;
-  const [stats, setStats] = useState<DerivedUserStats>(cached ?? EMPTY);
+  // 항상 EMPTY(loading: true) 로 시작 — 과거에는 module-level cache 값을 즉시
+  // 노출했는데, admin 이 트레이닝 기록을 리셋한 직후 등 cache 와 서버 진실값이
+  // 어긋난 케이스에서 stale hasAnySession=true 가 잠깐 보였다가 false 로
+  // 덮어써져 홈의 streak/랭킹 카드가 깜빡이는 회귀의 원인이 됐다.
+  // cache 는 그대로 두되 노출은 fresh 응답 도착 후에만 한다.
+  const [stats, setStats] = useState<DerivedUserStats>(EMPTY);
 
   useEffect(() => {
     if (!userId) {
       setStats({ ...EMPTY, loading: false });
       return;
     }
-    if (cached) setStats(cached);
+    setStats(EMPTY);
     if (inFlight.get(userId)) return;
     inFlight.set(userId, true);
 

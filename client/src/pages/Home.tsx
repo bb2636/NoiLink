@@ -43,7 +43,10 @@ export default function Home() {
   // 사용자도 신규처럼 취급되는 회귀가 생긴다 (Task #156-followup architect 지적).
   const variant = resolveVariant(user as any, card.streakDays, stats.hasAnySession);
 
-  if (home.loading || (user && stats.loading)) {
+  // 모든 데이터 소스(home / stats / card)가 마감될 때까지 로딩 유지.
+  // card 가 빠지면 streakDays=0 초기값으로 streak-broken("시작하기") 이 잠깐
+  // 보였다가 응답 도착 후 streak-active(N일차) 로 깜빡이는 회귀가 생긴다.
+  if (home.loading || (user && stats.loading) || (user && !card.loaded)) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#0A0A0A' }}>
         <div className="text-white">로딩 중...</div>
@@ -66,14 +69,17 @@ export default function Home() {
 //   기존 useUserStats / useHome 가 담당). 같은 14일 창 / 같은 dayKey(KST) 규칙으로
 //   계산되어 랭킹 페이지의 "나의 랭킹" 카드와 항상 동일한 일수를 보장한다.
 //   응답 도착 전에는 0 — 변경되면 streakDays > 0 일 때 active variant 로 자연 전환.
-function useUserRankingCard(userId: string | null): { streakDays: number } {
+function useUserRankingCard(userId: string | null): { streakDays: number; loaded: boolean } {
   const [streakDays, setStreakDays] = useState(0);
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     if (!userId) {
       setStreakDays(0);
+      setLoaded(true);
       return;
     }
     let cancelled = false;
+    setLoaded(false);
     (async () => {
       try {
         const res = await api.getMyRankingCard(userId);
@@ -81,14 +87,16 @@ function useUserRankingCard(userId: string | null): { streakDays: number } {
           setStreakDays(res.data.streakDays ?? 0);
         }
       } catch {
-        /* 네트워크 실패시 0 유지 — UI 는 broken variant 로 안전하게 표시 */
+        /* 네트워크 실패시 0 유지 — UI 는 broken/first-time variant 로 안전하게 표시 */
+      } finally {
+        if (!cancelled) setLoaded(true);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [userId]);
-  return { streakDays };
+  return { streakDays, loaded };
 }
 
 // =============================================================================
