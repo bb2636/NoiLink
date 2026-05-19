@@ -107,8 +107,12 @@ export default function Device() {
     try {
       bleWriteControl(CTRL_START);
       await new Promise((r) => setTimeout(r, 200));
-      for (let pod = 0; pod < 4; pod++) {
-        bleWriteLed({ tickId: pod, pod, colorCode: COLOR_CODE.RED, onMs: 500 });
+      // 펌웨어가 단일 LED 라 pod 인자는 무시된다 — 4번 loop 는 같은 기기에
+      // 같은 색을 700ms 간격으로 4번 보내는 의미 (트레이닝 박자 가시화 용도).
+      // WHITE(0x07, R+B+G) 로 가장 밝게 — 트레이닝 의미색(GREEN/BLUE/YELLOW)
+      // 과 겹치지 않아 "테스트 점등 vs 실제 자극" 구분이 자연스럽다.
+      for (let i = 0; i < 4; i++) {
+        bleWriteLed({ tickId: i, pod: i, colorCode: COLOR_CODE.WHITE, onMs: 500 });
         await new Promise((r) => setTimeout(r, 700));
       }
       bleWriteControl(CTRL_STOP);
