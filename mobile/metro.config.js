@@ -13,6 +13,9 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
-config.resolver.disableHierarchicalLookup = true;
+// expo-doctor 권장: `disableHierarchicalLookup` 은 기본값(false) 유지.
+// nodeModulesPaths 만 명시해 모노레포 의존성을 해석하고, 상위 디렉토리
+// fallback 은 Metro 가 알아서 처리하게 둔다. true 로 강제하면 일부
+// 라이브러리의 동적 require 가 깨질 수 있다.
 
 module.exports = config;
