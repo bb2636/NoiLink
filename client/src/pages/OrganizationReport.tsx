@@ -1,162 +1,65 @@
 /**
- * 기관 리포트 — 5개 탭 구성
+ * 기관 리포트 — 단순화 버전
  *
- *  [전체] [6대 지표] [브레이니멀 유형] [뇌지컬 종합 평가] [소속 인원 현황]
+ * 과거: 935줄의 5탭(전체/6대 지표/브레이니멀/종합평가/소속 인원) UI 가 통째로
+ *       MOCK_REPORT / MOCK_TREND / MOCK_MEMBERS 하드코딩 데이터에 의존했다.
+ *       기업 관리자가 보는 모든 수치(평균 뇌나이 79.9, FOX_BALANCED 25% 등)와
+ *       소속 인원 15명이 전부 가짜였다.
  *
- *  - 전체: 모든 섹션 한 화면 요약
- *  - 6대 지표: 레이더 + 변화추이 (개인 페이지와 동일 컴포넌트 재사용)
- *  - 브레이니멀 유형: 분포 도넛 + 범례 + 대표 유형
- *  - 뇌지컬 종합 평가: 본인의 브레이니멀 + Fact/Life/Hint/강점/보완점
- *  - 소속 인원 현황: 이름 / 뇌지컬 점수 / 브레이니멀 / 생년월일(추정) / 최근 검사일
+ * 현재: 실제 기관 인사이트 리포트 API(`GET /api/reports/organization/:organizationId`)
+ *       를 호출하고, 응답이 없으면 "아직 기관 리포트가 없어요" 안내만 노출한다.
+ *       UI 컴포넌트는 실 데이터 스키마가 안정화된 뒤 단계적으로 복원한다.
  */
-import { useState, useMemo, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import RadarChart from '../components/RadarChart';
-import MultiTrendChart, { type TrendPoint } from '../components/MultiTrendChart/MultiTrendChart';
-import { getBrainimalIcon, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
-import type { BrainimalType, OrganizationInsightReport, User } from '@noilink/shared';
-import { MOCK_MEMBERS as SHARED_MOCK_MEMBERS } from '../utils/mockMembers';
-import ComprehensiveEvaluation from '../components/ComprehensiveEvaluation';
-import RoleModelCard from '../components/RoleModelCard';
-
-// =============================================================================
-// 데모용 하드코딩 데이터 (이미지 시안 그대로)
-// TODO: 실제 API 데이터로 교체
-// =============================================================================
-const MOCK_REPORT: OrganizationInsightReport = {
-  id: 'mock-org-report',
-  organizationId: 'demo-org-001',
-  organizationName: '데모 기업',
-  managedMemberCount: 12,
-  avgBrainAge: 79.9,
-  cohortActualAvgAge: 79.7,
-  brainAgeVsChronologicalDelta: 0.2,
-  representativeBrainimal: 'FOX_BALANCED',
-  representativeBrainimalLabel: '균형 잡힌 여우',
-  avgMetricsScore: {
-    memory: 82,
-    comprehension: 76,
-    focus: 88,
-    judgment: 71,
-    agility: 68,
-    endurance: 74,
-  } as never,
-  factText: '쉽게 휘둘리지 않는 무뚝뚝한 안정감을 보여줍니다. 어떤 상황에서도 평정심을 잃지 않고 일관된 판단을 내립니다.',
-  lifeText: '화려한 일렉보다는 잔잔한 신뢰감을 주는 인상입니다. 주변 사람들이 의지할 수 있는 든든한 존재로 인식됩니다.',
-  hintText: '판단 시간이 다른 사람보다 약간 길지만, 한 번 결정하면 끝까지 책임지는 모범적인 회무 스타일을 보입니다.',
-  strengthText: '감정 안정성과 집중력이 매우 우수합니다.',
-  weaknessText: '순발력과 유연성을 보완하면 더 좋은 결과를 낼 수 있습니다.',
-  metricEvidenceCards: [],
-  brainimalDistribution: [
-    { type: 'FOX_BALANCED',      count: 8, percent: 25 },
-    { type: 'OWL_FOCUS',         count: 5, percent: 15 },
-    { type: 'BEAR_ENDURANCE',    count: 4, percent: 13 },
-    { type: 'KOALA_CALM',        count: 4, percent: 11 },
-    { type: 'CHEETAH_JUDGMENT',  count: 3, percent: 9 },
-    { type: 'DOLPHIN_BRILLIANT', count: 2, percent: 7 },
-    { type: 'TIGER_STRATEGIC',   count: 2, percent: 7 },
-    { type: 'CAT_DELICATE',      count: 2, percent: 5 },
-    { type: 'EAGLE_INSIGHT',     count: 1, percent: 4 },
-    { type: 'LION_BOLD',         count: 1, percent: 3 },
-    { type: 'DOG_SOCIAL',        count: 1, percent: 2 },
-    { type: 'WOLF_CREATIVE',     count: 0, percent: 1 },
-  ],
-  memberStatusSummary: '소속 인원 현황',
-  createdAt: new Date().toISOString(),
-};
-
-const MOCK_TREND: TrendPoint[] = (() => {
-  const today = new Date();
-  return Array.from({ length: 10 }).map((_, i) => {
-    const d = new Date(today);
-    d.setDate(today.getDate() - (9 - i));
-    return {
-      date: d.toISOString(),
-      memory:        70 + Math.round(Math.sin(i * 0.7) * 6 + i * 1.2),
-      comprehension: 65 + Math.round(Math.cos(i * 0.5) * 5 + i * 1.4),
-      focus:         78 + Math.round(Math.sin(i * 0.4) * 4 + i * 0.9),
-      judgment:      62 + Math.round(Math.cos(i * 0.6) * 6 + i * 1.5),
-      agility:       60 + Math.round(Math.sin(i * 0.8) * 5 + i * 1.0),
-      endurance:     68 + Math.round(Math.cos(i * 0.3) * 5 + i * 1.1),
-    };
-  });
-})();
-
-const MOCK_MEMBERS: User[] = SHARED_MOCK_MEMBERS;
-void ({} as BrainimalType); // keep import alive
-
-// 도넛 색상 팔레트 (브레이니멀 분포용)
-const DONUT_COLORS = [
-  '#AAED10', '#22d3ee', '#a78bfa', '#fb923c',
-  '#f472b6', '#38bdf8', '#facc15', '#34d399',
-  '#fb7185', '#818cf8', '#94a3b8', '#fbbf24',
-];
-
-type TabKey = 'all' | 'metrics' | 'brainimal' | 'comprehensive' | 'members';
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'all', label: '전체' },
-  { key: 'metrics', label: '6대 지표\n그래프' },
-  { key: 'brainimal', label: '브레이니멀\n유형' },
-  { key: 'comprehensive', label: '뇌지컬\n종합 평가' },
-  { key: 'members', label: '소속\n인원 현황' },
-];
+import api from '../utils/api';
+import type { OrganizationInsightReport } from '@noilink/shared';
 
 export default function OrganizationReport() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  // 데모: 항상 하드코딩 데이터 표시 (실 API 연동은 추후 교체)
-  // 단, 회사명은 로그인한 기업 회원의 실제 소속명으로 덮어씀.
-  const members: User[] = MOCK_MEMBERS;
-  // 총 관리 인원 카드(report.managedMemberCount)는 하드코딩(12)이었는데
-  // MOCK_MEMBERS 가 15 로 늘면서 "소속 인원 현황 탭에는 15명, 상단 카드는
-  // 12명" 이라는 시각적 불일치가 생긴다. 회원 수는 항상 실제 멤버 배열 길이를
-  // 진실원으로 사용해 동기화한다.
-  const report: OrganizationInsightReport = useMemo(
-    () => ({
-      ...MOCK_REPORT,
-      organizationName: user?.organizationName ?? MOCK_REPORT.organizationName,
-      managedMemberCount: members.length,
-    }),
-    [user?.organizationName, members.length],
-  );
-  const trendPoints: TrendPoint[] = MOCK_TREND;
+  const [report, setReport] = useState<OrganizationInsightReport | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // 탭 상태를 URL 쿼리(?tab=...)에 영속화 — 멤버 리포트로 이동했다가 뒤로가기 시
-  // 같은 탭(특히 '소속 인원 현황')으로 자연스럽게 복귀하도록 한다.
-  // (URL 변경은 history 를 추가로 쌓지 않도록 replace 모드 사용 — 뒤로가기 1회 = 이전 화면으로)
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tabFromUrl = (searchParams.get('tab') as TabKey | null);
-  const initialTab: TabKey =
-    tabFromUrl && TABS.some((t) => t.key === tabFromUrl) ? tabFromUrl : 'all';
-  const [tab, setTabState] = useState<TabKey>(initialTab);
-  // URL ↔ 상태 양방향 동기화 (뒤로가기로 URL이 바뀌면 상태도 따라옴)
   useEffect(() => {
-    const next = searchParams.get('tab');
-    if (next && TABS.some((t) => t.key === next) && next !== tab) {
-      setTabState(next as TabKey);
-    } else if (!next && tab !== 'all') {
-      setTabState('all');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
-  const setTab = (key: TabKey) => {
-    setTabState(key);
-    const next = new URLSearchParams(searchParams);
-    if (key === 'all') next.delete('tab');
-    else next.set('tab', key);
-    setSearchParams(next, { replace: true });
-  };
-  const [orgInfoOpen, setOrgInfoOpen] = useState(true);
+    let cancelled = false;
+    const load = async () => {
+      if (!user?.organizationId) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const res = await api.get<OrganizationInsightReport>(
+          `/reports/organization/${user.organizationId}`,
+        );
+        if (cancelled) return;
+        if (res.success && res.data) setReport(res.data);
+      } catch {
+        /* 실패해도 빈 상태로 표시 */
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.organizationId]);
 
   if (!user) return null;
 
-  // 기업 리포트는 기업 관리자(ORGANIZATION) 전용 — 개인 회원(소속 여부 무관)은 접근 불가
+  // 기업 리포트는 기업 관리자(ORGANIZATION) 전용
   if (user.userType !== 'ORGANIZATION' || !user.organizationId) {
     return (
-      <div className="px-4 py-10 text-center" style={{ color: '#fff' }}>
+      <div
+        className="px-4 py-10 text-center"
+        style={{ color: '#fff', paddingTop: 'calc(2.5rem + env(safe-area-inset-top))' }}
+      >
         <p className="text-base font-semibold mb-2">접근 권한이 없습니다</p>
-        <p className="text-sm text-gray-400 mb-6">기업 리포트는 기업 관리자만 볼 수 있습니다.</p>
+        <p className="text-sm text-gray-400 mb-6">
+          기업 리포트는 기업 관리자만 볼 수 있습니다.
+        </p>
         <button
           type="button"
           onClick={() => navigate('/profile')}
@@ -169,767 +72,158 @@ export default function OrganizationReport() {
     );
   }
 
-  const repInfo = getBrainimalIcon(report.representativeBrainimal);
-  const delta = report.brainAgeVsChronologicalDelta;
-  const deltaGood = delta <= 0;
+  if (loading) {
+    return (
+      <div
+        className="flex items-center justify-center min-h-[50vh]"
+        style={{ color: '#999', paddingTop: 'env(safe-area-inset-top)' }}
+      >
+        로딩 중...
+      </div>
+    );
+  }
 
-  return (
-    <div className="px-4 pb-6 space-y-4" style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))', paddingBottom: '120px', color: '#fff' }}>
-      {/* 제목 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+  const orgName = user.organizationName ?? '소속 기관';
+
+  if (!report) {
+    return (
+      <div
+        className="max-w-md mx-auto px-4"
+        style={{
+          backgroundColor: '#0A0A0A',
+          minHeight: '70vh',
+          paddingTop: 'env(safe-area-inset-top)',
+        }}
+      >
+        <div className="flex items-center pt-4 pb-2">
           <svg
-            className="w-5 h-5 text-white"
+            className="w-5 h-5 mr-2 text-white"
             fill="none"
             stroke="currentColor"
             strokeWidth={2}
             strokeLinecap="round"
             strokeLinejoin="round"
             viewBox="0 0 24 24"
+            aria-hidden
           >
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <path d="M14 2v6h6" />
-            <path d="M9 18v-3" />
-            <path d="M12 18v-6" />
-            <path d="M15 18v-2" />
           </svg>
-          <h1 className="text-lg font-bold">{report.organizationName} 리포트</h1>
+          <h1 className="text-[15px] font-semibold text-white">
+            {orgName} 리포트
+          </h1>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            if (navigator.share) {
-              void navigator.share({
-                title: 'NoiLink 기관 리포트',
-                text: `${report.organizationName} 팀 리포트`,
-              });
-            }
-          }}
-          className="text-white"
+
+        <div
+          className="rounded-2xl p-5 mt-4"
+          style={{ backgroundColor: '#1A1A1A', border: '1px solid #262626' }}
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M16 6l-4-4m0 0L8 6m4-4v13" />
-          </svg>
-        </button>
+          <div className="flex flex-col items-center text-center">
+            <div
+              className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
+              style={{ backgroundColor: '#262626' }}
+            >
+              <svg
+                className="w-7 h-7"
+                fill="none"
+                stroke="#AAED10"
+                strokeWidth={1.8}
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M9 17v-6h13M9 11V5h13M3 6h.01M3 12h.01M3 18h.01"
+                />
+              </svg>
+            </div>
+            <h3 className="text-white font-semibold text-base mb-2">
+              아직 기관 리포트가 없어요
+            </h3>
+            <p
+              className="text-[13px] leading-relaxed mb-5"
+              style={{ color: '#9CA3AF' }}
+            >
+              소속 인원이 트레이닝을 충분히 진행하면
+              <br />
+              평균 6대 지표·브레이니멀 분포·종합 평가가
+              <br />
+              자동으로 집계되어 표시됩니다.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="w-full py-3 rounded-xl font-medium text-[14px]"
+              style={{
+                backgroundColor: 'transparent',
+                color: '#E5E7EB',
+                border: '1px solid #2f2f2f',
+              }}
+            >
+              홈으로
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 실 리포트 응답이 있는 경우 — 최소 카드 형태로 표시. 5탭 UI 복원은 별도 작업.
+  return (
+    <div
+      className="px-4 pb-6 space-y-4"
+      style={{
+        paddingTop: 'calc(1.5rem + env(safe-area-inset-top))',
+        paddingBottom: '120px',
+        color: '#fff',
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <h1 className="text-lg font-bold">{report.organizationName} 리포트</h1>
       </div>
 
-      {/* 기업 정보 카드 (접이식) */}
-      <CollapsibleCard
-        title="기업 정보"
-        open={orgInfoOpen}
-        onToggle={() => setOrgInfoOpen((v) => !v)}
-        footer={
-          // 사용자 요청으로 "모든 타입 보기" 버튼 제거. 대표 브레이니멀
-          // 라벨만 푸터에 남겨 한눈에 조직 성향을 확인할 수 있게 한다.
-          <div
-            className="px-4 py-3 flex items-center"
-            style={{ backgroundColor: '#1F2A0E' }}
-          >
-            <div className="flex items-center gap-2">
-              {repInfo.icon ? (
-                <img src={repInfo.icon} alt="" className="w-5 h-5 object-contain" />
-              ) : (
-                <span>{repInfo.emoji}</span>
-              )}
-              <span className="text-sm font-medium" style={{ color: '#AAED10' }}>
-                {report.representativeBrainimalLabel}
-              </span>
-            </div>
-          </div>
-        }
+      <div
+        className="rounded-2xl p-4"
+        style={{ backgroundColor: '#1A1A1A', border: '1px solid #262626' }}
       >
-        {/* 상단: 아바타 + 기관명 */}
-        <div className="flex items-center gap-3">
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center"
-            style={{ backgroundColor: '#264213' }}
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#AAED10" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 12h.01M9 15h.01M13 9h.01M13 12h.01M13 15h.01" />
-            </svg>
-          </div>
-          <p className="text-base font-semibold text-white">{report.organizationName}</p>
-        </div>
-
-        {/* 구분선 */}
-        <div className="h-px my-4" style={{ backgroundColor: '#262626' }} />
-
-        {/* 총 관리 인원 */}
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-400">총 관리 인원</span>
-          <span className="text-base font-semibold text-white">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-sm" style={{ color: '#9CA3AF' }}>
+            소속 인원
+          </span>
+          <span className="text-base font-semibold">
             {report.managedMemberCount}명
           </span>
         </div>
-      </CollapsibleCard>
-
-      {/* 조직 평균 생체 나이 */}
-      <CollapsibleCard title="조직 평균 생체 나이" open onToggle={() => {}}>
-        <div className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-3">
-            <span className="text-xl">🧠</span>
-            <span className="text-sm text-white">평균 뇌지컬 나이</span>
-          </div>
-          <div className="text-right">
-            <span className="text-2xl font-bold" style={{ color: '#AAED10' }}>
-              {report.avgBrainAge.toFixed(1)}
-            </span>
-            <span className="text-base text-white"> 세</span>
-            <span className="text-xs ml-2" style={{ color: deltaGood ? '#AAED10' : '#f87171' }}>
-              ({delta > 0 ? '+' : ''}
-              {delta})
-            </span>
-            <p className="text-[11px] text-gray-500 mt-0.5">
-              실제 평균 ({report.cohortActualAvgAge.toFixed(1)}세) 대비
-            </p>
-          </div>
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-sm" style={{ color: '#9CA3AF' }}>
+            평균 뇌나이
+          </span>
+          <span className="text-base font-semibold">
+            {report.avgBrainAge.toFixed(1)}세
+          </span>
         </div>
-      </CollapsibleCard>
-
-      {/* 탭 스트립 — 밑줄형 */}
-      <div
-        className="grid grid-cols-5"
-        style={{ borderBottom: '1px solid #2A2A2A' }}
-      >
-        {TABS.map((t) => {
-          const active = t.key === tab;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className="relative py-3 px-1 text-[11px] font-medium leading-tight whitespace-pre-line text-center transition-colors"
-              style={{
-                color: active ? '#FFFFFF' : '#888',
-                fontWeight: active ? 700 : 500,
-              }}
-            >
-              {t.label}
-              {active && (
-                <span
-                  className="absolute left-2 right-2 -bottom-px h-0.5 rounded-full"
-                  style={{ backgroundColor: '#AAED10' }}
-                />
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* 탭 콘텐츠 */}
-      {(tab === 'all' || tab === 'metrics') && (
-        <MetricsTabSection
-          report={report}
-          trendPoints={trendPoints}
-          showTitle={tab === 'metrics' || tab === 'all'}
-        />
-      )}
-
-      {(tab === 'all' || tab === 'brainimal') && (
-        <BrainimalTabSection report={report} totalMembers={members.length} />
-      )}
-
-      {(tab === 'all' || tab === 'comprehensive') && (
-        <ComprehensiveTabSection report={report} />
-      )}
-
-      {(tab === 'all' || tab === 'members') && (
-        <MembersTabSection members={members} />
-      )}
-
-      {/* 모든 탭 공통 푸터: 의료 면책 조항 */}
-      <DisclaimerFooter />
-    </div>
-  );
-}
-
-// =============================================================================
-// 6대 지표 + 변화추이 탭
-// =============================================================================
-function MetricsTabSection({
-  report,
-  trendPoints,
-  showTitle,
-}: {
-  report: OrganizationInsightReport;
-  trendPoints: TrendPoint[];
-  showTitle: boolean;
-}) {
-  return (
-    <section className="space-y-5">
-      {showTitle && <h3 className="text-base font-bold text-white">6대 지표 그래프</h3>}
-
-      <div>
-        <p className="text-xs mb-2 text-gray-400">분석 결과</p>
-        <p className="text-xs mb-3" style={{ color: '#666' }}>
-          꼭짓점을 누르면 해당 지표의 팀 평균 점수가 표시됩니다.
-        </p>
-        <div className="flex justify-center">
-          <RadarChart data={report.avgMetricsScore} size={260} />
+        <div className="flex items-center justify-between">
+          <span className="text-sm" style={{ color: '#9CA3AF' }}>
+            대표 브레이니멀
+          </span>
+          <span className="text-base font-semibold">
+            {report.representativeBrainimalLabel}
+          </span>
         </div>
       </div>
 
-      <div>
-        {trendPoints.length > 0 ? (
-          <MultiTrendChart
-            data={trendPoints}
-            height={200}
-            headerLeft={
-              <HelpDot text={`최근 '${report.organizationName}'를 기준으로 표시된 변화추이 입니다`}>
-                <h4 className="text-sm font-semibold text-white">변화 추이</h4>
-              </HelpDot>
-            }
-          />
-        ) : (
-          <>
-            <div className="mb-2">
-              <HelpDot text={`최근 '${report.organizationName}'를 기준으로 표시된 변화추이 입니다`}>
-                <h4 className="text-sm font-semibold text-white">변화 추이</h4>
-              </HelpDot>
-            </div>
-            <p className="text-sm text-gray-400 py-4 text-center">
-              팀 추이를 그릴 만큼의 최근 세션이 아직 없습니다.
-            </p>
-          </>
-        )}
-      </div>
-    </section>
-  );
-}
-
-// =============================================================================
-// 브레이니멀 유형 분포 탭
-// =============================================================================
-function BrainimalTabSection({
-  report,
-  totalMembers,
-}: {
-  report: OrganizationInsightReport;
-  totalMembers: number;
-}) {
-  const repInfo = getBrainimalIcon(report.representativeBrainimal);
-
-  // 도넛 데이터
-  const total = report.brainimalDistribution.reduce((sum, r) => sum + r.percent, 0) || 100;
-  const slices = useMemo(() => {
-    let acc = 0;
-    return report.brainimalDistribution.map((row, i) => {
-      const start = (acc / total) * 360;
-      acc += row.percent;
-      const end = (acc / total) * 360;
-      return {
-        ...row,
-        color: DONUT_COLORS[i % DONUT_COLORS.length],
-        startAngle: start,
-        endAngle: end,
-      };
-    });
-  }, [report.brainimalDistribution, total]);
-
-  const [hoveredType, setHoveredType] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
-  const hoveredSlice = hoveredType
-    ? slices.find((s) => s.type === hoveredType) ?? null
-    : null;
-  const hoveredCount = hoveredSlice
-    ? Math.max(1, Math.round((hoveredSlice.percent / 100) * (totalMembers || 0)))
-    : 0;
-  const hoveredInfo = hoveredSlice ? getBrainimalIcon(hoveredSlice.type) : null;
-
-  return (
-    <section className="space-y-3">
-      <button
-        type="button"
-        onClick={() => setCollapsed((c) => !c)}
-        className="w-full flex items-center justify-between"
-      >
-        <h3 className="text-base font-bold text-white">브레이니멀 유형 분포</h3>
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="#9CA3AF"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className={`transition-transform ${collapsed ? '' : 'rotate-180'}`}
+      {report.factText && (
+        <div
+          className="rounded-2xl p-4"
+          style={{ backgroundColor: '#1A1A1A', border: '1px solid #262626' }}
         >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </button>
-
-      {!collapsed && (
-      <div className="flex items-center justify-around gap-2 relative">
-        {/* 도넛 */}
-        <div className="relative shrink-0">
-          <DonutChart
-            slices={slices}
-            size={160}
-            onHover={setHoveredType}
-          />
-          {/* 호버 툴팁 — 도넛 우측에 두면 좁은 모바일 화면에서 우측 범례 영역과
-              겹치며 라벨 글씨가 박스 밖으로 잘려 보인다. 도넛 위쪽 가운데에
-              띄우고(translate(-50%, -100%)) whitespace-nowrap 으로 한 줄 유지. */}
-          {hoveredSlice && hoveredInfo && (
-            <div
-              className="absolute z-10 pointer-events-none rounded-lg px-3 py-2 shadow-lg whitespace-nowrap"
-              style={{
-                left: '50%',
-                top: -8,
-                transform: 'translate(-50%, -100%)',
-                backgroundColor: '#2A2A2A',
-                border: '1px solid #3A3A3A',
-              }}
-            >
-              <div className="flex items-center gap-1.5 text-[12px]">
-                {hoveredInfo.icon ? (
-                  <img src={hoveredInfo.icon} alt="" className="w-4 h-4 object-contain" />
-                ) : (
-                  <span>{hoveredInfo.emoji}</span>
-                )}
-                <span className="font-semibold text-white">{hoveredInfo.name}</span>
-              </div>
-              <div className="text-[11px] text-gray-300 mt-0.5 text-center">
-                {hoveredCount}명
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* 범례 — % 만 표시 (이름 제거), 우측 정렬 */}
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 shrink-0">
-          <p className="text-[11px] text-gray-400 col-span-2 mb-1">분포 현황</p>
-          {slices.map((s) => (
-            <div key={s.type} className="flex items-center gap-1.5 text-[11px] py-0.5">
-              <span
-                className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
-                style={{ backgroundColor: s.color }}
-              />
-              <span className="text-white font-semibold">{s.percent}%</span>
-            </div>
-          ))}
-        </div>
-      </div>
-      )}
-
-      {/* 대표 유형 카드 */}
-      <div
-        className="rounded-xl p-3 flex items-center gap-2 text-sm"
-        style={{ backgroundColor: '#0F0F0F' }}
-      >
-        {repInfo.icon ? (
-          <img src={repInfo.icon} alt="" className="w-5 h-5 object-contain" />
-        ) : (
-          <span>{repInfo.emoji}</span>
-        )}
-        <span className="text-gray-300">
-          귀사는{' '}
-          <span className="font-semibold" style={{ color: '#AAED10' }}>
-            {`'${report.representativeBrainimalLabel}'`}
-          </span>{' '}
-          유형이 가장 많습니다.
-        </span>
-      </div>
-    </section>
-  );
-}
-
-// =============================================================================
-// 뇌지컬 종합 평가 탭 (본인 브레이니멀 + 평가)
-// =============================================================================
-function ComprehensiveTabSection({ report }: { report: OrganizationInsightReport }) {
-  const { user } = useAuth();
-  const myBrainimal = user?.brainimalType
-    ? getBrainimalIcon(user.brainimalType)
-    : DEFAULT_BRAINIMAL;
-  const userName = user?.name ?? '홍길동';
-  const ageDelta = (() => {
-    if (!user?.brainAge || !user?.age) return 1;
-    const d = user.age - user.brainAge;
-    return d > 0 ? d : 1;
-  })();
-
-  // 본인의 6대 지표 — 보고서가 본인 지표를 갖고 있지 않으면 기본값으로 폴백
-  const myMetrics = (report as any).myMetrics ?? {
-    sessionId: '',
-    userId: user?.id ?? '',
-    memory: 78,
-    comprehension: 82,
-    focus: 88,
-    judgment: 74,
-    agility: 91,
-    endurance: 69,
-    createdAt: new Date().toISOString(),
-  };
-
-  return (
-    <div className="space-y-4">
-      {/* 본인 브레이니멀 카드 — 마스코트 + 두뇌나이 */}
-      <section
-        className="rounded-2xl p-6 text-center"
-        style={{
-          background: 'radial-gradient(circle at top, #14331c 0%, #0F1A12 70%)',
-          border: '1px solid #2A4A14',
-        }}
-      >
-        <p className="text-xs text-gray-300 mb-3">{userName}님, 축하드려요.</p>
-        <div className="flex justify-center mb-3">
-          <div
-            className="w-20 h-20 rounded-full flex items-center justify-center"
-            style={{
-              backgroundColor: '#0F0F0F',
-              border: '2px solid #AAED10',
-              boxShadow: '0 0 0 3px rgba(170,237,16,0.15)',
-            }}
-          >
-            {myBrainimal.icon ? (
-              <img src={myBrainimal.icon} alt="" className="w-12 h-12 object-contain" />
-            ) : (
-              <span className="text-4xl">{myBrainimal.emoji}</span>
-            )}
-          </div>
-        </div>
-        <h4 className="text-2xl font-extrabold" style={{ color: '#AAED10' }}>
-          {myBrainimal.name}
-        </h4>
-        <p className="text-xs text-gray-400 mt-3">두뇌 나이 평균보다</p>
-        <p className="text-base font-semibold text-white mt-0.5">
-          {ageDelta}살 더 젊어요!
-        </p>
-      </section>
-
-      {/* 뇌지컬 종합 평가 + 생활 밀착 피드백 — 개인 리포트와 동일 UI */}
-      <ComprehensiveEvaluation metricsScore={myMetrics} />
-
-      {/* 롤모델 — 개인 리포트와 동일 UI */}
-      <RoleModelCard
-        subtitle={`${user?.organizationName ?? '송산치매안심센터'}님의 롤모델`}
-        name="워런 버핏"
-        quote="원칙이 있으면 흔들리지 않는다!"
-        connectionHeadline="흔들리지 않는 원칙, 복리의 마법으로 돌아옵니다."
-        connectionDetail="단기 변동에 일희일비하지 않는 우직함이 버핏을 만들었습니다. 당신의 꾸준함도 곧 거대한 성과가 될 거예요."
-      />
-
-    </div>
-  );
-}
-
-// =============================================================================
-// 의료 면책 조항 — 모든 탭 공통 푸터
-// =============================================================================
-function DisclaimerFooter() {
-  return (
-    <section
-      className="rounded-2xl p-4 border"
-      style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
-    >
-      <p className="text-[13px] font-bold text-white mb-2">
-        의료 면책 조항 (Disclaimer)
-      </p>
-      <p className="text-[12px] leading-relaxed" style={{ color: '#888' }}>
-        본 리포트는 웰니스 및 건강 관리를 위한 참고 자료이며, 전문적인 의료적
-        진단이나 치료를 대신할 수 없습니다. 측정 결과는 환경에 따라 달라질 수
-        있으며, 의학적 소견이 필요한 경우 반드시 전문의와 상담하시기 바랍니다.
-        (주)노이랩은 본 리포트의 해석 및 활용 결과에 대해 법적인 책임을 지지
-        않습니다.
-      </p>
-    </section>
-  );
-}
-
-// =============================================================================
-// 소속 인원 현황 탭
-// =============================================================================
-function MembersTabSection({ members }: { members: User[] }) {
-  const [open, setOpen] = useState(true);
-  const [expanded, setExpanded] = useState(false);
-  const COLLAPSED_LIMIT = 5;
-
-  const visibleMembers = expanded ? members : members.slice(0, COLLAPSED_LIMIT);
-  const hasMore = members.length > COLLAPSED_LIMIT;
-
-  return (
-    <section>
-      {/* 카드 밖 헤더 */}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-1 pb-2"
-      >
-        <span className="text-sm font-semibold text-white">소속 인원 현황</span>
-        <span className="text-gray-400 text-xs">{open ? '⌃' : '⌄'}</span>
-      </button>
-
-      {open && (
-        <>
-          {members.length === 0 ? (
-            <p
-              className="text-sm text-gray-400 p-4 text-center rounded-2xl border"
-              style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
-            >
-              소속 인원 데이터가 없습니다.
-            </p>
-          ) : (
-            <div
-              className="rounded-2xl border overflow-hidden"
-              style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
-            >
-              <div className="divide-y" style={{ borderColor: '#2A2A2A' }}>
-                {visibleMembers.map((m) => (
-                  <div
-                    key={m.id}
-                    className="border-b last:border-b-0"
-                    style={{ borderColor: '#2A2A2A' }}
-                  >
-                    <MemberRow member={m} />
-                  </div>
-                ))}
-              </div>
-              {hasMore && (
-                <button
-                  type="button"
-                  onClick={() => setExpanded((v) => !v)}
-                  className="w-full flex items-center justify-center gap-1 py-3 text-xs text-gray-300 border-t"
-                  style={{ borderColor: '#2A2A2A' }}
-                >
-                  {expanded ? '접기' : '더보기'}
-                  <span className="text-gray-400">{expanded ? '⌃' : '⌄'}</span>
-                </button>
-              )}
-            </div>
-          )}
-          <p className="mt-3 text-[10px] text-gray-500">
-            ※ 정확한 생년월일은 회원 프로필 입력 후 표시됩니다 (현재는 만 나이 기반 추정).
+          <h3 className="text-sm font-semibold mb-2">조직 특성</h3>
+          <p className="text-[13px] leading-relaxed" style={{ color: '#D1D5DB' }}>
+            {report.factText}
           </p>
-        </>
-      )}
-    </section>
-  );
-}
-
-function MemberRow({ member }: { member: User }) {
-  const navigate = useNavigate();
-  const info = member.brainimalType ? getBrainimalIcon(member.brainimalType) : null;
-  const birthYear =
-    member.age != null ? new Date().getFullYear() - member.age : null;
-  const birthDateStr = birthYear ? `${birthYear}.09.04` : '-';
-  const lastTestStr = member.lastTrainingDate
-    ? formatLongDate(member.lastTrainingDate)
-    : '-';
-
-  return (
-    <button
-      type="button"
-      onClick={() => navigate(`/report/${member.id}`)}
-      className="w-full text-left p-4 transition-colors hover:bg-white/[0.02] active:bg-white/[0.04]"
-    >
-      {/* 상단 행: 이름님 / 뇌지컬 점수 */}
-      <div className="flex items-start justify-between mb-3">
-        <p className="text-base">
-          <span className="font-bold text-white">{member.name}</span>
-          <span className="text-gray-400"> 님</span>
-        </p>
-        <div className="flex items-center gap-1 text-sm">
-          <span className="text-gray-400">뇌지컬 점수</span>
-          <span className="font-bold" style={{ color: '#818cf8' }}>
-            {member.brainAge ?? '-'}점
-          </span>
-          <svg
-            className="w-3.5 h-3.5 text-gray-500"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 5l7 7-7 7"
-            />
-          </svg>
-        </div>
-      </div>
-
-      {/* 하단 행: 메타 정보 / 브레이니멀 pill */}
-      <div className="flex items-end justify-between gap-3">
-        <div className="text-[12px] space-y-1">
-          <div className="flex gap-3">
-            <span style={{ color: '#888' }}>생년월일</span>
-            <span className="text-white">{birthDateStr}</span>
-          </div>
-          <div className="flex gap-3">
-            <span style={{ color: '#888' }}>최근 검사일</span>
-            <span className="text-white">{lastTestStr}</span>
-          </div>
-        </div>
-
-        {info && (
-          <span
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium shrink-0"
-            style={{ backgroundColor: '#1F2A0E', color: '#AAED10' }}
-          >
-            {info.icon ? (
-              <img src={info.icon} alt="" className="w-4 h-4 object-contain" />
-            ) : (
-              <span className="text-sm">{info.emoji}</span>
-            )}
-            {info.name}
-          </span>
-        )}
-      </div>
-    </button>
-  );
-}
-
-// =============================================================================
-// 공용 컴포넌트
-// =============================================================================
-// 헤더 옆 작은 도움말 점(?) — 폰트 크기와 비슷한 크기로 유지
-// 제목 + "?" + 안내 말풍선(타이틀 줄 아래에 좌측 정렬로 표시) — 첨부 이미지와 동일
-function HelpDot({
-  text,
-  children,
-}: {
-  text: string;
-  children: React.ReactNode;
-}) {
-  // 안내 말풍선은 기본 닫힘 상태 — 사용자가 ?를 눌러야 안내가 나타난다.
-  // 항상 펼쳐 두면 변화 추이 차트 위 공간을 항상 차지해 시각적 노이즈가 된다.
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative inline-block">
-      <div className="flex items-center gap-1.5">
-        {children}
-        <button
-          type="button"
-          aria-label="도움말"
-          onClick={() => setOpen((v) => !v)}
-          className="rounded-full inline-flex items-center justify-center font-bold leading-none shrink-0"
-          style={{ backgroundColor: '#FFFFFF', color: '#000000', width: 14, height: 14, minWidth: 14, minHeight: 14, padding: 0, fontSize: 9, lineHeight: '14px' }}
-        >
-          ?
-        </button>
-      </div>
-      {open && (
-        <div
-          className="absolute left-0 top-full mt-2 z-20 inline-flex items-center gap-2 whitespace-nowrap rounded-full px-3 py-1 text-[12px]"
-          style={{ backgroundColor: '#2A2A2A', color: '#E5E5E5' }}
-        >
-          <span>{text}</span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-            }}
-            aria-label="닫기"
-            className="text-[12px] leading-none"
-            style={{ color: '#888' }}
-          >
-            ✕
-          </button>
         </div>
       )}
     </div>
   );
-}
-
-function CollapsibleCard({
-  title,
-  open,
-  onToggle,
-  children,
-  footer,
-}: {
-  title: string;
-  open: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-  footer?: React.ReactNode;
-}) {
-  return (
-    <section>
-      {/* 카드 밖 헤더: 제목 + 펼침 화살표 */}
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full flex items-center justify-between px-1 pb-2"
-      >
-        <span className="text-sm font-semibold text-white">{title}</span>
-        <span className="text-gray-400 text-xs">{open ? '⌃' : '⌄'}</span>
-      </button>
-      {open && (
-        <div
-          className="rounded-2xl border overflow-hidden"
-          style={{ backgroundColor: '#1A1A1A', borderColor: '#2A2A2A' }}
-        >
-          <div className="p-4 space-y-2">{children}</div>
-          {footer}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function DonutChart({
-  slices,
-  size,
-  onHover,
-}: {
-  slices: { type: string; color: string; percent: number; startAngle: number; endAngle: number }[];
-  size: number;
-  onHover?: (type: string | null) => void;
-}) {
-  const STROKE = 35;
-  const R = (size - STROKE) / 2;
-  const C = size / 2;
-
-  return (
-    <svg
-      width={size}
-      height={size}
-      className="-rotate-90"
-      onMouseLeave={() => onHover?.(null)}
-    >
-      <circle cx={C} cy={C} r={R} stroke="#2A2A2A" strokeWidth={STROKE} fill="none" />
-      {slices.map((s) => {
-        if (s.endAngle <= s.startAngle) return null;
-        return (
-          <path
-            key={s.type}
-            d={describeArcStroke(C, C, R, s.startAngle, s.endAngle)}
-            stroke={s.color}
-            strokeWidth={STROKE}
-            fill="none"
-            style={{ cursor: onHover ? 'pointer' : undefined }}
-            onMouseEnter={() => onHover?.(s.type)}
-            onMouseMove={() => onHover?.(s.type)}
-          />
-        );
-      })}
-    </svg>
-  );
-}
-
-function describeArcStroke(cx: number, cy: number, r: number, startDeg: number, endDeg: number): string {
-  const polar = (deg: number) => {
-    const rad = (deg * Math.PI) / 180;
-    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
-  };
-  const start = polar(startDeg);
-  const end = polar(endDeg);
-  const largeArc = endDeg - startDeg > 180 ? 1 : 0;
-  return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y}`;
-}
-
-
-function formatLongDate(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '-';
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}.${mm}.${dd}`;
 }

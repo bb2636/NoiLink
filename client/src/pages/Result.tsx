@@ -19,7 +19,6 @@ import {
 import { MobileLayout } from '../components/Layout';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
-import { DEMO_PROFILE } from '../utils/demoProfile';
 import {
   hasSeenReplayedHint,
   markReplayedHintSeen,
@@ -238,10 +237,12 @@ export default function Result() {
     return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
   }, [serverScore]);
 
-  // 점수 데이터 우선순위: navigate state(정상 완료) → 서버 응답(재진입) →
-  // 데모 프로필. 마지막 폴백은 어떤 경로로도 점수를 못 받았을 때만 노출된다.
+  // 점수 데이터 우선순위: navigate state(정상 완료) → 서버 응답(재진입).
+  // 둘 다 없는 경우(점수 미산출/유효 세션 미달 등)에는 가짜 폴백(과거 DEMO_PROFILE.brainIndex=80)
+  // 대신 0 을 노출 — 아래 비교 카드(hasPreviousScore 가드) 와 향상 점수 카드
+  // (Math.max(0, diff))가 자동으로 자연스러운 빈 상태로 표시된다.
   const todayScore =
-    state?.displayScore ?? serverComputedDisplayScore ?? DEMO_PROFILE.brainIndex;
+    state?.displayScore ?? serverComputedDisplayScore ?? 0;
   // 직전 점수 결정 (Task #95 / Task #113 / Task #122):
   // - navigate state.previousScore 가 있으면 그대로 사용한다.
   //   정상 완료 흐름에서는 submitCompletedTraining 이 calculateMetrics 와 같은

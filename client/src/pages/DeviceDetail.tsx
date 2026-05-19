@@ -27,14 +27,11 @@ interface RegisteredDevice {
   registeredAt: string;
 }
 
-const MOCK_DETAIL = {
-  firmwareVersion: 'v1.2.3',
-  lastUpdate: '2025.12.02',
-  batteryHealth: '양호',
-  estimatedUsageTime: '6시간',
-  lightSensor: '정상',
-  touchSensor: '정상',
-};
+// 펌웨어/배터리/센서 등 실측 데이터는 현재 BLE 프로토콜에서 노출되지 않아
+// '-' 로 표기한다. 과거 MOCK_DETAIL(펌웨어 v1.2.3, 배터리 양호 등) 폴백은
+// 사용자에게 가짜 사양을 사실처럼 보이게 했어 제거. 실제 값이 BLE 로 들어오면
+// 그때 InfoRow 의 value 를 실측값으로 교체.
+const NOT_AVAILABLE = '-';
 
 function getConnectedDeviceId(): string | null {
   try {
@@ -75,7 +72,12 @@ export default function DeviceDetail() {
     isConnected: !!registeredMatch && connectedId === registeredMatch.id,
     battery: null as number | null,
     signal: null as string | null,
-    ...MOCK_DETAIL,
+    firmwareVersion: NOT_AVAILABLE,
+    lastUpdate: NOT_AVAILABLE,
+    batteryHealth: NOT_AVAILABLE,
+    estimatedUsageTime: NOT_AVAILABLE,
+    lightSensor: NOT_AVAILABLE,
+    touchSensor: NOT_AVAILABLE,
   };
 
   // 실시간 상태 동기화 — Device.tsx 와 동일 패턴 (Task: DeviceDetail 실시간 반영).

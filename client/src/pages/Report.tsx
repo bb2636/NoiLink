@@ -8,75 +8,9 @@ import MultiTrendChart, {
 } from "../components/MultiTrendChart/MultiTrendChart";
 import { calculateBrainAge } from "../utils/brainAge";
 import { getBrainimalIcon, DEFAULT_BRAINIMAL } from "../utils/brainimalIcons";
-import { DEMO_PROFILE, DEMO_METRICS } from "../utils/demoProfile";
-import {
-  getMockMember,
-  buildMockMemberReport,
-  buildMockMemberTrend,
-} from "../utils/mockMembers";
 import ComprehensiveEvaluation from "../components/ComprehensiveEvaluation";
 import RoleModelCard from "../components/RoleModelCard";
 import type { Report, MetricsScore, Session } from "@noilink/shared";
-
-// TODO: 실제 API 데이터로 교체 — 홈/랭킹과 동일한 단일 데모 프로필 사용
-const MOCK_PERSONAL_REPORT: Report = {
-  id: "mock-report-001",
-  userId: "mock-user",
-  reportVersion: 12,
-  brainimalType: DEMO_PROFILE.brainimalType,
-  confidence: DEMO_PROFILE.confidence,
-  metricsScore: {
-    sessionId: "mock-session",
-    userId: "mock-user",
-    memory: DEMO_METRICS.memory,
-    comprehension: DEMO_METRICS.comprehension,
-    focus: DEMO_METRICS.focus,
-    judgment: DEMO_METRICS.judgment,
-    agility: DEMO_METRICS.agility,
-    endurance: DEMO_METRICS.endurance,
-    rhythm: DEMO_PROFILE.brainIndex,
-    createdAt: new Date().toISOString(),
-  },
-  factText:
-    "최근 12회의 종합 트레이닝 결과, 평균 종합 점수는 80.3점으로 동연령대 상위 22% 수준입니다. 특히 순발력과 집중력에서 안정적으로 높은 수치를 유지하고 있습니다.",
-  lifeText:
-    "단기 변동에 일희일비하지 않는 우직함이 버핏을 만들었습니다. 당신의 꾸준함도 곧 거대한 성과가 될 거예요.",
-  hintText:
-    "아침 5분의 가벼운 인지 워밍업과 충분한 수분 섭취가 오후 집중력 유지에 효과적입니다. 주 3회 이상 종합 트레이닝을 권장드립니다.",
-  strengthText:
-    "순발력(91점)과 집중력(88점)이 또래 평균보다 12점 이상 높습니다. 빠른 의사결정이 필요한 상황에서 강점을 발휘합니다.",
-  weaknessText:
-    "지구력(69점)이 상대적으로 낮습니다. 짧고 강한 트레이닝보다 중간 강도의 긴 세션을 통해 점진적으로 끌어올리는 것을 추천드립니다.",
-  metricEvidenceCards: [
-    {
-      key: "memory",
-      label: "기억력",
-      body: "최근 5세션 평균 78점 — 숫자 회상 과제에서 안정적 수행을 보였습니다.",
-    },
-    {
-      key: "focus",
-      label: "집중력",
-      body: "주의 유지 과제 정답률 92% — 상위 15% 수준입니다.",
-    },
-    {
-      key: "agility",
-      label: "순발력",
-      body: "평균 반응속도 412ms로 동연령대 대비 18% 빠릅니다.",
-    },
-    {
-      key: "endurance",
-      label: "지구력",
-      body: "5분 이상 세션에서 후반부 정확도 하락 폭이 평균보다 큽니다.",
-    },
-  ],
-  recommendedRoleModel: {
-    name: "워런 버핏",
-    oneLiner: "원칙이 있으면 흔들리지 않는다!",
-    description: "흔들리지 않는 원칙, 복리의 마법으로 돌아옵니다.",
-  },
-  recommendedBPM: DEMO_PROFILE.bpmAvg,
-  createdAt: new Date().toISOString(),
-};
 
 /**
  * 개인 리포트 — 명세: 프로필 요약, 6대 지표(꼭짓점 툴팁), 변화추이, 종합 평가, 롤모델, 면책
@@ -181,16 +115,10 @@ export default function Report() {
     try {
       if (!hasCache) setLoading(true);
 
-      // 소속 인원 현황에서 클릭한 더미 회원이면 합성 데이터 사용 (API 호출 안 함)
-      const mockMember = getMockMember(reportId);
-      if (mockMember) {
-        const synth = buildMockMemberReport(mockMember);
-        const synthTrend = buildMockMemberTrend(mockMember);
-        setReport(synth);
-        setTrendPoints(synthTrend);
-        reportCache.set(key, { report: synth, trendPoints: synthTrend });
-        return;
-      }
+      // 과거: 소속 인원 현황의 더미 멤버를 클릭하면 buildMockMemberReport 로
+      // 가짜 점수/평가 텍스트를 합성해 보여줬다. 사용자에게 "이 멤버는 76점"
+      // 같은 가짜 수치가 사실처럼 보일 수 있어 mock 데이터 전체 제거의 일환으로
+      // 분기 삭제 — OrganizationReport 도 단순화되어 멤버 클릭 진입 자체가 없어진다.
 
       let nextReport: Report | null = null;
       if (reportId) {
@@ -377,16 +305,11 @@ export default function Report() {
     );
   }
 
-  // 소속 인원 현황에서 진입한 경우 → 해당 멤버 정보로 프로필 표기 오버라이드
-  const viewingMember = getMockMember(reportId);
-
   // 본인 리포트가 아직 생성되지 않은 경우 (COMPOSITE 유효 세션 3회 미만 등) —
-  // MOCK_PERSONAL_REPORT (78점/80.3점 등 데모 텍스트) 를 본인 점수처럼 보여주면
-  // 사용자에게 "내가 32점 받았는데 왜 78점이라고 나오냐" 류 신뢰 무너지는 혼동이
-  // 발생한다. 비로그인 빈 카드와 동일한 안내 화면으로 통일해 노출.
-  // (소속 인원 현황에서 더미 멤버를 보는 viewingMember 케이스는 위쪽 `mockMember`
-  //  분기에서 합성 데이터가 들어가므로 여기 도달하지 않는다.)
-  if (!report && !viewingMember) {
+  // 과거 MOCK_PERSONAL_REPORT (78/82/88/74/91/69 데모 지표) 를 본인 점수처럼
+  // 보여주던 fallback 은 "내가 32점 받았는데 왜 78점이라고 나오냐" 류 신뢰 회귀의
+  // 원인이라 제거. 비로그인 빈 카드와 동일한 안내 화면으로 통일해 노출.
+  if (!report) {
     return (
       <div
         className="max-w-md mx-auto px-4"
@@ -478,12 +401,8 @@ export default function Report() {
     );
   }
 
-  // viewingMember 합성 리포트 또는 실제 본인 리포트가 있는 경우만 이 아래로 도달.
-  // (report 가 null 이면 위에서 이미 빈 상태 카드를 반환했으므로 non-null 보장.)
-  const effectiveReport: Report = report ?? {
-    ...MOCK_PERSONAL_REPORT,
-    userId: user.id,
-  };
+  // 본인 리포트가 있는 경우만 이 아래로 도달 — 위 가드로 non-null 보장.
+  const effectiveReport: Report = report;
   // 세션은 있지만 모든 포인트의 6대 지표가 비어있는 경우(점수 미산출)에는
   // 변화 추이 그래프를 그릴 의미가 없어 빈 배열로 둔다 (MOCK 폴백 제거 —
   // 데모 데이터를 본인 트렌드처럼 표시하던 회귀 수정).
@@ -498,16 +417,15 @@ export default function Report() {
   );
   const effectiveTrendPoints: TrendPoint[] = hasAnyMetric ? trendPoints : [];
 
-  // 표시용 사용자 정보 — 멤버 보기일 땐 멤버 데이터 사용
+  // 표시용 사용자 정보 — 항상 본인 데이터 (과거 viewingMember 멤버 오버라이드는
+  // mock 의존이라 제거).
   const displayUser = {
-    name: viewingMember?.name ?? user.name,
-    age: viewingMember?.age ?? user.age,
-    brainAge: viewingMember?.brainAge ?? user.brainAge,
-    previousBrainAge: viewingMember ? undefined : user.previousBrainAge,
-    organizationName: viewingMember
-      ? (user.organizationName ?? "소속 기관")
-      : user.organizationName,
-    organizationId: viewingMember ? user.organizationId : user.organizationId,
+    name: user.name,
+    age: user.age,
+    brainAge: user.brainAge,
+    previousBrainAge: user.previousBrainAge,
+    organizationName: user.organizationName,
+    organizationId: user.organizationId,
   };
 
   const brainimalInfo = effectiveReport.brainimalType
@@ -589,7 +507,7 @@ export default function Report() {
               strokeLinecap="round"
               strokeLinejoin="round"
               viewBox="0 0 24 24"
-              style={{ color: viewingMember ? "#FFFFFF" : "#AAED10" }}
+              style={{ color: "#AAED10" }}
               aria-hidden
             >
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -628,43 +546,12 @@ export default function Report() {
           </button>
         </div>
 
-        {/* 기업 관리자가 멤버 리포트 보는 중 — 헤더 아래 별도 row 로 뒤로가기 */}
-        {viewingMember && (
-          <div
-            className="px-4 h-10 flex items-center"
-            style={{ borderTop: "1px solid #1A1A1A" }}
-          >
-            <button
-              type="button"
-              onClick={() => navigate("/report/organization?tab=members")}
-              className="inline-flex items-center gap-1.5 -ml-1 px-1 py-1 rounded"
-              aria-label="소속 인원 현황으로 돌아가기"
-              style={{ color: "#D4D4D4" }}
-            >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                viewBox="0 0 24 24"
-                aria-hidden
-              >
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-              <span className="text-[13px] font-medium">뒤로가기</span>
-            </button>
-          </div>
-        )}
       </header>
 
       <div
         className="px-4 pb-6 space-y-5"
         style={{
-          paddingTop: viewingMember
-            ? "calc(48px + 40px + env(safe-area-inset-top) + 12px)"
-            : "calc(48px + env(safe-area-inset-top) + 12px)",
+          paddingTop: "calc(48px + env(safe-area-inset-top) + 12px)",
           paddingBottom: "120px",
         }}
       >
