@@ -36,12 +36,32 @@ export function snakeToCamel(s: string): string {
   return s.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
 }
 
-/** row 단일 객체를 camelCase 키로 변환 */
+/**
+ * 약어 그룹(SD, BPM, URL, ID 등)이 shared 타입에서 대문자로 표기되는 필드 alias.
+ * snakeToCamel('rt_sd') = 'rtSd' 인데 shared 타입은 'rtSD' 를 쓰므로,
+ * 변환 직후 camelKey → fixedKey 로 한 번 더 매핑해 정렬한다.
+ *
+ * Task #159 통합 테스트가 rt_sd/rtSD 미스매치를 잡아낸 뒤 raw-metrics.ts 에 인라인
+ * 보정이 들어갔는데, 동일 패턴이 다른 컬럼에 또 생길 수 있어 Task #161 에서
+ * 중앙화했다. 새 약어 컬럼(예: `*_bpm`, `*_url`) 을 schema 에 추가하면 여기에
+ * 한 줄 더 등록하면 모든 repository 가 자동으로 정렬된다.
+ *
+ * 현재 SQL 평탄 컬럼 중 약어 충돌은 `rt_sd` 하나뿐 — 나머지 SD/BPM 필드
+ * (offsetSD/reactionTimeSD/targetBPM/recommendedBPM) 는 모두 JSONB payload 안에
+ * 들어있어 snake→camel 변환을 거치지 않는다. (Task #161 audit 결과)
+ */
+export const ACRONYM_FIELD_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+  rtSd: 'rtSD',
+});
+
+/** row 단일 객체를 camelCase 키로 변환 (약어 alias 자동 적용) */
 export function rowToCamel<T = any>(row: Record<string, any> | undefined): T | null {
   if (!row) return null;
   const out: Record<string, any> = {};
   for (const k of Object.keys(row)) {
-    out[snakeToCamel(k)] = row[k];
+    const camel = snakeToCamel(k);
+    const aliased = ACRONYM_FIELD_ALIASES[camel] ?? camel;
+    out[aliased] = row[k];
   }
   return out as T;
 }

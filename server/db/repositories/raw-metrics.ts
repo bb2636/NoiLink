@@ -12,14 +12,10 @@ const COLS = `
 
 function rowToRaw(row: any): RawMetrics | null {
   if (!row) return null;
+  // rt_sd → rtSD 약어 alias 는 util.ts 의 ACRONYM_FIELD_ALIASES 가 처리.
+  // (Task #159 회귀가 Task #161 에서 중앙화됐다.)
   const c = rowToCamel<any>(row)!;
   if (c.createdAt instanceof Date) c.createdAt = c.createdAt.toISOString();
-  // snake→camel 변환이 'rt_sd' → 'rtSd' 를 만들지만 shared 타입은 'rtSD' 다.
-  // 정규화 케이스를 명시적으로 보정 (Task #159 통합 테스트로 발견).
-  if (c.rtSd !== undefined && c.rtSD === undefined) {
-    c.rtSD = c.rtSd;
-    delete c.rtSd;
-  }
   return c as RawMetrics;
 }
 
