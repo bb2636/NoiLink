@@ -443,15 +443,26 @@ function bump(label, key) {
 // ──────────────────────────────────────────────────────────────
 async function importEvents(kvKey, table) {
   const items = (await kvGet(kvKey)) || [];
-  for (const ev of items) {
+  // 멱등성 보장: id 가 없는 레거시 이벤트는 페이로드 전체 fingerprint(SHA-1) 로
+  // deterministic id 를 만든다. 같은 row 를 다시 import 해도 같은 id → ON CONFLICT
+  // DO UPDATE 가 새 row 를 만들지 않고 in-place 업데이트만 한다.
+  const { createHash } = await import('node:crypto');
+  for (const idx of items.keys()) {
+    const ev = items[idx];
     const { id, userId, sessionId, createdAt, ...rest } = ev;
+    const stableId =
+      id ??
+      `${kvKey}_${createHash('sha1')
+        .update(JSON.stringify({ userId, sessionId, createdAt, rest, idx }))
+        .digest('hex')
+        .slice(0, 24)}`;
     try {
       await pool.query(
         `INSERT INTO ${table} (id, user_id, session_id, payload, created_at)
          VALUES ($1, $2, $3, $4::jsonb, $5)
          ON CONFLICT (id) DO UPDATE SET payload=EXCLUDED.payload`,
         [
-          id ?? `${kvKey}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          stableId,
           userId ?? null, sessionId ?? null, JSON.stringify(rest),
           createdAt ?? new Date().toISOString(),
         ]

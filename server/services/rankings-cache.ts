@@ -20,10 +20,15 @@ const DEFAULT_TTL_MS = process.env.NODE_ENV === 'test'
 let rankingsCacheTtlMs = Number.isFinite(DEFAULT_TTL_MS) ? DEFAULT_TTL_MS : 60_000;
 let lastCalcAt = 0;
 let inflight: Promise<void> | null = null;
+// invalidate 가 호출될 때마다 증가하는 epoch. ensureRankings 가 recompute 시작 시점의
+// epoch 를 기억했다가 종료 후 동일한지 확인 — 다르면 (= 진행 중 invalidate 가 들어왔으면)
+// 결과를 fresh 로 마킹하지 않고 0 으로 되돌려 다음 read 가 다시 재계산하도록 한다.
+let invalidationEpoch = 0;
 
 /** 세션 저장/삭제/리셋 hook 에서 호출 — 다음 read 가 강제 재계산하도록 만든다. */
 export function invalidateRankingsCache(): void {
   lastCalcAt = 0;
+  invalidationEpoch++;
 }
 
 /** 테스트 헬퍼 — TTL 을 명시적으로 조정하고 캐시를 리셋한다. */
@@ -31,11 +36,16 @@ export function __setRankingsCacheTtlForTests(ms: number): void {
   rankingsCacheTtlMs = ms;
   lastCalcAt = 0;
   inflight = null;
+  invalidationEpoch = 0;
 }
 
 /**
  * recompute 콜백을 TTL 안에서는 스킵, TTL 만료 시 한 번만 호출한다.
  * 동시 호출은 같은 inflight Promise 에 매달려 단일 실행으로 합쳐진다.
+ *
+ * Race 가드: recompute 가 도는 중에 invalidateRankingsCache() 가 호출되면
+ * (예: 새 세션이 저장됨) 완료된 결과는 이미 stale 이므로 lastCalcAt 을 갱신하지
+ * 않고 0 으로 둔다 → 다음 read 가 다시 재계산.
  */
 export async function ensureRankings(recompute: () => Promise<void>): Promise<void> {
   if (rankingsCacheTtlMs > 0 && lastCalcAt > 0 && Date.now() - lastCalcAt < rankingsCacheTtlMs) {
@@ -44,10 +54,16 @@ export async function ensureRankings(recompute: () => Promise<void>): Promise<vo
   if (inflight) {
     return inflight;
   }
+  const startEpoch = invalidationEpoch;
   inflight = (async () => {
     try {
       await recompute();
-      lastCalcAt = Date.now();
+      if (invalidationEpoch === startEpoch) {
+        lastCalcAt = Date.now();
+      } else {
+        // 진행 중 invalidate 가 들어왔으므로 결과를 신선한 것으로 표시하지 않는다.
+        lastCalcAt = 0;
+      }
     } finally {
       inflight = null;
     }

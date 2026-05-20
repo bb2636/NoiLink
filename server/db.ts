@@ -132,6 +132,18 @@ async function getPool(): Promise<Pool> {
   return await maybe.getPool();
 }
 
-const dbExport = Object.assign(dbWrapper, { getPool });
+/**
+ * 실제 결정된 백엔드 인스턴스에 getPool 메서드가 있는지로 Postgres 여부 판정.
+ * dbWrapper 자체에 getPool 을 합쳐놓았으므로 `dbExport.getPool` 존재 여부로는
+ * 판정할 수 없다 — 반드시 내부 인스턴스를 거쳐야 한다 (PG 연결 실패 후
+ * LocalDB 로 fallback 한 경우도 정확히 false 가 나온다).
+ */
+async function isPostgresBackend(): Promise<boolean> {
+  if (!db) db = await dbPromise;
+  const maybe = db as unknown as { getPool?: () => Promise<Pool> };
+  return typeof maybe.getPool === 'function';
+}
+
+const dbExport = Object.assign(dbWrapper, { getPool, isPostgresBackend });
 
 export { dbExport as db };

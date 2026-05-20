@@ -29,8 +29,16 @@ export async function isPostgresBackend(): Promise<boolean> {
   } catch {
     // ignore — fall through to availability check
   }
-  const maybe = db as unknown as { getPool?: () => Promise<Pool> };
-  pgAvailable = typeof maybe.getPool === 'function';
+  // 주의: db.ts 의 dbWrapper 에는 항상 getPool 이 합쳐져 있으므로 wrapper 의 메서드
+  // 존재 여부로는 판정 불가. 실제로 결정된 내부 백엔드 인스턴스를 확인하는
+  // `db.isPostgresBackend()` 헬퍼를 사용해야 KV/LocalDB fallback 분기가 동작한다.
+  const wrapper = db as unknown as { isPostgresBackend?: () => Promise<boolean> };
+  if (typeof wrapper.isPostgresBackend === 'function') {
+    pgAvailable = await wrapper.isPostgresBackend();
+  } else {
+    // 구버전 호환 — wrapper 가 헬퍼를 노출하지 않으면 false 로 간주해 KV 폴백.
+    pgAvailable = false;
+  }
   pgChecked = true;
   return pgAvailable;
 }
