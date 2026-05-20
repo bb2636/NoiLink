@@ -14,7 +14,8 @@ cd shared && npm run build # Must build shared before client
 - `JWT_SECRET`: Required in production.
 - `ADMIN_EMAIL`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`: Admin seed credentials. `ADMIN_PASSWORD` required for seeding in production.
 - `DB_TYPE`: Explicitly selects DB (`postgres`, `replit`, or `local`).
-- `DATABASE_URL`: PostgreSQL connection string.
+- `DATABASE_URL`: PostgreSQL connection string. **Also required for `server` workspace test runs** — `server/db/repositories/integration.test.ts` provisions an isolated `noilink_test_<pid>_<ts>` schema against this DB and runs `schema.sql` as the regression guard for repository contracts. If unset, the suite registers an explicitly **failing** top-level `it` (not a silent skip) so external CI (GitHub Actions etc.) cannot report a green build with zero coverage of repository round-trips (Task #160).
+- `ALLOW_SKIP_DB_INTEGRATION_TESTS=1`: Opt-out for environments that genuinely have no Postgres available. Set explicitly to convert the repository integration suite from "fail" to "skip". Default is fail-loud — do not set this in any CI that is expected to validate DB repositories.
 
 **Database Auto-detection:**
 1. `DB_TYPE` env var

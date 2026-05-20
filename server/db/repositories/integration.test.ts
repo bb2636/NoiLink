@@ -33,11 +33,45 @@ const __dirname = path.dirname(__filename);
  *  - 일부 JSONB / index 옵션
  *
  * DATABASE_URL 이 없으면 silent skip 하지 않고 명시적으로 실패시킨다 —
- * 회귀 가드가 CI 에서 침묵하지 않도록 (Task #159 코드리뷰 요구).
+ * 회귀 가드가 CI 에서 침묵하지 않도록 (Task #159/#160 코드리뷰 요구).
  * Replit 환경에서는 항상 셋팅돼 있다.
+ *
+ * Task #160: 회귀 가드를 이중으로 — (1) 아래의 top-level `it` 가 DATABASE_URL
+ * 미설정 시 명시적으로 실패한 테스트 한 건을 등록하고, (2) 메인 describe 의
+ * beforeAll 도 같은 에러로 throw 한다. (1) 단독으로는 외부 CI (GitHub Actions
+ * 등) 에서 환경변수가 비어 있어도 vitest 가 "passed" 로 보고하던 silent green
+ * 문제를 한 번 더 막는다 — `beforeAll` 의 throw 는 등록된 it 가 0 개일 경우
+ * 일부 reporter 에서 hook failure 로만 잡혀 exit code 가 어긋날 수 있다.
+ *
+ * 진짜 DB 가 없는 환경에서 이 테스트만 정말로 건너뛰고 싶다면
+ * `ALLOW_SKIP_DB_INTEGRATION_TESTS=1` 을 명시해야 한다 — 명시적 의도가 없는
+ * 한 CI 는 항상 실패시키는 것이 기본값.
  */
 const DATABASE_URL = process.env.DATABASE_URL;
+const ALLOW_SKIP = process.env.ALLOW_SKIP_DB_INTEGRATION_TESTS === '1';
 const TEST_SCHEMA = `noilink_test_${process.pid}_${Date.now()}`;
+
+const MISSING_DB_URL_MESSAGE =
+  'Repository integration tests require DATABASE_URL. ' +
+  'Set DATABASE_URL to a Postgres instance (the test creates and drops an isolated schema). ' +
+  'To intentionally skip in an environment with no Postgres, set ALLOW_SKIP_DB_INTEGRATION_TESTS=1.';
+
+// Top-level guard 테스트 — 메인 describe 의 beforeAll throw 와 별개로,
+// vitest 가 항상 "한 건의 실행된 테스트" 로 인식하도록 등록한다.
+// ALLOW_SKIP_DB_INTEGRATION_TESTS=1 일 때만 skip 으로 전환.
+if (!DATABASE_URL) {
+  if (ALLOW_SKIP) {
+    describe.skip('Repository integration (Postgres, isolated schema)', () => {
+      it('skipped — ALLOW_SKIP_DB_INTEGRATION_TESTS=1', () => {});
+    });
+  } else {
+    describe('Repository integration (Postgres, isolated schema)', () => {
+      it('fails when DATABASE_URL is not set (CI green-skip guard, Task #160)', () => {
+        throw new Error(MISSING_DB_URL_MESSAGE);
+      });
+    });
+  }
+}
 
 // Pool 은 beforeAll 안에서 만든 뒤 mock 콜백이 참조하도록 외부 변수로 둔다.
 let testPool: pg.Pool | null = null;
@@ -66,14 +100,15 @@ const Daily = await import('./daily.js');
 const Events = await import('./events.js');
 const Terms = await import('./terms.js');
 
-describe('Repository integration (Postgres, isolated schema)', () => {
+// DATABASE_URL 이 있을 때만 본 통합 테스트를 등록한다. 미설정 시에는 위의
+// top-level guard `it` 가 실패(또는 skip) 한 건을 책임진다.
+const describeIntegration = DATABASE_URL ? describe : describe.skip;
+
+describeIntegration('Repository integration (Postgres, isolated schema)', () => {
   beforeAll(async () => {
     if (!DATABASE_URL) {
-      // 명시적 실패 — silent skip 으로 회귀 가드가 침묵하는 것을 막는다.
-      throw new Error(
-        'Repository integration tests require DATABASE_URL. ' +
-          'Set DATABASE_URL to a Postgres instance (the test creates and drops an isolated schema).'
-      );
+      // 도달 불가 — describeIntegration === describe.skip 이지만 방어용.
+      throw new Error(MISSING_DB_URL_MESSAGE);
     }
     // 1) 임시 schema 생성용 부트스트랩 pool (search_path 미지정).
     const bootstrap = new pg.Pool({ connectionString: DATABASE_URL });
