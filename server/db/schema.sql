@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS users (
   organization_id             VARCHAR(64),
   device_id                   VARCHAR(255),
   brainimal_type              VARCHAR(64),
-  brainimal_confidence        INTEGER,
+  brainimal_confidence        REAL,
   brain_age                   INTEGER,
   previous_brain_age          INTEGER,
   streak                      INTEGER NOT NULL DEFAULT 0,
