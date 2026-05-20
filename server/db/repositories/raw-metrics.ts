@@ -1,9 +1,13 @@
 /**
- * raw_metrics repository (Task #157)
+ * raw_metrics repository (Task #157 + Task #158 dual-mode)
  */
 import type { RawMetrics } from '@noilink/shared';
-import { getPool, rowToCamel } from './util.js';
+import {
+  getPool, rowToCamel, isPostgresBackend,
+  kvGetCollection, kvSetCollection, kvUpsert,
+} from './util.js';
 
+const KV = 'rawMetrics';
 const COLS = `
   session_id, user_id, touch_count, hit_count, rt_mean, rt_sd,
   by_mode_metrics, rhythm, memory, comprehension, focus, judgment, agility, endurance, recovery,
@@ -20,25 +24,32 @@ function rowToRaw(row: any): RawMetrics | null {
 }
 
 export async function findRawMetricsBySessionId(sessionId: string): Promise<RawMetrics | null> {
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<RawMetrics>(KV);
+    return all.find((r) => r.sessionId === sessionId) ?? null;
+  }
   const pool = await getPool();
   const { rows } = await pool.query(
-    `SELECT ${COLS} FROM raw_metrics WHERE session_id = $1 LIMIT 1`,
-    [sessionId]
+    `SELECT ${COLS} FROM raw_metrics WHERE session_id = $1 LIMIT 1`, [sessionId]
   );
   return rowToRaw(rows[0]);
 }
 
 export async function listRawMetricsByUser(
-  userId: string,
-  opts: { limit?: number; sinceCreatedAt?: string } = {}
+  userId: string, opts: { limit?: number; sinceCreatedAt?: string } = {}
 ): Promise<RawMetrics[]> {
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<RawMetrics>(KV);
+    let filtered = all.filter((r) => r.userId === userId
+      && (!opts.sinceCreatedAt || new Date(r.createdAt).getTime() >= new Date(opts.sinceCreatedAt).getTime()));
+    filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    if (opts.limit) filtered = filtered.slice(0, Math.max(1, Math.floor(opts.limit)));
+    return filtered;
+  }
   const pool = await getPool();
   const where: string[] = ['user_id = $1'];
   const params: any[] = [userId];
-  if (opts.sinceCreatedAt !== undefined) {
-    params.push(opts.sinceCreatedAt);
-    where.push(`created_at >= $${params.length}`);
-  }
+  if (opts.sinceCreatedAt !== undefined) { params.push(opts.sinceCreatedAt); where.push(`created_at >= $${params.length}`); }
   const limit = opts.limit !== undefined ? `LIMIT ${Math.max(1, Math.floor(opts.limit))}` : '';
   const { rows } = await pool.query(
     `SELECT ${COLS} FROM raw_metrics WHERE ${where.join(' AND ')} ORDER BY created_at DESC ${limit}`,
@@ -47,7 +58,48 @@ export async function listRawMetricsByUser(
   return rows.map((r) => rowToRaw(r)!).filter(Boolean);
 }
 
+export async function deleteRawMetricsByUser(userId: string): Promise<void> {
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<RawMetrics>(KV);
+    await kvSetCollection(KV, all.filter((r) => r.userId !== userId));
+    return;
+  }
+  const pool = await getPool();
+  await pool.query(`DELETE FROM raw_metrics WHERE user_id = $1`, [userId]);
+}
+
+export async function deleteAllRawMetrics(): Promise<void> {
+  if (!(await isPostgresBackend())) {
+    await kvSetCollection(KV, []);
+    return;
+  }
+  const pool = await getPool();
+  await pool.query(`DELETE FROM raw_metrics`);
+}
+
+export async function countAllRawMetrics(): Promise<number> {
+  if (!(await isPostgresBackend())) {
+    return (await kvGetCollection<RawMetrics>(KV)).length;
+  }
+  const pool = await getPool();
+  const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM raw_metrics`);
+  return rows[0]?.n ?? 0;
+}
+
+export async function listAllRawMetrics(): Promise<RawMetrics[]> {
+  if (!(await isPostgresBackend())) {
+    return kvGetCollection<RawMetrics>(KV);
+  }
+  const pool = await getPool();
+  const { rows } = await pool.query(`SELECT ${COLS} FROM raw_metrics ORDER BY created_at DESC`);
+  return rows.map((r) => rowToRaw(r)!).filter(Boolean);
+}
+
 export async function upsertRawMetrics(r: RawMetrics): Promise<void> {
+  if (!(await isPostgresBackend())) {
+    await kvUpsert<RawMetrics>(KV, r, (x) => x.sessionId === r.sessionId);
+    return;
+  }
   const pool = await getPool();
   await pool.query(
     `INSERT INTO raw_metrics (

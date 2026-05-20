@@ -12,6 +12,15 @@ import {
   RECOVERY_COACHING_MIN_SESSIONS,
 } from '@noilink/shared';
 import { getBleStabilityRemoteConfigStatus } from './config.js';
+import {
+  listAllUsers, listUsersByType, listOrganizations, listSessions, countAllSessions,
+  upsertUser, listAllRawMetrics,
+  countAllMetrics, countAllRawMetrics, countAllReports, countAllOrgInsightReports,
+  countAllDailyConditions, countAllDailyMissions, countBleAbortEvents, countAckBannerEvents,
+  deleteAllSessions, deleteAllMetrics, deleteAllRawMetrics, deleteAllReports,
+  deleteAllOrgInsightReports, deleteAllDailyConditions, deleteAllDailyMissions,
+  deleteAllBleAbortEvents, deleteAllAckBannerEvents,
+} from '../db/repositories/index.js';
 
 const router = Router();
 
@@ -24,22 +33,24 @@ router.use(requireAdmin);
  */
 router.get('/dashboard', async (req: AuthRequest, res: Response) => {
   try {
-    const users = await db.get('users') || [];
-    const sessions = await db.get('sessions') || [];
-    const organizations = await db.get('organizations') || [];
-    
+    const [users, totalSessions, organizations] = await Promise.all([
+      listAllUsers({ includeDeleted: true }),
+      countAllSessions(),
+      listOrganizations(),
+    ]);
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
     const stats = {
       totalUsers: users.length,
       personalUsers: users.filter((u: User) => u.userType === 'PERSONAL').length,
       organizationUsers: users.filter((u: User) => u.userType === 'ORGANIZATION').length,
-      totalSessions: sessions.length,
+      totalSessions,
       totalOrganizations: organizations.length,
       activeUsers: users.filter((u: User) => {
         if (!u.lastLoginAt) return false;
-        const lastLogin = new Date(u.lastLoginAt);
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        return lastLogin >= sevenDaysAgo;
+        return new Date(u.lastLoginAt) >= sevenDaysAgo;
       }).length,
       // BLE 단절 안내 임계값 원격 설정의 현재 상태 (Task #71).
       // 잘못된 BLE_STABILITY_REMOTE_CONFIG 가 푸시되면 parseError 가 채워지므로
@@ -63,12 +74,9 @@ router.get('/dashboard', async (req: AuthRequest, res: Response) => {
 router.get('/users', async (req: AuthRequest, res: Response) => {
   try {
     const { page = 1, limit = 50, userType } = req.query;
-    const users = await db.get('users') || [];
-    
-    let filteredUsers = users;
-    if (userType) {
-      filteredUsers = users.filter((u: User) => u.userType === userType);
-    }
+    const filteredUsers = userType
+      ? await listUsersByType(String(userType) as any)
+      : await listAllUsers({ includeDeleted: true });
     
     const startIndex = (Number(page) - 1) * Number(limit);
     const endIndex = startIndex + Number(limit);
@@ -98,7 +106,7 @@ router.get('/users', async (req: AuthRequest, res: Response) => {
  */
 router.get('/organizations', async (req: AuthRequest, res: Response) => {
   try {
-    const organizations = await db.get('organizations') || [];
+    const organizations = await listOrganizations();
     res.json({ success: true, data: organizations });
   } catch (error) {
     res.status(500).json({
@@ -115,12 +123,9 @@ router.get('/organizations', async (req: AuthRequest, res: Response) => {
 router.get('/sessions', async (req: AuthRequest, res: Response) => {
   try {
     const { page = 1, limit = 50, userId } = req.query;
-    const sessions = await db.get('sessions') || [];
-    
-    let filteredSessions = sessions;
-    if (userId) {
-      filteredSessions = sessions.filter((s: Session) => s.userId === userId);
-    }
+    const filteredSessions = await listSessions(
+      userId ? { userId: String(userId), order: 'desc' } : { order: 'desc' }
+    );
     
     const startIndex = (Number(page) - 1) * Number(limit);
     const endIndex = startIndex + Number(limit);
@@ -496,13 +501,10 @@ router.get('/recovery-stats', async (req: AuthRequest, res: Response) => {
     const periodDays = periodParam === '30d' ? 30 : 7;
     const cutoff = Date.now() - periodDays * 24 * 60 * 60 * 1000;
 
-    const [rawMetricsList, users] = await Promise.all([
-      db.get('rawMetrics') as Promise<RawMetrics[] | undefined>,
-      db.get('users') as Promise<User[] | undefined>,
+    const [rawList, userList] = await Promise.all([
+      listAllRawMetrics(),
+      listAllUsers({ includeDeleted: true }),
     ]);
-
-    const rawList = rawMetricsList || [];
-    const userList = users || [];
 
     // userId -> recovery 엔트리 배열 (세션 1개당 1엔트리, recovery 없으면 null)
     const buckets = new Map<string, Array<RecoveryRawMetrics | null>>();
@@ -565,40 +567,53 @@ router.get('/recovery-stats', async (req: AuthRequest, res: Response) => {
  */
 router.post('/reset-training-data', async (req: AuthRequest, res: Response) => {
   try {
+    const [
+      sessionsBefore, metricsBefore, rawBefore, reportsBefore, orgBefore,
+      condBefore, missBefore, bleAbortBefore, ackBefore,
+    ] = await Promise.all([
+      countAllSessions(), countAllMetrics(), countAllRawMetrics(),
+      countAllReports(), countAllOrgInsightReports(),
+      countAllDailyConditions(), countAllDailyMissions(),
+      countBleAbortEvents(), countAckBannerEvents(),
+    ]);
+    const rankingsBefore = ((await db.get('rankings')) || []).length;
     const before = {
-      sessions: ((await db.get('sessions')) || []).length,
-      metricsScores: ((await db.get('metricsScores')) || []).length,
-      rawMetrics: ((await db.get('rawMetrics')) || []).length,
-      rankings: ((await db.get('rankings')) || []).length,
-      reports: ((await db.get('reports')) || []).length,
-      organizationInsightReports: ((await db.get('organizationInsightReports')) || []).length,
-      dailyConditions: ((await db.get('dailyConditions')) || []).length,
-      dailyMissions: ((await db.get('dailyMissions')) || []).length,
-      bleAbortEvents: ((await db.get('bleAbortEvents')) || []).length,
-      ackBannerEvents: ((await db.get('ackBannerEvents')) || []).length,
+      sessions: sessionsBefore,
+      metricsScores: metricsBefore,
+      rawMetrics: rawBefore,
+      rankings: rankingsBefore,
+      reports: reportsBefore,
+      organizationInsightReports: orgBefore,
+      dailyConditions: condBefore,
+      dailyMissions: missBefore,
+      bleAbortEvents: bleAbortBefore,
+      ackBannerEvents: ackBefore,
     };
 
-    await db.set('sessions', []);
-    await db.set('metricsScores', []);
-    await db.set('rawMetrics', []);
+    await Promise.all([
+      deleteAllSessions(), deleteAllMetrics(), deleteAllRawMetrics(),
+      deleteAllReports(), deleteAllOrgInsightReports(),
+      deleteAllDailyConditions(), deleteAllDailyMissions(),
+      deleteAllBleAbortEvents(), deleteAllAckBannerEvents(),
+    ]);
+    // rankings 컬렉션은 KV 호환 유지 — repository 의 replaceAllRankings 는 source-of-truth replace 용도라
+    // 명시적 clear 경로로 set([]) 유지.
     await db.set('rankings', []);
-    await db.set('reports', []);
-    await db.set('organizationInsightReports', []);
-    await db.set('dailyConditions', []);
-    await db.set('dailyMissions', []);
-    await db.set('bleAbortEvents', []);
-    await db.set('ackBannerEvents', []);
 
-    const users: User[] = (await db.get('users')) || [];
+    const users = await listAllUsers({ includeDeleted: true });
     let usersReset = 0;
     for (const u of users) {
       const hadStreak = !!(u as any).streak || !!(u as any).bestStreak || !!(u as any).lastTrainingDate;
-      (u as any).streak = 0;
-      (u as any).bestStreak = 0;
-      (u as any).lastTrainingDate = null;
+      const updated: any = {
+        ...u,
+        streak: 0,
+        bestStreak: 0,
+        lastTrainingDate: null,
+        updatedAt: new Date().toISOString(),
+      };
+      await upsertUser(updated);
       if (hadStreak) usersReset++;
     }
-    await db.set('users', users);
 
     res.json({
       success: true,

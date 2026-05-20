@@ -1,10 +1,28 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
+import {
+  findUserById,
+  findDailyCondition,
+  upsertDailyCondition,
+  findDailyMission,
+  upsertDailyMission,
+  listSessions,
+  listMetricsBySessionIds,
+} from '../db/repositories/index.js';
 import type { DailyCondition, DailyMission, Session, MetricsScore, User } from '@noilink/shared';
 import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
 import { userCanActOnTargetUserId } from '../utils/session-user-policy.js';
 
 const router = Router();
+
+async function authorizeTarget(authUser: User, targetUserId: string): Promise<boolean> {
+  const list: User[] = [authUser];
+  if (targetUserId !== authUser.id) {
+    const t = await findUserById(targetUserId);
+    if (t) list.push(t);
+  }
+  return userCanActOnTargetUserId(authUser, targetUserId, list);
+}
 
 router.get('/condition/:userId', optionalAuth, async (req: Request, res: Response) => {
   try {
@@ -13,41 +31,28 @@ router.get('/condition/:userId', optionalAuth, async (req: Request, res: Respons
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
     const { userId } = req.params;
-    const users: User[] = (await db.get('users')) || [];
-    if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
+    if (!(await authorizeTarget(authReq.user, userId))) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
     const today = new Date().toISOString().split('T')[0];
-    
-    const conditions = await db.get('dailyConditions') || [];
-    let condition = conditions.find((c: DailyCondition) => 
-      c.userId === userId && c.date === today
-    );
-    
+    let condition: DailyCondition | null = await findDailyCondition(userId, today);
+
     if (!condition) {
-      const sessions = await db.get('sessions') || [];
-      const recentSessions = sessions
-        .filter((s: Session) => s.userId === userId && s.isValid)
-        .sort((a: Session, b: Session) => 
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        )
-        .slice(0, 3);
-      
+      const recentSessions = await listSessions({
+        userId, isValid: true, limit: 3, order: 'desc',
+      });
+
       if (recentSessions.length === 0) {
-        // 신규 사용자(또는 유효 세션이 없는 사용자) 에게 임의 점수(과거: 70점)
-        // 를 만들어 저장해두면, 사용자는 "내가 첫 트레이닝에서 32점을 받았는데
-        // 홈은 70점이라고 한다 — 어느 게 내 점수냐" 같은 신뢰 무너지는 혼동을
-        // 겪는다. 데이터가 없으면 정직하게 null 을 돌려보내고, 클라이언트가
-        // "데이터 부족 — 트레이닝 후 표시" 빈 상태 UI 로 처리하도록 한다.
         return res.json({ success: true, data: null });
       }
-      
-      const metricsScores = await db.get('metricsScores') || [];
+
+      const metricsForSessions = await listMetricsBySessionIds(recentSessions.map((s) => s.id));
+      const bySid = new Map(metricsForSessions.map((m) => [m.sessionId, m]));
       const recentScores = recentSessions
-        .map((s: Session) => metricsScores.find((m: MetricsScore) => m.sessionId === s.id))
-        .filter((m: MetricsScore | undefined): m is MetricsScore => m !== undefined);
-      
+        .map((s: Session) => bySid.get(s.id))
+        .filter((m): m is MetricsScore => m !== undefined);
+
       const avgRT = recentSessions.reduce((sum: number, s: Session) => sum + (s.duration || 0), 0) / recentSessions.length;
       const avgAcc = recentScores.length > 0
         ? recentScores.reduce((sum: number, m: MetricsScore) => {
@@ -58,17 +63,17 @@ router.get('/condition/:userId', optionalAuth, async (req: Request, res: Respons
             return sum + (scores.reduce((a, b) => a + b, 0) / scores.length);
           }, 0) / recentScores.length
         : 0;
-      
+
       const conditionScore = Math.min(100, Math.max(0,
         (avgRT / 1000 * 0.3) + (avgAcc * 0.4) + (recentSessions.length * 10 * 0.2)
       ));
-      
+
       let badge: 'EXCELLENT' | 'GOOD' | 'NORMAL' | 'POOR';
       if (conditionScore >= 80) badge = 'EXCELLENT';
       else if (conditionScore >= 60) badge = 'GOOD';
       else if (conditionScore >= 40) badge = 'NORMAL';
       else badge = 'POOR';
-      
+
       condition = {
         userId,
         date: today,
@@ -80,11 +85,10 @@ router.get('/condition/:userId', optionalAuth, async (req: Request, res: Respons
         duration: recentSessions.reduce((sum: number, s: Session) => sum + s.duration, 0),
         calculatedAt: new Date().toISOString(),
       };
-      
-      conditions.push(condition);
-      await db.set('dailyConditions', conditions);
+
+      await upsertDailyCondition(condition);
     }
-    
+
     res.json({ success: true, data: condition });
   } catch (error) {
     res.status(500).json({
@@ -101,36 +105,28 @@ router.get('/mission/:userId', optionalAuth, async (req: Request, res: Response)
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
     const { userId } = req.params;
-    const users: User[] = (await db.get('users')) || [];
-    if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
+    if (!(await authorizeTarget(authReq.user, userId))) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
     const today = new Date().toISOString().split('T')[0];
-    
-    const missions = await db.get('dailyMissions') || [];
-    let mission = missions.find((m: DailyMission) => 
-      m.userId === userId && m.date === today
-    );
-    
+    let mission: DailyMission | null = await findDailyMission(userId, today);
+
     if (!mission) {
-      const sessions = await db.get('sessions') || [];
-      const recentSessions = sessions
-        .filter((s: Session) => s.userId === userId && s.isValid)
-        .sort((a: Session, b: Session) => 
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        )
-        .slice(0, 5);
-      
+      const recentSessions = await listSessions({
+        userId, isValid: true, limit: 5, order: 'desc',
+      });
+
       const avgBPM = recentSessions.length > 0
         ? recentSessions.reduce((sum: number, s: Session) => sum + s.bpm, 0) / recentSessions.length
         : 80;
-      
-      const metricsScores = await db.get('metricsScores') || [];
+
+      const metricsForSessions = await listMetricsBySessionIds(recentSessions.map((s) => s.id));
+      const bySid = new Map(metricsForSessions.map((m) => [m.sessionId, m]));
       const recentScores = recentSessions
-        .map((s: Session) => metricsScores.find((m: MetricsScore) => m.sessionId === s.id))
-        .filter((m: MetricsScore | undefined): m is MetricsScore => m !== undefined);
-      
+        .map((s: Session) => bySid.get(s.id))
+        .filter((m): m is MetricsScore => m !== undefined);
+
       const avgAccuracy = recentScores.length > 0
         ? recentScores.reduce((sum: number, m: MetricsScore) => {
             const scores = [
@@ -140,10 +136,10 @@ router.get('/mission/:userId', optionalAuth, async (req: Request, res: Response)
             return sum + (scores.reduce((a, b) => a + b, 0) / scores.length);
           }, 0) / recentScores.length
         : 70;
-      
+
       const targetBPM = Math.max(60, Math.min(120, avgBPM + 10));
       const targetAccuracy = Math.min(100, Math.round(avgAccuracy + 5));
-      
+
       mission = {
         userId,
         date: today,
@@ -152,11 +148,10 @@ router.get('/mission/:userId', optionalAuth, async (req: Request, res: Response)
         description: `오늘은 ${targetBPM}BPM에서 정확도 ${targetAccuracy}% 달성해보기`,
         createdAt: new Date().toISOString(),
       };
-      
-      missions.push(mission);
-      await db.set('dailyMissions', missions);
+
+      await upsertDailyMission(mission);
     }
-    
+
     res.json({ success: true, data: mission });
   } catch (error) {
     res.status(500).json({
@@ -173,32 +168,31 @@ router.get('/quickstart/:userId', optionalAuth, async (req: Request, res: Respon
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
     const { userId } = req.params;
-    const users: User[] = (await db.get('users')) || [];
-    if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
+    if (!(await authorizeTarget(authReq.user, userId))) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
-    const user = users.find((u: User) => u.id === userId);
+    const user = await findUserById(userId);
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
-    
+
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    
-    const sessions = await db.get('sessions') || [];
-    const recentSessions = sessions
-      .filter((s: Session) => 
-        s.userId === userId && 
-        s.isValid &&
-        new Date(s.createdAt).getTime() >= sevenDaysAgo.getTime()
-      );
-    
-    const metricsScores = await db.get('metricsScores') || [];
+
+    const recentSessions = await listSessions({
+      userId,
+      isValid: true,
+      sinceCreatedAt: sevenDaysAgo.toISOString(),
+      order: 'desc',
+    });
+
+    const metricsForSessions = await listMetricsBySessionIds(recentSessions.map((s) => s.id));
+    const bySid = new Map(metricsForSessions.map((m) => [m.sessionId, m]));
     const recentScores = recentSessions
-      .map((s: Session) => metricsScores.find((m: MetricsScore) => m.sessionId === s.id))
-      .filter((m: MetricsScore | undefined): m is MetricsScore => m !== undefined);
-    
+      .map((s: Session) => bySid.get(s.id))
+      .filter((m): m is MetricsScore => m !== undefined);
+
     if (recentScores.length === 0) {
       return res.json({
         success: true,
@@ -210,7 +204,7 @@ router.get('/quickstart/:userId', optionalAuth, async (req: Request, res: Respon
         },
       });
     }
-    
+
     const metrics = [
       { mode: 'MEMORY', score: 0 },
       { mode: 'COMPREHENSION', score: 0 },
@@ -219,7 +213,7 @@ router.get('/quickstart/:userId', optionalAuth, async (req: Request, res: Respon
       { mode: 'AGILITY', score: 0 },
       { mode: 'ENDURANCE', score: 0 },
     ];
-    
+
     for (const score of recentScores) {
       if (score.memory) metrics[0].score += score.memory;
       if (score.comprehension) metrics[1].score += score.comprehension;
@@ -228,24 +222,24 @@ router.get('/quickstart/:userId', optionalAuth, async (req: Request, res: Respon
       if (score.agility) metrics[4].score += score.agility;
       if (score.endurance) metrics[5].score += score.endurance;
     }
-    
+
     const avgMetrics = metrics.map(m => ({
       ...m,
       score: m.score / recentScores.length,
     }));
-    
-    const weakest = avgMetrics.reduce((min, curr) => 
+
+    const weakest = avgMetrics.reduce((min, curr) =>
       curr.score < min.score ? curr : min
     );
-    
+
     const recentSessions3 = recentSessions.slice(0, 3);
     const fatigueLevel = recentSessions3.length >= 2
       ? Math.abs((recentSessions3[0].score || 0) - (recentSessions3[recentSessions3.length - 1].score || 0))
       : 0;
-    
+
     const recommendedBPM = fatigueLevel > 10 ? 75 : 85;
     const recommendedLevel: 1 | 2 | 3 | 4 | 5 = fatigueLevel > 10 ? 2 : 4;
-    
+
     res.json({
       success: true,
       data: {
@@ -265,7 +259,8 @@ router.get('/quickstart/:userId', optionalAuth, async (req: Request, res: Respon
   }
 });
 
-router.get('/banners', async (req: Request, res: Response) => {
+// banners 는 운영자가 관리하는 작은 KV 컬렉션 — 정규화 테이블 대상 아님.
+router.get('/banners', async (_req: Request, res: Response) => {
   try {
     const banners = await db.get('banners') || [];
     const sortedBanners = banners.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));

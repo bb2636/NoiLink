@@ -1,9 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
 import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
-import { userCanActOnTargetUserId } from '../utils/session-user-policy.js';
+import { userCanActOnTargetUserIdAsync } from '../utils/session-user-policy.js';
 import { withKeyLock } from '../utils/key-mutex.js';
-import type { User } from '@noilink/shared';
+import { findUserById, upsertUser, listAllUsers } from '../db/repositories/index.js';
 
 const router = Router();
 const KV_LOCK = { SCORES: 'lock:db:scores', USERS: 'lock:db:users' };
@@ -16,7 +16,7 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
     }
 
     const { userId, gameId, score, accuracy, timeSpent, level } = req.body;
-    
+
     if (!userId || !gameId || score === undefined) {
       return res.status(400).json({
         success: false,
@@ -24,11 +24,10 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
       });
     }
 
-    const users: User[] = (await db.get('users')) || [];
-    if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
+    if (!(await userCanActOnTargetUserIdAsync(authReq.user, userId))) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
-    
+
     const scoreData = {
       id: `score_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       userId,
@@ -40,7 +39,7 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
       createdAt: new Date().toISOString()
     };
 
-    // mutex: scores 배열 RMW 보호 (동시 푸시로 인한 데이터 유실 방지)
+    // mutex: scores 배열 RMW 보호 — 'scores' 컬렉션은 KV 전용 유지 (task #158 명시).
     let bestScore = scoreData.score;
     await withKeyLock(KV_LOCK.SCORES, async () => {
       const scores = await db.get('scores') || [];
@@ -50,17 +49,16 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
       bestScore = Math.max(...userScores.map((s: any) => s.score));
     });
 
-    // mutex: users RMW (bestScores/totalGamesPlayed) 보호
+    // mutex: users RMW (bestScores/totalGamesPlayed) 보호 — repository upsert 사용
     await withKeyLock(KV_LOCK.USERS, async () => {
-      const currentUsers = await db.get('users') || [];
-      const userIndex = currentUsers.findIndex((u: any) => u.id === userId);
-      if (userIndex !== -1) {
-        const u = currentUsers[userIndex] as any;
-        if (!u.bestScores) u.bestScores = {};
-        u.bestScores[gameId] = bestScore;
-        u.totalGamesPlayed = (u.totalGamesPlayed || 0) + 1;
-        await db.set('users', currentUsers);
-      }
+      const u = await findUserById(userId);
+      if (!u) return;
+      const updated: any = { ...u };
+      if (!updated.bestScores) updated.bestScores = {};
+      updated.bestScores[gameId] = bestScore;
+      updated.totalGamesPlayed = (updated.totalGamesPlayed || 0) + 1;
+      updated.updatedAt = new Date().toISOString();
+      await upsertUser(updated);
     });
 
     res.status(201).json({ success: true, data: scoreData });
@@ -79,14 +77,13 @@ router.get('/user/:userId', optionalAuth, async (req: Request, res: Response) =>
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
     const { userId } = req.params;
-    const users: User[] = (await db.get('users')) || [];
-    if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
+    if (!(await userCanActOnTargetUserIdAsync(authReq.user, userId))) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
     const scores = await db.get('scores') || [];
     const userScores = scores.filter((s: any) => s.userId === userId);
-    
+
     res.json({ success: true, data: userScores });
   } catch (error) {
     res.status(500).json({
@@ -105,13 +102,13 @@ router.get('/game/:gameId', optionalAuth, async (req: Request, res: Response) =>
 
     const { gameId } = req.params;
     const { limit = 100 } = req.query;
-    
+
     const scores = await db.get('scores') || [];
     const gameScores = scores
       .filter((s: any) => s.gameId === gameId)
       .sort((a: any, b: any) => b.score - a.score)
       .slice(0, Number(limit));
-    
+
     res.json({ success: true, data: gameScores });
   } catch (error) {
     res.status(500).json({
@@ -129,14 +126,14 @@ router.get('/leaderboard', optionalAuth, async (req: Request, res: Response) => 
     }
 
     const { limit = 100 } = req.query;
-    
+
     const scores = await db.get('scores') || [];
-    const users = await db.get('users') || [];
-    
+    const users = await listAllUsers();
+
     const leaderboard = users.map((user: any) => {
       const userScores = scores.filter((s: any) => s.userId === user.id);
       const totalScore = userScores.reduce((sum: number, s: any) => sum + s.score, 0);
-      
+
       return {
         userId: user.id,
         username: user.username || user.name,
@@ -147,7 +144,7 @@ router.get('/leaderboard', optionalAuth, async (req: Request, res: Response) => 
     })
     .sort((a: any, b: any) => b.totalScore - a.totalScore)
     .slice(0, Number(limit));
-    
+
     res.json({ success: true, data: leaderboard });
   } catch (error) {
     res.status(500).json({

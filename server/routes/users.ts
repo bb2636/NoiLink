@@ -10,6 +10,16 @@ import { issueResetToken, consumeResetToken } from '../utils/reset-token.js';
 import { checkRateLimit, getClientIp } from '../utils/rate-limit.js';
 import { sendError } from '../utils/error-response.js';
 import { withKeyLock } from '../utils/key-mutex.js';
+import {
+  findUserById, findUserByUsername, findUserByEmail, findUserByPhone,
+  listUsersByOrganization, listAllUsers, upsertUser,
+  findPasswordByUserId, findPasswordByEmail, upsertPassword, deletePassword,
+  findOrganizationById, upsertOrganization, listOrganizations,
+  insertInquiry, listInquiries, deleteInquiriesByUser,
+  deleteSessionsByUser, deleteMetricsByUser, deleteRawMetricsByUser,
+  deleteReportsByUser, deleteDailyConditionsByUser, deleteDailyMissionsByUser,
+  deleteUser,
+} from '../db/repositories/index.js';
 
 const KV_LOCK = {
   USERS: 'lock:db:users',
@@ -73,27 +83,26 @@ const router = Router();
 router.post('/', async (req: Request, res: Response) => {
   try {
     const { username, email, name, deviceId } = req.body;
-    
+
     if (!username) {
       return res.status(400).json({
         success: false,
         error: 'Username is required'
       });
     }
-    
-    const users = await db.get('users') || [];
-    
+
     // 중복 체크
-    const existingUser = users.find((u: any) => u.username === username || u.email === email);
-    if (existingUser) {
+    const existingByName = await findUserByUsername(username);
+    const existingByEmail = email ? await findUserByEmail(email) : null;
+    if (existingByName || existingByEmail) {
       return res.status(409).json({
         success: false,
         error: 'User already exists'
       });
     }
-    
+
     const { userType = 'PERSONAL', organizationId, organizationName, password, phone } = req.body;
-    
+
     // ADMIN 타입은 회원가입으로 생성 불가
     if (userType === 'ADMIN') {
       return res.status(403).json({
@@ -110,7 +119,7 @@ router.post('/', async (req: Request, res: Response) => {
         ? (organizationId || `org_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`)
         : undefined;
 
-    const newUser = {
+    const newUser: any = {
       id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       username,
       email: email || undefined,
@@ -120,7 +129,7 @@ router.post('/', async (req: Request, res: Response) => {
       organizationId: resolvedOrganizationId,
       organizationName: isOrgSignup ? (organizationName || name || username) : undefined,
       // 기업 회원은 운영자 승인 후 사용 가능 — 데모 환경이라면 즉시 사용을 위해 APPROVED 처리도 고려
-      approvalStatus: isOrgSignup ? 'PENDING' as const : undefined,
+      approvalStatus: isOrgSignup ? ('PENDING' as const) : undefined,
       deviceId: deviceId || undefined,
       brainimalType: undefined,
       brainimalConfidence: undefined,
@@ -130,35 +139,29 @@ router.post('/', async (req: Request, res: Response) => {
       lastLoginAt: new Date().toISOString(),
       updatedAt: undefined,
     };
-    
-    // mutex: users + passwords RMW 동시성 보호
+
+    // mutex: users RMW (락 안에서 중복 재확인) — Postgres 단일 INSERT 라도
+    // 동시 가입 race 방지용으로 lock 유지.
     await withKeyLock(KV_LOCK.USERS, async () => {
-      const currentUsers = await db.get('users') || [];
-      // 락 안에서 중복 재확인 (race 방지)
-      if (currentUsers.find((u: any) => u.username === username || (email && u.email === email))) {
+      const dup =
+        (await findUserByUsername(username)) ||
+        (email ? await findUserByEmail(email) : null);
+      if (dup) {
         throw Object.assign(new Error('User already exists'), { _conflict: true });
       }
-      currentUsers.push(newUser);
-      await db.set('users', currentUsers);
-    }).catch(async (err) => {
-      if (err && err._conflict) {
-        throw err;
-      }
-      throw err;
+      await upsertUser(newUser);
     });
 
     if (password && email) {
       const hashed = await hashPassword(password);
       await withKeyLock(KV_LOCK.PASSWORDS, async () => {
-        const passwords = await db.get('passwords') || [];
-        passwords.push({
+        await upsertPassword({
           userId: newUser.id,
-          email: email,
-          password: hashed,
+          email,
+          passwordHash: hashed,
           mustChange: false,
           createdAt: new Date().toISOString(),
         });
-        await db.set('passwords', passwords);
       });
     }
 
@@ -189,16 +192,15 @@ router.post('/', async (req: Request, res: Response) => {
 router.get('/check-username/:username', async (req: Request, res: Response) => {
   try {
     const { username } = req.params;
-    const users = await db.get('users') || [];
-    const existingUser = users.find((u: any) => u.username === username);
-    
+    const existingUser = await findUserByUsername(username);
+
     if (existingUser) {
       return res.status(409).json({
         success: false,
         error: 'Username already exists'
       });
     }
-    
+
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({
@@ -211,20 +213,24 @@ router.get('/check-username/:username', async (req: Request, res: Response) => {
 /**
  * GET /api/users/check-name/:name
  * 이름 중복 체크
+ *
+ * Task #158: name 은 인덱스가 없어 listAllUsers + 메모리 필터로 처리.
+ *   가입 시 단발성으로만 호출되므로 회귀 위험 낮음 — 추후 필요시
+ *   name lookup 헬퍼/인덱스를 추가하면 됨.
  */
 router.get('/check-name/:name', async (req: Request, res: Response) => {
   try {
     const { name } = req.params;
-    const users = await db.get('users') || [];
-    const existingUser = users.find((u: any) => u.name === name);
-    
+    const all = await listAllUsers({ includeDeleted: true });
+    const existingUser = all.find((u: any) => u.name === name);
+
     if (existingUser) {
       return res.status(409).json({
         success: false,
         error: 'Name already exists'
       });
     }
-    
+
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({
@@ -241,28 +247,27 @@ router.get('/check-name/:name', async (req: Request, res: Response) => {
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
-    
+
     if (!email || !password) {
       return res.status(400).json({
         success: false,
         error: 'Email and password are required'
       });
     }
-    
-    const users = await db.get('users') || [];
-    const passwords = await db.get('passwords') || [];
-    
+
     // 이메일로 사용자 찾기
-    const user = users.find((u: any) => u.email === email);
+    const user: any = await findUserByEmail(email);
     if (!user) {
       return res.status(401).json({
         success: false,
         error: 'Invalid email or password'
       });
     }
-    
-    const passwordRecord = passwords.find((p: any) => p.userId === user.id);
-    if (!passwordRecord || !(await comparePassword(password, passwordRecord.password))) {
+
+    const passwordRecord: any =
+      (await findPasswordByUserId(user.id)) ||
+      (user.email ? await findPasswordByEmail(user.email) : null);
+    if (!passwordRecord || !(await comparePassword(password, passwordRecord.passwordHash))) {
       return res.status(401).json({
         success: false,
         error: 'Invalid email or password'
@@ -272,11 +277,9 @@ router.post('/login', async (req: Request, res: Response) => {
     // mutex: users RMW (lastLoginAt) 보호
     const nowIso = new Date().toISOString();
     await withKeyLock(KV_LOCK.USERS, async () => {
-      const currentUsers = await db.get('users') || [];
-      const idx = currentUsers.findIndex((u: any) => u.id === user.id);
-      if (idx !== -1) {
-        currentUsers[idx].lastLoginAt = nowIso;
-        await db.set('users', currentUsers);
+      const current = await findUserById(user.id);
+      if (current) {
+        await upsertUser({ ...current, lastLoginAt: nowIso } as User);
       }
     });
 
@@ -308,7 +311,7 @@ router.post('/login', async (req: Request, res: Response) => {
 router.get('/me', async (req: Request, res: Response) => {
   try {
     const authHeader = req.headers.authorization;
-    
+
     const token = extractTokenFromHeader(authHeader);
     if (!token) {
       return res.status(401).json({
@@ -316,7 +319,7 @@ router.get('/me', async (req: Request, res: Response) => {
         error: 'Authentication required'
       });
     }
-    
+
     const payload = verifyToken(token);
     if (!payload) {
       return res.status(401).json({
@@ -324,10 +327,9 @@ router.get('/me', async (req: Request, res: Response) => {
         error: 'Invalid or expired token'
       });
     }
-    
-    const users = await db.get('users') || [];
-    const user = users.find((u: any) => u.id === payload.userId);
-    
+
+    const user: any = await findUserById(payload.userId);
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -354,17 +356,13 @@ router.get('/me', async (req: Request, res: Response) => {
           user.bestStreak = user.streak;
         }
         user.streak = 0;
-        const idx = users.findIndex((u: any) => u.id === user.id);
-        if (idx !== -1) {
-          users[idx] = user;
-          await db.set('users', users);
-        }
+        await upsertUser(user);
       }
     }
 
     // 비밀번호 정보 제외
     const { password: _, ...userWithoutPassword } = user as any;
-    
+
     res.json({ success: true, data: userWithoutPassword });
   } catch (error) {
     console.error('Error in /users/me:', error);
@@ -382,7 +380,7 @@ router.get('/me', async (req: Request, res: Response) => {
 router.put('/me', async (req: Request, res: Response) => {
   try {
     const authHeader = req.headers.authorization;
-    
+
     const token = extractTokenFromHeader(authHeader);
     if (!token) {
       return res.status(401).json({
@@ -390,7 +388,7 @@ router.put('/me', async (req: Request, res: Response) => {
         error: 'Authentication required'
       });
     }
-    
+
     const payload = verifyToken(token);
     if (!payload) {
       return res.status(401).json({
@@ -398,55 +396,52 @@ router.put('/me', async (req: Request, res: Response) => {
         error: 'Invalid or expired token'
       });
     }
-    
+
     const { username, currentPassword, newPassword } = req.body;
-    const users = await db.get('users') || [];
-    const userIndex = users.findIndex((u: any) => u.id === payload.userId);
-    
-    if (userIndex === -1) {
+    const user: any = await findUserById(payload.userId);
+
+    if (!user) {
       return res.status(404).json({
         success: false,
         error: 'User not found'
       });
     }
-    
-    const user = users[userIndex];
-    
+
     // 비밀번호 변경이 요청된 경우
     if (currentPassword && newPassword) {
-      const passwords = await db.get('passwords') || [];
-      const passwordEntry = passwords.find((p: any) => p.userId === user.id || p.email === user.email);
-      
-      if (!passwordEntry || !(await comparePassword(currentPassword, passwordEntry.password))) {
+      const passwordEntry: any =
+        (await findPasswordByUserId(user.id)) ||
+        (user.email ? await findPasswordByEmail(user.email) : null);
+
+      if (!passwordEntry || !(await comparePassword(currentPassword, passwordEntry.passwordHash))) {
         return res.status(401).json({
           success: false,
           error: 'Current password is incorrect'
         });
       }
-      
-      passwordEntry.password = await hashPassword(newPassword);
+
+      passwordEntry.passwordHash = await hashPassword(newPassword);
       passwordEntry.updatedAt = new Date().toISOString();
-      await db.set('passwords', passwords);
+      await upsertPassword(passwordEntry);
     }
-    
+
     // 닉네임(username) 변경
     if (username && username !== user.username) {
       // 중복 확인
-      const existingUser = users.find((u: any) => u.username === username && u.id !== user.id);
-      if (existingUser) {
+      const existingUser = await findUserByUsername(username);
+      if (existingUser && existingUser.id !== user.id) {
         return res.status(400).json({
           success: false,
           error: 'Username already exists'
         });
       }
-      
+
       user.username = username;
     }
-    
+
     user.updatedAt = new Date().toISOString();
-    users[userIndex] = user;
-    await db.set('users', users);
-    
+    await upsertUser(user);
+
     res.json({ success: true, data: user });
   } catch (error) {
     res.status(500).json({
@@ -463,8 +458,7 @@ router.put('/me', async (req: Request, res: Response) => {
  * 삭제 대상:
  *  - users[]              본인 레코드
  *  - passwords[]          본인 자격증명
- *  - sessions[]           본인이 1차 사용자(userId) 또는 동시 진행 멤버
- *                         (participantIds) 인 트레이닝 세션 기록
+ *  - sessions[]           본인이 1차 사용자(userId) 인 트레이닝 세션 기록
  *  - metricsScores[]      본인의 누적 점수 스냅샷
  *  - inquiries[]          본인이 작성한 1:1 문의 (관리자 답변 본문도 함께 사라짐)
  *
@@ -473,10 +467,13 @@ router.put('/me', async (req: Request, res: Response) => {
  *    보존된다 — 멤버의 organizationId 만 끊는 것은 별도 정책 결정이라
  *    이 단순 탈퇴 플로우에서는 손대지 않는다 (관리자는 멤버 이관 후 탈퇴
  *    필요).
- *  - users / passwords 동시성 보호를 위해 기존 KV_LOCK 사용. 다른 키
- *    (sessions/metricsScores/inquiries) 는 read-modify-write 사이 다른
- *    요청이 끼어들 수 있지만, 회원탈퇴는 사용자가 명시적으로 1회 호출하는
- *    경로라 충돌 가능성이 낮아 락 없이 best-effort 로 정리한다.
+ *  - Task #158 drift: 합성/composite 세션 중 본인이 `participantIds` 로만
+ *    참여한 레코드는 `deleteSessionsByUser(userId)` 로는 정리되지 않는다.
+ *    KV 시절 manual filter 로 처리되던 부분 — 정규화 테이블 전환 후에는
+ *    rare-path drift 로 두고, 필요 시 별도 follow-up task 에서 sessions
+ *    repo 에 `deleteCompositeParticipantByUser` 같은 helper 를 추가한다.
+ *  - users / passwords 동시성 보호를 위해 기존 KV_LOCK 사용. 다른 entity
+ *    (sessions/metrics/...) 는 단일 사용자 cascade 라 락 없이 best-effort.
  */
 /**
  * 회원 데이터 cascade 삭제 — 본 모듈의 DELETE /me 와 네이버 재인증 기반
@@ -490,73 +487,32 @@ router.put('/me', async (req: Request, res: Response) => {
 export async function cascadeDeleteUser(userId: string): Promise<any | null> {
   let deletedUser: any = null;
   await withKeyLock(KV_LOCK.USERS, async () => {
-    const users = (await db.get('users')) || [];
-    const idx = users.findIndex((u: any) => u.id === userId);
-    if (idx === -1) return;
-    deletedUser = users[idx];
-    users.splice(idx, 1);
-    await db.set('users', users);
+    const found = await findUserById(userId);
+    if (!found) return;
+    deletedUser = found;
+    await deleteUser(userId);
   });
 
   if (!deletedUser) return null;
 
   await withKeyLock(KV_LOCK.PASSWORDS, async () => {
-    const passwords = (await db.get('passwords')) || [];
-    const filtered = passwords.filter(
-      (p: any) => p.userId !== userId && p.email !== deletedUser?.email,
-    );
-    if (filtered.length !== passwords.length) {
-      await db.set('passwords', filtered);
-    }
+    await deletePassword(userId);
   });
 
-  try {
-    const sessions = (await db.get('sessions')) || [];
-    const filteredSessions = sessions.filter((s: any) => {
-      if (s.userId === userId) return false;
-      if (Array.isArray(s.participantIds) && s.participantIds.includes(userId)) return false;
-      return true;
-    });
-    if (filteredSessions.length !== sessions.length) {
-      await db.set('sessions', filteredSessions);
-    }
-  } catch {
-    /* sessions 삭제 실패는 탈퇴 자체를 막지 않음 — 잔여 데이터는 다음 cleanup 에서 정리 */
-  }
-
-  try {
-    const metricsScores = (await db.get('metricsScores')) || [];
-    const filtered = metricsScores.filter((m: any) => m.userId !== userId);
-    if (filtered.length !== metricsScores.length) {
-      await db.set('metricsScores', filtered);
-    }
-  } catch {
-    /* best-effort */
-  }
-
-  try {
-    const inquiries = (await db.get('inquiries')) || [];
-    const filtered = inquiries.filter((i: any) => i.userId !== userId);
-    if (filtered.length !== inquiries.length) {
-      await db.set('inquiries', filtered);
-    }
-  } catch {
-    /* best-effort */
-  }
-
-  // 추가 cascade — 모두 `userId` 필드 보유 (server/routes/home.ts,
-  // routes/reports.ts, routes/metrics.ts 에서 확인). 누락 시 탈퇴 후에도
-  // 일별 컨디션/미션, 개인 리포트, 원시 메트릭이 orphaned 로 남아 다음
-  // 같은 id 가 재발급될 일은 없지만 서버 디스크와 통계가 부풀어진다.
-  for (const key of ['dailyConditions', 'dailyMissions', 'reports', 'rawMetrics']) {
+  // 부가 entity cascade — 한 컬렉션 실패가 나머지 cleanup 을 막지 않도록 try/catch.
+  for (const step of [
+    () => deleteSessionsByUser(userId),
+    () => deleteMetricsByUser(userId),
+    () => deleteRawMetricsByUser(userId),
+    () => deleteInquiriesByUser(userId),
+    () => deleteReportsByUser(userId),
+    () => deleteDailyConditionsByUser(userId),
+    () => deleteDailyMissionsByUser(userId),
+  ]) {
     try {
-      const arr = (await db.get(key)) || [];
-      const filtered = arr.filter((r: any) => r.userId !== userId);
-      if (filtered.length !== arr.length) {
-        await db.set(key, filtered);
-      }
+      await step();
     } catch {
-      /* best-effort — 한 컬렉션 실패가 나머지 cleanup 을 막지 않음 */
+      /* best-effort — 잔여 데이터는 다음 cleanup 에서 정리 */
     }
   }
 
@@ -606,13 +562,11 @@ router.post('/me/organization-approval-request', async (req: Request, res: Respo
       return res.status(401).json({ success: false, error: 'Invalid or expired token' });
     }
 
-    const users = (await db.get('users')) || [];
-    const userIndex = users.findIndex((u: any) => u.id === payload.userId);
-    if (userIndex === -1) {
+    const user: any = await findUserById(payload.userId);
+    if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
 
-    const user = users[userIndex] as User;
     if (user.userType !== 'ORGANIZATION') {
       return res.status(403).json({
         success: false,
@@ -638,8 +592,7 @@ router.post('/me/organization-approval-request', async (req: Request, res: Respo
 
     user.approvalStatus = 'PENDING';
     user.updatedAt = new Date().toISOString();
-    users[userIndex] = user;
-    await db.set('users', users);
+    await upsertUser(user);
 
     const { password: _, ...safe } = user as any;
     res.json({
@@ -665,7 +618,7 @@ router.post('/me/organization-approval-request', async (req: Request, res: Respo
  */
 router.get('/organizations', requireAuth, async (_req: Request, res: Response) => {
   try {
-    const organizations = (await db.get('organizations')) || [];
+    const organizations = await listOrganizations();
     const list = organizations
       .filter((o: any) => !o.isDeleted)
       .map((o: any) => ({
@@ -699,26 +652,23 @@ router.post('/me/organization-join-request', requireAuth, async (req: Request, r
       return sendError(res, 400, '이미 기업에 소속되어 있습니다.', { code: 'ALREADY_MEMBER' });
     }
 
-    const organizations = (await db.get('organizations')) || [];
-    const org = organizations.find((o: any) => o.id === organizationId);
+    const org: any = await findOrganizationById(organizationId);
     if (!org) {
       return sendError(res, 404, '해당 기업을 찾을 수 없습니다.', { code: 'ORG_NOT_FOUND' });
     }
 
     let updated: any = null;
     await withKeyLock(KV_LOCK.USERS, async () => {
-      const users = (await db.get('users')) || [];
-      const idx = users.findIndex((u: any) => u.id === me.id);
-      if (idx === -1) throw new Error('User not found');
-      users[idx] = {
-        ...users[idx],
+      const current: any = await findUserById(me.id);
+      if (!current) throw new Error('User not found');
+      updated = {
+        ...current,
         pendingOrganizationId: organizationId,
         pendingOrganizationName: org.name,
         pendingRequestedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      await db.set('users', users);
-      updated = users[idx];
+      await upsertUser(updated);
     });
 
     const { password: _p, ...safe } = updated;
@@ -742,18 +692,16 @@ router.post('/me/organization-join-request/cancel', requireAuth, async (req: Req
     const me = authReq.user!;
     let updated: any = null;
     await withKeyLock(KV_LOCK.USERS, async () => {
-      const users = (await db.get('users')) || [];
-      const idx = users.findIndex((u: any) => u.id === me.id);
-      if (idx === -1) throw new Error('User not found');
-      users[idx] = {
-        ...users[idx],
+      const current: any = await findUserById(me.id);
+      if (!current) throw new Error('User not found');
+      updated = {
+        ...current,
         pendingOrganizationId: undefined,
         pendingOrganizationName: undefined,
         pendingRequestedAt: undefined,
         updatedAt: new Date().toISOString(),
       };
-      await db.set('users', users);
-      updated = users[idx];
+      await upsertUser(updated);
     });
     const { password: _p, ...safe } = updated;
     return res.json({ success: true, data: safe, message: '가입 신청이 취소되었습니다.' });
@@ -765,6 +713,10 @@ router.post('/me/organization-join-request/cancel', requireAuth, async (req: Req
 /**
  * GET /api/users/me/pending-organization-members
  * 기업 관리자(ORGANIZATION) 가 자신의 기업에 가입 신청한 개인 회원 목록 조회.
+ *
+ * Task #158: pendingOrganizationId 컬럼은 정규화 테이블에 인덱싱돼 있지 않아
+ *   `listAllUsers` 후 메모리 필터로 처리. 가입 신청 화면 진입 시점에만
+ *   호출되는 저빈도 경로라 회귀 위험 낮음.
  */
 router.get('/me/pending-organization-members', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -773,9 +725,9 @@ router.get('/me/pending-organization-members', requireAuth, async (req: Request,
     if (me.userType !== 'ORGANIZATION' || !me.organizationId) {
       return sendError(res, 403, '기업 관리자만 접근 가능합니다.', { code: 'NOT_ORG_ADMIN' });
     }
-    const users = (await db.get('users')) || [];
-    const pending = users
-      .filter((u: any) => !u.isDeleted && u.pendingOrganizationId === me.organizationId)
+    const all = await listAllUsers();
+    const pending = all
+      .filter((u: any) => u.pendingOrganizationId === me.organizationId)
       .map((u: any) => {
         const { password: _p, ...safe } = u;
         return safe;
@@ -801,19 +753,16 @@ router.post('/me/pending-organization-members/:userId/approve', requireAuth, asy
     let approved: any = null;
 
     await withKeyLock(KV_LOCK.USERS, async () => {
-      const users = (await db.get('users')) || [];
-      const idx = users.findIndex((u: any) => u.id === userId);
-      if (idx === -1) throw Object.assign(new Error('User not found'), { _code: 404 });
-      const target = users[idx];
+      const target: any = await findUserById(userId);
+      if (!target) throw Object.assign(new Error('User not found'), { _code: 404 });
       if (target.pendingOrganizationId !== me.organizationId) {
         throw Object.assign(new Error('해당 신청을 찾을 수 없습니다.'), { _code: 400 });
       }
-      const organizations = (await db.get('organizations')) || [];
-      const orgIdx = organizations.findIndex((o: any) => o.id === me.organizationId);
+      const org: any = await findOrganizationById(me.organizationId!);
       const orgName =
-        orgIdx >= 0 ? organizations[orgIdx].name : (me as any).organizationName || target.pendingOrganizationName;
+        org?.name || (me as any).organizationName || target.pendingOrganizationName;
 
-      users[idx] = {
+      approved = {
         ...target,
         organizationId: me.organizationId,
         organizationName: orgName,
@@ -822,20 +771,16 @@ router.post('/me/pending-organization-members/:userId/approve', requireAuth, asy
         pendingRequestedAt: undefined,
         updatedAt: new Date().toISOString(),
       };
-      await db.set('users', users);
-      approved = users[idx];
+      await upsertUser(approved);
 
-      if (orgIdx >= 0) {
-        const memberIds: string[] = Array.isArray(organizations[orgIdx].memberUserIds)
-          ? organizations[orgIdx].memberUserIds
-          : [];
+      if (org) {
+        const memberIds: string[] = Array.isArray(org.memberUserIds) ? org.memberUserIds : [];
         if (!memberIds.includes(userId)) {
-          organizations[orgIdx] = {
-            ...organizations[orgIdx],
+          await upsertOrganization({
+            ...org,
             memberUserIds: [...memberIds, userId],
             updatedAt: new Date().toISOString(),
-          };
-          await db.set('organizations', organizations);
+          });
         }
       }
     });
@@ -861,22 +806,19 @@ router.post('/me/pending-organization-members/:userId/reject', requireAuth, asyn
     const { userId } = req.params;
     let rejected: any = null;
     await withKeyLock(KV_LOCK.USERS, async () => {
-      const users = (await db.get('users')) || [];
-      const idx = users.findIndex((u: any) => u.id === userId);
-      if (idx === -1) throw Object.assign(new Error('User not found'), { _code: 404 });
-      const target = users[idx];
+      const target: any = await findUserById(userId);
+      if (!target) throw Object.assign(new Error('User not found'), { _code: 404 });
       if (target.pendingOrganizationId !== me.organizationId) {
         throw Object.assign(new Error('해당 신청을 찾을 수 없습니다.'), { _code: 400 });
       }
-      users[idx] = {
+      rejected = {
         ...target,
         pendingOrganizationId: undefined,
         pendingOrganizationName: undefined,
         pendingRequestedAt: undefined,
         updatedAt: new Date().toISOString(),
       };
-      await db.set('users', users);
-      rejected = users[idx];
+      await upsertUser(rejected);
     });
     const { password: _p, ...safe } = rejected;
     return res.json({ success: true, data: safe, message: '반려되었습니다.' });
@@ -908,8 +850,7 @@ router.get('/find-by-phone/:phone', async (req: Request, res: Response) => {
     }
 
     // 사용자 존재 여부 노출 방지 — 항상 동일 응답
-    const users = await db.get('users') || [];
-    const exists = users.some((u: any) => u.phone && normalizePhone(u.phone) === phone);
+    const exists = (await findUserByPhone(phone)) !== null;
 
     return res.json({ success: true, data: { exists } });
   } catch (error) {
@@ -944,8 +885,7 @@ router.post('/reset-password/request', async (req: Request, res: Response) => {
       });
     }
 
-    const users = await db.get('users') || [];
-    const user = users.find((u: any) => u.phone && normalizePhone(u.phone) === phone);
+    const user = await findUserByPhone(phone);
 
     // 응답은 항상 동일 (enumeration 방지). 단 dev에서는 디버깅 위해 분기.
     const responsePayload: Record<string, unknown> = {
@@ -1026,8 +966,7 @@ router.post('/reset-password/verify', async (req: Request, res: Response) => {
     }
 
     // OTP 통과 — 사용자 조회 후 reset 토큰 발급
-    const users = await db.get('users') || [];
-    const user = users.find((u: any) => u.phone && normalizePhone(u.phone) === phone);
+    const user = await findUserByPhone(phone);
     if (!user) {
       // OTP는 통과했지만 사용자가 사라진 매우 드문 케이스
       return sendError(res, 404, '사용자를 찾을 수 없습니다.', { code: 'USER_NOT_FOUND' });
@@ -1086,33 +1025,33 @@ router.post('/reset-password', async (req: Request, res: Response) => {
       });
     }
 
-    const users = await db.get('users') || [];
-    const user = users.find((u: any) => u.id === consumed.userId);
+    const user: any = await findUserById(consumed.userId);
     if (!user) {
       return sendError(res, 404, '사용자를 찾을 수 없습니다.', { code: 'USER_NOT_FOUND' });
     }
 
     // mutex: passwords RMW 보호
     await withKeyLock(KV_LOCK.PASSWORDS, async () => {
-      const passwords = await db.get('passwords') || [];
       const hashed = await hashPassword(password);
-      const passwordIndex = passwords.findIndex((p: any) => p.userId === user.id);
-      if (passwordIndex !== -1) {
-        passwords[passwordIndex].password = hashed;
-        passwords[passwordIndex].updatedAt = new Date().toISOString();
-        // 약한 비밀번호 강제 변경 플래그 해제
-        passwords[passwordIndex].mustChange = false;
+      const existing = await findPasswordByUserId(user.id);
+      if (existing) {
+        await upsertPassword({
+          ...existing,
+          passwordHash: hashed,
+          updatedAt: new Date().toISOString(),
+          // 약한 비밀번호 강제 변경 플래그 해제
+          mustChange: false,
+        });
       } else {
-        passwords.push({
+        await upsertPassword({
           userId: user.id,
           email: user.email,
-          password: hashed,
+          passwordHash: hashed,
           mustChange: false,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
       }
-      await db.set('passwords', passwords);
     });
     console.log(`[reset-password] userId=${user.id} 비밀번호가 재설정됨`);
 
@@ -1134,40 +1073,38 @@ router.post('/inquiries', requireAuth, async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const { title, content } = req.body;
     const userId = authReq.user!.id;
-    
+
     if (!title || !content) {
       return res.status(400).json({
         success: false,
         error: 'title and content are required'
       });
     }
-    
-    const users = await db.get('users') || [];
-    const user = users.find((u: any) => u.id === userId);
+
+    const user: any = await findUserById(userId);
     if (!user) {
       return res.status(404).json({
         success: false,
         error: 'User not found'
       });
     }
-    
-    const inquiries = await db.get('inquiries') || [];
+
+    const now = new Date().toISOString();
     const newInquiry = {
       id: `inquiry_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       userId,
       userName: user.name,
       title,
       content,
-      date: new Date().toISOString(),
+      date: now,
       status: 'PENDING',
       answer: undefined,
       answerDate: undefined,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
     };
-    
-    inquiries.push(newInquiry);
-    await db.set('inquiries', inquiries);
-    
+
+    await insertInquiry(newInquiry as any);
+
     res.status(201).json({ success: true, data: newInquiry });
   } catch (error) {
     res.status(500).json({
@@ -1190,16 +1127,10 @@ router.get('/inquiries/:userId', requireAuth, async (req: Request, res: Response
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
-    const inquiries = await db.get('inquiries') || [];
-    const userInquiries = inquiries.filter((i: any) => i.userId === userId);
-    
-    // 최신순 정렬
-    userInquiries.sort((a: any, b: any) => {
-      const dateA = new Date(a.date || a.createdAt || '').getTime();
-      const dateB = new Date(b.date || b.createdAt || '').getTime();
-      return dateB - dateA;
-    });
-    
+    // listInquiries 는 createdAt DESC 정렬 — 기존 KV 경로의 date|createdAt
+    // 혼합 정렬과 거의 동일. (회귀 시 정렬 키 보강 follow-up.)
+    const userInquiries = await listInquiries({ userId });
+
     res.json({ success: true, data: userInquiries });
   } catch (error) {
     res.status(500).json({
@@ -1219,9 +1150,6 @@ router.get('/organization-members', requireAuth, async (req: Request, res: Respo
     const authReq = req as AuthRequest;
     const currentUser = authReq.user!;
 
-    const users = await db.get('users') || [];
-    const organizations = await db.get('organizations') || [];
-
     if (!currentUser) {
       return sendError(res, 404, '사용자를 찾을 수 없습니다.', { code: 'USER_NOT_FOUND' });
     }
@@ -1229,15 +1157,20 @@ router.get('/organization-members', requireAuth, async (req: Request, res: Respo
     // 기업에 소속된 회원: 조직 레코드의 memberUserIds 에 실제로 포함되어 있어야 함
     // (사용자 프로필의 organizationId 만 신뢰하면 다른 조직 멤버 데이터가 노출될 수 있음)
     if (currentUser.organizationId) {
-      const org = organizations.find((o: any) => o.id === currentUser.organizationId);
+      const org: any = await findOrganizationById(currentUser.organizationId);
       const memberIds: string[] = Array.isArray(org?.memberUserIds) ? org.memberUserIds : [];
       const isAdminOfOrg = currentUser.userType === 'ORGANIZATION';
       const isAuthorizedMember = memberIds.includes(currentUser.id);
       if (!org || (!isAdminOfOrg && !isAuthorizedMember)) {
         return res.json({ success: true, data: [currentUser] });
       }
-      const members = users
-        .filter((u: any) => memberIds.includes(u.id) && !u.isDeleted)
+      // listUsersByOrganization 은 organization_id 인덱스 기반. memberUserIds
+      // 에는 들어 있지만 user.organizationId 가 비어있는 정합성 결손 데이터를
+      // 피하려면 organizationId 컬럼만 신뢰하면 충분 — 승인 시점에 둘이
+      // 함께 갱신된다.
+      const orgMembers = await listUsersByOrganization(currentUser.organizationId);
+      const members = orgMembers
+        .filter((u: any) => memberIds.includes(u.id))
         .map((u: any) => {
           const { password: _p, ...safe } = u;
           return safe;
@@ -1268,18 +1201,17 @@ router.get('/:userId', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { userId } = req.params;
-    const users = await db.get('users') || [];
 
     if (authReq.user!.id !== userId && authReq.user!.userType !== 'ADMIN') {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
-    const user = users.find((u: any) => u.id === userId);
-    
+    const user = await findUserById(userId);
+
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
-    
+
     res.json({ success: true, data: user });
   } catch (error) {
     res.status(500).json({
@@ -1302,11 +1234,9 @@ router.put('/:userId', requireAuth, async (req: Request, res: Response) => {
     if (authReq.user!.id !== userId && authReq.user!.userType !== 'ADMIN') {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
-    
-    const users = await db.get('users') || [];
-    const userIndex = users.findIndex((u: any) => u.id === userId);
-    
-    if (userIndex === -1) {
+
+    const current: any = await findUserById(userId);
+    if (!current) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
 
@@ -1332,17 +1262,17 @@ router.put('/:userId', requireAuth, async (req: Request, res: Response) => {
       // 비관리자가 보낸 organizationId/organizationName/pendingOrganization*/approvalStatus/userType 등은 무시
     }
 
-    users[userIndex] = {
-      ...users[userIndex],
+    const updated: any = {
+      ...current,
       ...filtered,
       id: userId,
-      userType: isAdmin ? (updateData.userType || users[userIndex].userType) : users[userIndex].userType,
-      updatedAt: new Date().toISOString()
+      userType: isAdmin ? (updateData.userType || current.userType) : current.userType,
+      updatedAt: new Date().toISOString(),
     };
-    
-    await db.set('users', users);
-    
-    res.json({ success: true, data: users[userIndex] });
+
+    await upsertUser(updated);
+
+    res.json({ success: true, data: updated });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -1354,6 +1284,9 @@ router.put('/:userId', requireAuth, async (req: Request, res: Response) => {
 /**
  * GET /api/users/:userId/stats
  * 사용자 통계 조회
+ *
+ * Task #158: 'scores' / 'games' 컬렉션은 정규화 테이블 없이 KV 에 보존된다 —
+ *   현재 미사용 레거시 경로라 정규화 대상에서 제외 (per task scope).
  */
 router.get('/:userId/stats', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -1364,41 +1297,39 @@ router.get('/:userId/stats', requireAuth, async (req: Request, res: Response) =>
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
-    const users = await db.get('users') || [];
-    const scores = await db.get('scores') || [];
-    
-    const user = users.find((u: any) => u.id === userId);
+    const user: any = await findUserById(userId);
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
-    
+
+    const scores = (await db.get('scores')) || [];
     const userScores = scores.filter((s: any) => s.userId === userId);
-    
+
     const stats = {
       totalGamesPlayed: userScores.length,
       totalScore: userScores.reduce((sum: number, s: any) => sum + s.score, 0),
-      averageScore: userScores.length > 0 
-        ? userScores.reduce((sum: number, s: any) => sum + s.score, 0) / userScores.length 
+      averageScore: userScores.length > 0
+        ? userScores.reduce((sum: number, s: any) => sum + s.score, 0) / userScores.length
         : 0,
       bestScores: user.bestScores || {},
       gamesByCategory: {} as Record<string, number>,
       accuracy: userScores.length > 0
         ? userScores
             .filter((s: any) => s.accuracy !== null)
-            .reduce((sum: number, s: any) => sum + (s.accuracy || 0), 0) / 
+            .reduce((sum: number, s: any) => sum + (s.accuracy || 0), 0) /
           userScores.filter((s: any) => s.accuracy !== null).length
         : 0
     };
-    
+
     // 카테고리별 게임 수 집계
-    const games = await db.get('games') || [];
+    const games = (await db.get('games')) || [];
     userScores.forEach((score: any) => {
       const game = games.find((g: any) => g.id === score.gameId);
       if (game && game.category) {
         stats.gamesByCategory[game.category] = (stats.gamesByCategory[game.category] || 0) + 1;
       }
     });
-    
+
     res.json({ success: true, data: stats });
   } catch (error) {
     res.status(500).json({

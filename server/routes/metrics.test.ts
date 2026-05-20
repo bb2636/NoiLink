@@ -432,8 +432,10 @@ describe('POST /api/metrics/ble-abort — 운영 텔레메트리', () => {
     expect(typeof event.occurredAt).toBe('string');
     expect(Number.isFinite(new Date(event.occurredAt).getTime())).toBe(true);
     // PII 가 흘러들지 않는지 확인 — 화이트리스트 외 키는 저장되어선 안 된다.
+    // Task #158: repository insertEvent envelope 가 id + createdAt 을 항상 추가
+    // (정규화 테이블 PK / 인덱싱용). PII 와 무관한 구조 필드라 허용 목록에 포함.
     expect(Object.keys(event).sort()).toEqual(
-      ['apiMode', 'bleUnstable', 'occurredAt', 'totalMs', 'windows'].sort(),
+      ['apiMode', 'bleUnstable', 'createdAt', 'id', 'occurredAt', 'totalMs', 'windows'].sort(),
     );
   });
 
@@ -543,8 +545,10 @@ describe('POST /api/metrics/ack-banner — 운영 텔레메트리', () => {
     expect(typeof event.occurredAt).toBe('string');
     expect(Number.isFinite(new Date(event.occurredAt).getTime())).toBe(true);
     // PII 가 흘러들지 않는지 확인 — 화이트리스트 외 키는 저장되어선 안 된다.
+    // Task #158: repository insertEvent envelope 가 id + createdAt 을 항상 추가
+    // (정규화 테이블 PK / 인덱싱용). PII 와 무관한 구조 필드라 허용 목록에 포함.
     expect(Object.keys(event).sort()).toEqual(
-      ['burstCount', 'burstDurationMs', 'occurredAt', 'reason'].sort(),
+      ['burstCount', 'burstDurationMs', 'createdAt', 'id', 'occurredAt', 'reason'].sort(),
     );
   });
 

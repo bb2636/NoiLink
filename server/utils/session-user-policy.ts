@@ -1,4 +1,23 @@
 import type { User } from '@noilink/shared';
+import { findUserById } from '../db/repositories/index.js';
+
+/**
+ * Async variant — actor 와 target 만 조회 (전체 users 로드 방지).
+ * Task #158: KV `db.get('users')` 통째 로딩 제거.
+ */
+export async function userCanActOnTargetUserIdAsync(
+  actor: User,
+  targetUserId: string,
+): Promise<boolean> {
+  if (actor.id === targetUserId) return true;
+  if (actor.userType === 'ADMIN') return true;
+  if (actor.userType === 'ORGANIZATION' && actor.organizationId) {
+    const target = await findUserById(targetUserId);
+    if (!target || target.isDeleted) return false;
+    return target.organizationId === actor.organizationId;
+  }
+  return false;
+}
 
 /**
  * 세션·메트릭·리포트 등에서 actor가 targetUserId 사용자를 대리할 수 있는지

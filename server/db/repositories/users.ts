@@ -1,11 +1,13 @@
 /**
- * users repository (Task #157)
- *
- * 모든 SQL 은 parameterized.
- * 입력/반환 타입은 shared 의 User. snake_case ↔ camelCase 매핑은 row↔record helper 가 처리.
+ * users repository (Task #157 + Task #158 dual-mode)
  */
-import type { User, UserType, BrainimalType } from '@noilink/shared';
-import { getPool, rowToCamel, rowsToCamel } from './util.js';
+import type { User, UserType } from '@noilink/shared';
+import {
+  getPool, rowToCamel, isPostgresBackend,
+  kvGetCollection, kvUpsert, kvDelete,
+} from './util.js';
+
+const KV = 'users';
 
 const USER_COLUMNS = `
   id, username, email, name, nickname, phone, age, user_type, organization_id,
@@ -19,11 +21,9 @@ const USER_COLUMNS = `
 function rowToUser(row: any): User | null {
   if (!row) return null;
   const camel = rowToCamel<any>(row)!;
-  // timestamps → ISO string
   for (const k of ['createdAt', 'lastLoginAt', 'updatedAt', 'lastTrainingDate', 'pendingRequestedAt']) {
     if (camel[k] instanceof Date) camel[k] = camel[k].toISOString();
   }
-  // extra 머지 (회원 가입 후 추가된 임의 필드 보존)
   if (camel.extra && typeof camel.extra === 'object') {
     const extra = camel.extra;
     delete camel.extra;
@@ -34,36 +34,67 @@ function rowToUser(row: any): User | null {
 }
 
 export async function findUserById(id: string): Promise<User | null> {
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<User>(KV);
+    return all.find((u) => u.id === id) ?? null;
+  }
   const pool = await getPool();
   const { rows } = await pool.query(
-    `SELECT ${USER_COLUMNS} FROM users WHERE id = $1 LIMIT 1`,
-    [id]
+    `SELECT ${USER_COLUMNS} FROM users WHERE id = $1 LIMIT 1`, [id]
   );
   return rowToUser(rows[0]);
 }
 
 export async function findUserByUsername(username: string): Promise<User | null> {
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<User>(KV);
+    return all.find((u) => u.username === username) ?? null;
+  }
   const pool = await getPool();
   const { rows } = await pool.query(
-    `SELECT ${USER_COLUMNS} FROM users WHERE username = $1 LIMIT 1`,
-    [username]
+    `SELECT ${USER_COLUMNS} FROM users WHERE username = $1 LIMIT 1`, [username]
   );
   return rowToUser(rows[0]);
 }
 
 export async function findUserByEmail(email: string): Promise<User | null> {
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<User>(KV);
+    return all.find((u) => u.email === email) ?? null;
+  }
   const pool = await getPool();
   const { rows } = await pool.query(
-    `SELECT ${USER_COLUMNS} FROM users WHERE email = $1 LIMIT 1`,
-    [email]
+    `SELECT ${USER_COLUMNS} FROM users WHERE email = $1 LIMIT 1`, [email]
+  );
+  return rowToUser(rows[0]);
+}
+
+export async function findUserByPhone(phoneDigits: string): Promise<User | null> {
+  // phoneDigits 는 normalize 된 숫자 문자열 (예: "01012345678").
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<User>(KV);
+    return all.find((u: any) =>
+      u.phone && String(u.phone).replace(/[^0-9]/g, '') === phoneDigits
+    ) ?? null;
+  }
+  const pool = await getPool();
+  // DB 에 저장된 phone 도 보통 숫자 only 이지만, hyphen 포함 데이터가 섞였을 가능성을 가드.
+  const { rows } = await pool.query(
+    `SELECT ${USER_COLUMNS} FROM users
+     WHERE regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') = $1
+     LIMIT 1`,
+    [phoneDigits]
   );
   return rowToUser(rows[0]);
 }
 
 export async function findUserBySocial(
-  provider: string,
-  socialId: string
+  provider: string, socialId: string
 ): Promise<User | null> {
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<User>(KV);
+    return all.find((u: any) => u.socialProvider === provider && u.socialId === socialId) ?? null;
+  }
   const pool = await getPool();
   const { rows } = await pool.query(
     `SELECT ${USER_COLUMNS} FROM users WHERE social_provider = $1 AND social_id = $2 LIMIT 1`,
@@ -73,9 +104,13 @@ export async function findUserBySocial(
 }
 
 export async function listUsersByOrganization(
-  organizationId: string,
-  opts: { includeDeleted?: boolean } = {}
+  organizationId: string, opts: { includeDeleted?: boolean } = {}
 ): Promise<User[]> {
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<User>(KV);
+    return all.filter((u) => u.organizationId === organizationId
+      && (opts.includeDeleted || !u.isDeleted));
+  }
   const pool = await getPool();
   const where = opts.includeDeleted
     ? 'organization_id = $1'
@@ -88,6 +123,10 @@ export async function listUsersByOrganization(
 }
 
 export async function listUsersByType(userType: UserType): Promise<User[]> {
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<User>(KV);
+    return all.filter((u) => u.userType === userType);
+  }
   const pool = await getPool();
   const { rows } = await pool.query(
     `SELECT ${USER_COLUMNS} FROM users WHERE user_type = $1 ORDER BY created_at ASC`,
@@ -97,6 +136,10 @@ export async function listUsersByType(userType: UserType): Promise<User[]> {
 }
 
 export async function listAllUsers(opts: { includeDeleted?: boolean } = {}): Promise<User[]> {
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<User>(KV);
+    return opts.includeDeleted ? all : all.filter((u) => !u.isDeleted);
+  }
   const pool = await getPool();
   const where = opts.includeDeleted ? '' : 'WHERE COALESCE(is_deleted, FALSE) = FALSE';
   const { rows } = await pool.query(
@@ -106,15 +149,21 @@ export async function listAllUsers(opts: { includeDeleted?: boolean } = {}): Pro
 }
 
 export async function countUsers(opts: { includeDeleted?: boolean } = {}): Promise<number> {
+  if (!(await isPostgresBackend())) {
+    const all = await listAllUsers(opts);
+    return all.length;
+  }
   const pool = await getPool();
   const where = opts.includeDeleted ? '' : 'WHERE COALESCE(is_deleted, FALSE) = FALSE';
   const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM users ${where}`);
   return rows[0]?.n ?? 0;
 }
 
-/** insert 또는 update (id PK 기준). User 객체의 모든 알려진 컬럼을 평탄화하고
- *  나머지는 extra JSONB 에 보관. */
 export async function upsertUser(user: User): Promise<void> {
+  if (!(await isPostgresBackend())) {
+    await kvUpsert<User>(KV, user, (u) => u.id === user.id);
+    return;
+  }
   const pool = await getPool();
   const known = new Set([
     'id', 'username', 'email', 'name', 'nickname', 'phone', 'age', 'userType',
@@ -174,15 +223,41 @@ export async function upsertUser(user: User): Promise<void> {
   );
 }
 
+export async function listUsersByIds(ids: string[]): Promise<User[]> {
+  if (ids.length === 0) return [];
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<User>(KV);
+    const set = new Set(ids);
+    return all.filter((u) => set.has(u.id));
+  }
+  const pool = await getPool();
+  const { rows } = await pool.query(
+    `SELECT ${USER_COLUMNS} FROM users WHERE id = ANY($1::text[])`, [ids]
+  );
+  return rows.map((r) => rowToUser(r)!).filter(Boolean);
+}
+
 export async function deleteUser(id: string): Promise<void> {
+  if (!(await isPostgresBackend())) {
+    await kvDelete<User>(KV, (u) => u.id === id);
+    return;
+  }
   const pool = await getPool();
   await pool.query(`DELETE FROM users WHERE id = $1`, [id]);
 }
 
 export async function softDeleteUser(id: string): Promise<void> {
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<User>(KV);
+    const idx = all.findIndex((u) => u.id === id);
+    if (idx >= 0) {
+      all[idx] = { ...all[idx], isDeleted: true, updatedAt: new Date().toISOString() };
+      await import('../../db.js').then(({ db }) => db.set(KV, all));
+    }
+    return;
+  }
   const pool = await getPool();
   await pool.query(
-    `UPDATE users SET is_deleted = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-    [id]
+    `UPDATE users SET is_deleted = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]
   );
 }

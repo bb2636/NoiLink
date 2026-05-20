@@ -4,7 +4,17 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db } from '../db.js';
+import {
+  findUserById,
+  upsertUser,
+  findSessionById,
+  upsertSession,
+  listSessions,
+  listSessionsByUsers,
+  findPreviousScoredSessionForUser,
+  listUsersByOrganization,
+  listMetricsBySessionIds,
+} from '../db/repositories/index.js';
 import type { Session, SessionMeta, PhaseMeta, TrainingMode, Level, MetricsScore, User } from '@noilink/shared';
 import { isoToKstLocalDate, KST_TIME_ZONE } from '@noilink/shared';
 import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
@@ -14,14 +24,7 @@ import { withIdempotency } from '../utils/idempotency.js';
 const router = Router();
 
 /**
- * 세션 메타를 저장 전 정규화한다.
- *  - meta.partial.progressPct: 유한한 숫자만 받아 0~100 정수로 클램프.
- *    손상값(NaN/Infinity/문자열/객체/null)은 partial 키 자체를 제거해
- *    UI 가 "부분 결과 · NaN%" 같은 어색한 표기를 만들지 않게 한다.
- *  - 그 외 미상의 키는 그대로 통과시켜 시드/실험 메타 호환성 유지.
- *
- * 정규화 후 남는 키가 하나도 없으면 undefined 를 반환해 호출 측이 meta 자체를
- * 세션에서 빼버릴 수 있게 한다.
+ * 세션 메타 정규화 (자세한 사유 — 이전 구현 주석 참조).
  */
 function sanitizeSessionMeta(raw: Record<string, unknown>): SessionMeta | undefined {
   const out: Record<string, unknown> = {};
@@ -40,6 +43,19 @@ function sanitizeSessionMeta(raw: Record<string, unknown>): SessionMeta | undefi
     out[k] = v;
   }
   return Object.keys(out).length > 0 ? (out as SessionMeta) : undefined;
+}
+
+/**
+ * actor 와 target 사용자를 묶어 정책 헬퍼에 넘기는 최소 배열.
+ * 전체 사용자 로딩을 피하기 위함.
+ */
+async function actorTargetUsers(actor: User, targetUserId: string): Promise<User[]> {
+  const list: User[] = [actor];
+  if (targetUserId !== actor.id) {
+    const t = await findUserById(targetUserId);
+    if (t) list.push(t);
+  }
+  return list;
 }
 
 /**
@@ -68,7 +84,7 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
       phases,
       meta,
     } = req.body;
-    
+
     if (!userId || !mode || !bpm || !level) {
       return res.status(400).json({
         success: false,
@@ -76,7 +92,7 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
       });
     }
 
-    const users: User[] = (await db.get('users')) || [];
+    const users = await actorTargetUsers(authReq.user, userId);
     if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
       return res.status(403).json({
         success: false,
@@ -84,19 +100,11 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
       });
     }
 
-    // 인증·인가 통과 후 idempotency 보호로 감싼다.
-    // 같은 키로 재시도가 들어오면 첫 응답을 그대로 반환하고 insert/streak 갱신을 건너뛴다.
     await withIdempotency(
       req,
       res,
       { scope: 'sessions.create', userId: authReq.user.id },
       async () => {
-        // 클라이언트가 meta(예: 부분 결과 진행률)를 함께 보내면 보존하되, 알려진
-        // 키는 서버 단에서 정규화해 저장 데이터의 신뢰도를 보장한다.
-        //  - meta 자체가 객체가 아니면(잘못된 페이로드) 통째로 무시.
-        //  - meta.partial.progressPct 는 유한한 숫자만 받아 0~100 정수로 클램프한다.
-        //    (NaN/Infinity/문자열/음수/100 초과 같은 손상값은 partial 키 자체를 제거)
-        //  - 그 외 미상의 키는 그대로 통과시켜 시드/실험 메타 호환성 유지.
         const sanitizedMeta =
           meta && typeof meta === 'object' && !Array.isArray(meta)
             ? sanitizeSessionMeta(meta as Record<string, unknown>)
@@ -117,48 +125,36 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
           createdAt: new Date().toISOString(),
         };
 
-        const sessions = await db.get('sessions') || [];
-        sessions.push(session);
-        await db.set('sessions', sessions);
+        await upsertSession(session);
 
-        // 사용자 정보 업데이트 (lastTrainingDate, streak, bestStreak)
-        // 규칙:
-        //   - 오늘 처음 훈련: 어제 훈련 기록 있으면 streak + 1, 없으면 streak = 1 (중간에 빠진 경우 초기화)
-        //   - bestStreak 는 역대 최고 기록이라 절대 감소하지 않음 (리셋 시에도 보관)
-        //   - 같은 날 추가 세션: streak 변화 없음 (중복 카운트 방지)
-        // Task #151: "오늘/어제" 비교는 반드시 KST(`Asia/Seoul`) 기준 — 서버
-        //   기본 UTC 로 묶으면 KST 자정 직후(=UTC 15:00 직후) 의 두 번째 날
-        //   훈련이 같은 UTC 일자로 묶여 streak 가 1 에서 멈추는 회귀가 발생.
-        const userIndex = users.findIndex((u: User) => u.id === userId);
-        if (userIndex !== -1) {
+        // streak/bestStreak 갱신 — KST 기준.
+        const targetUser = await findUserById(userId);
+        if (targetUser) {
           const nowIso = new Date().toISOString();
           const today = isoToKstLocalDate(nowIso)!;
-          const lastDate = users[userIndex].lastTrainingDate
-            ? isoToKstLocalDate(users[userIndex].lastTrainingDate as string)
+          const lastDate = targetUser.lastTrainingDate
+            ? isoToKstLocalDate(targetUser.lastTrainingDate as string)
             : null;
 
           if (lastDate !== today) {
-            // KST 기준 어제: today(YYYY-MM-DD) 에서 1일 빼기
             const [yy, mm, dd] = today.split('-').map(Number);
             const yUtc = new Date(Date.UTC(yy, mm - 1, dd));
             yUtc.setUTCDate(yUtc.getUTCDate() - 1);
             const yesterdayStr = `${yUtc.getUTCFullYear()}-${String(yUtc.getUTCMonth() + 1).padStart(2, '0')}-${String(yUtc.getUTCDate()).padStart(2, '0')}`;
 
+            const updated: User = { ...targetUser };
             if (lastDate === yesterdayStr) {
-              users[userIndex].streak = (users[userIndex].streak || 0) + 1;
+              updated.streak = (updated.streak || 0) + 1;
             } else {
-              // 첫 훈련이거나 하루 이상 빠진 경우 → 1부터 다시 시작
-              users[userIndex].streak = 1;
+              updated.streak = 1;
             }
 
-            // 최고 기록 갱신 (보관)
-            const prevBest = users[userIndex].bestStreak || 0;
-            if (users[userIndex].streak > prevBest) {
-              users[userIndex].bestStreak = users[userIndex].streak;
+            const prevBest = updated.bestStreak || 0;
+            if ((updated.streak || 0) > prevBest) {
+              updated.bestStreak = updated.streak;
             }
-
-            users[userIndex].lastTrainingDate = new Date().toISOString();
-            await db.set('users', users);
+            updated.lastTrainingDate = new Date().toISOString();
+            await upsertUser(updated);
           }
         }
 
@@ -184,35 +180,27 @@ router.get('/user/:userId', optionalAuth, async (req: Request, res: Response) =>
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
     const { userId } = req.params;
-    const users: User[] = (await db.get('users')) || [];
+    const users = await actorTargetUsers(authReq.user, userId);
     if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
     const { limit = 50, mode, isComposite, isValid } = req.query;
-    
-    const sessions = await db.get('sessions') || [];
-    let userSessions = sessions.filter((s: Session) => s.userId === userId);
-    
-    // 필터링
+
+    let userSessions = await listSessions({
+      userId,
+      isComposite: isComposite !== undefined ? isComposite === 'true' : undefined,
+      isValid: isValid !== undefined ? isValid === 'true' : undefined,
+      order: 'desc',
+      limit: mode ? undefined : Number(limit),
+    });
+
     if (mode) {
-      userSessions = userSessions.filter((s: Session) => s.mode === mode);
+      userSessions = userSessions
+        .filter((s: Session) => s.mode === mode)
+        .slice(0, Number(limit));
     }
-    if (isComposite !== undefined) {
-      userSessions = userSessions.filter((s: Session) => s.isComposite === (isComposite === 'true'));
-    }
-    if (isValid !== undefined) {
-      userSessions = userSessions.filter((s: Session) => s.isValid === (isValid === 'true'));
-    }
-    
-    // 정렬 (최신순)
-    userSessions.sort((a: Session, b: Session) => 
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-    
-    // 제한
-    const limited = userSessions.slice(0, Number(limit));
-    
-    res.json({ success: true, data: limited });
+
+    res.json({ success: true, data: userSessions });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -223,30 +211,7 @@ router.get('/user/:userId', optionalAuth, async (req: Request, res: Response) =>
 
 /**
  * GET /api/sessions/user/:userId/previous-score?excluding=:sid
- * 비교 카드용 직전 점수 한 건만 가볍게 돌려준다 (Task #124).
- *
- * 배경:
- *  - 결과 화면(Result.tsx) 재진입과 트레이닝 종료 직후(TrainingSessionPlay.tsx) 모두
- *    "직전 점수 한 개" 만을 위해 `/sessions/user/:userId?limit=50` 으로 세션 목록
- *    전체를 받아오고 있었다. 사용자 세션이 늘수록 응답 페이로드 대부분이 버려지고,
- *    서버는 매번 정렬·필터를 수행한다.
- *  - 이 엔드포인트는 직전 점수 한 건만 골라 `previousScore` /
- *    `previousSessionId` / `previousCreatedAt` 만 담아 돌려준다.
- *
- * 정책:
- *  - 같은 userId 의 세션 중 `id !== excluding` 이고 `score` 가 숫자인 항목을
- *    createdAt 내림차순으로 정렬해 첫 항목을 직전 점수로 본다.
- *  - excluding 쿼리 파라미터가 없으면 사용자 전체 이력 중 가장 최신 점수 세션을
- *    돌려준다 (자기 자신을 제외하지 않는다).
- *  - 직전 세션이 없으면(첫 세션·점수 산출 세션 부재) 200 + 모든 필드 null.
- *    클라이언트는 이 신호로 비교 카드를 자연스럽게 숨긴다 (가짜 비교 금지).
- *  - 인증·인가는 같은 라우터의 `/user/:userId` 와 동일 (본인 또는 권한 보유자만).
- *  - Task #132: 라벨이 디바이스 시간대로 흔들리지 않도록 KST(`Asia/Seoul`)
- *    기준 `YYYY-MM-DD` 표시용 문자열(`previousScoreLocalDate`) 과 기준 시간대
- *    (`timeZone`) 도 함께 회신한다. 자정 근처(UTC 15:00 ↔ KST 다음 날 00:00)
- *    케이스도 항상 KST 의 같은 날짜로 떨어진다. 직전이 없으면
- *    `previousScoreLocalDate: null`. `timeZone` 은 응답 형태가 일정하도록
- *    항상 포함된다.
+ * 비교 카드용 직전 점수 (Task #124).
  */
 router.get(
   '/user/:userId/previous-score',
@@ -260,7 +225,7 @@ router.get(
           .json({ success: false, error: 'Authentication required' });
       }
       const { userId } = req.params;
-      const users: User[] = (await db.get('users')) || [];
+      const users = await actorTargetUsers(authReq.user, userId);
       if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
         return res.status(403).json({ success: false, error: 'Forbidden' });
       }
@@ -271,27 +236,12 @@ router.get(
           ? excludingRaw
           : null;
 
-      const sessions: Session[] = (await db.get('sessions')) || [];
-      const candidates = sessions
-        .filter(
-          (s) =>
-            s.userId === userId &&
-            (excluding === null || s.id !== excluding) &&
-            typeof s.score === 'number',
-        )
-        .sort(
-          (a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        );
-
-      const top = candidates[0];
+      const top = await findPreviousScoredSessionForUser(userId, excluding);
       const data = top
         ? {
             previousScore: top.score as number,
             previousSessionId: top.id,
             previousCreatedAt: top.createdAt,
-            // Task #132: 비교 카드 라벨이 디바이스 시간대로 흔들리지 않도록
-            // KST 기준 `YYYY-MM-DD` 표시용 문자열도 한 쌍으로 함께 회신한다.
             previousScoreLocalDate: isoToKstLocalDate(top.createdAt),
             timeZone: KST_TIME_ZONE,
           }
@@ -335,24 +285,22 @@ router.get('/organization/:organizationId/trend', optionalAuth, async (req: Requ
     if (!canAccessOrganizationResource(authReq.user, organizationId)) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
-    const users: User[] = (await db.get('users')) || [];
-    const memberIds = new Set(
-      users.filter((u) => u.organizationId === organizationId && !u.isDeleted).map((u) => u.id)
-    );
-    if (memberIds.size === 0) {
+    const members = await listUsersByOrganization(organizationId);
+    if (members.length === 0) {
       return res.json({ success: true, data: [] });
     }
 
-    const sessions: Session[] = (await db.get('sessions')) || [];
-    const metricsScores: MetricsScore[] = (await db.get('metricsScores')) || [];
-
-    const relevant = sessions.filter(
-      (s) => memberIds.has(s.userId) && s.isComposite && s.isValid
-    );
+    const memberIds = members.map((u) => u.id);
+    const relevant = await listSessionsByUsers(memberIds, { isComposite: true, isValid: true });
+    if (relevant.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+    const metricsScores = await listMetricsBySessionIds(relevant.map((s) => s.id));
+    const bySid = new Map(metricsScores.map((m) => [m.sessionId, m]));
 
     const dayMap = new Map<string, MetricsScore[]>();
     for (const s of relevant) {
-      const m = metricsScores.find((ms) => ms.sessionId === s.id);
+      const m = bySid.get(s.id);
       if (!m) continue;
       const day = s.createdAt.slice(0, 10);
       if (!dayMap.has(day)) dayMap.set(day, []);
@@ -386,7 +334,6 @@ router.get('/organization/:organizationId/trend', optionalAuth, async (req: Requ
 
 /**
  * GET /api/sessions/:sessionId
- * 특정 세션 조회
  */
 router.get('/:sessionId', optionalAuth, async (req: Request, res: Response) => {
   try {
@@ -395,18 +342,17 @@ router.get('/:sessionId', optionalAuth, async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
     const { sessionId } = req.params;
-    const sessions = await db.get('sessions') || [];
-    const session = sessions.find((s: Session) => s.id === sessionId);
-    
+    const session = await findSessionById(sessionId);
+
     if (!session) {
       return res.status(404).json({ success: false, error: 'Session not found' });
     }
 
-    const users: User[] = (await db.get('users')) || [];
+    const users = await actorTargetUsers(authReq.user, session.userId);
     if (!userCanActOnTargetUserId(authReq.user, session.userId, users)) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
-    
+
     res.json({ success: true, data: session });
   } catch (error) {
     res.status(500).json({
@@ -418,7 +364,6 @@ router.get('/:sessionId', optionalAuth, async (req: Request, res: Response) => {
 
 /**
  * PUT /api/sessions/:sessionId
- * 세션 업데이트
  */
 router.put('/:sessionId', optionalAuth, async (req: Request, res: Response) => {
   try {
@@ -428,32 +373,24 @@ router.put('/:sessionId', optionalAuth, async (req: Request, res: Response) => {
     }
     const { sessionId } = req.params;
     const updateData = req.body;
-    
-    const sessions = await db.get('sessions') || [];
-    const sessionIndex = sessions.findIndex((s: Session) => s.id === sessionId);
-    
-    if (sessionIndex === -1) {
+
+    const existing = await findSessionById(sessionId);
+    if (!existing) {
       return res.status(404).json({ success: false, error: 'Session not found' });
     }
 
-    const users: User[] = (await db.get('users')) || [];
-    const existing = sessions[sessionIndex] as Session;
+    const users = await actorTargetUsers(authReq.user, existing.userId);
     if (!userCanActOnTargetUserId(authReq.user, existing.userId, users)) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
     if (updateData.userId != null && updateData.userId !== existing.userId) {
       return res.status(403).json({ success: false, error: 'Cannot change session userId' });
     }
-    
-    sessions[sessionIndex] = {
-      ...sessions[sessionIndex],
-      ...updateData,
-      id: sessionId, // ID는 변경 불가
-    };
-    
-    await db.set('sessions', sessions);
-    
-    res.json({ success: true, data: sessions[sessionIndex] });
+
+    const merged: Session = { ...existing, ...updateData, id: sessionId };
+    await upsertSession(merged);
+
+    res.json({ success: true, data: merged });
   } catch (error) {
     res.status(500).json({
       success: false,

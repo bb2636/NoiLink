@@ -4,8 +4,12 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db } from '../db.js';
-import type { Report, User } from '@noilink/shared';
+import {
+  findUserById,
+  findReportById,
+  listReportsByUser,
+} from '../db/repositories/index.js';
+import type { User } from '@noilink/shared';
 import { generateAndSavePersonalReport } from '../services/personal-report.js';
 import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
 import { userCanActOnTargetUserId, canAccessOrganizationResource } from '../utils/session-user-policy.js';
@@ -15,6 +19,19 @@ import {
 } from '../services/organization-insight-report.js';
 
 const router = Router();
+
+/**
+ * 권한 검증용: 정책 헬퍼가 users 배열을 요구하므로 actor + target 만 담은
+ * 최소 배열을 만들어 전달한다 (전체 사용자 로딩 회피).
+ */
+async function actorTargetUsers(actor: User, targetUserId: string): Promise<User[]> {
+  const list: User[] = [actor];
+  if (targetUserId !== actor.id) {
+    const target = await findUserById(targetUserId);
+    if (target) list.push(target);
+  }
+  return list;
+}
 
 /**
  * POST /api/reports/generate
@@ -35,13 +52,13 @@ router.post('/generate', optionalAuth, async (req: Request, res: Response) => {
       });
     }
 
-    const users: User[] = (await db.get('users')) || [];
+    const target = await findUserById(userId);
+    if (!target) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    const users = [authReq.user, ...(target.id !== authReq.user.id ? [target] : [])];
     if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
-    }
-    const user = users.find((u: { id: string }) => u.id === userId);
-    if (!user) {
-      return res.status(404).json({ success: false, error: 'User not found' });
     }
 
     const report = await generateAndSavePersonalReport(userId);
@@ -144,21 +161,13 @@ router.get('/user/:userId', optionalAuth, async (req: Request, res: Response) =>
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
     const { userId } = req.params;
-    const users: User[] = (await db.get('users')) || [];
+    const users = await actorTargetUsers(authReq.user, userId);
     if (!userCanActOnTargetUserId(authReq.user, userId, users)) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
     const { limit = 10 } = req.query;
 
-    const reports = (await db.get('reports')) || [];
-    const userReports = reports
-      .filter((r: Report) => r.userId === userId)
-      .sort(
-        (a: Report, b: Report) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      )
-      .slice(0, Number(limit));
-
+    const userReports = await listReportsByUser(userId, { limit: Number(limit) });
     res.json({ success: true, data: userReports });
   } catch (error) {
     res.status(500).json({
@@ -170,7 +179,11 @@ router.get('/user/:userId', optionalAuth, async (req: Request, res: Response) =>
 
 /**
  * GET /api/reports/:reportId
- * 특정 리포트 조회
+ * 특정 리포트 조회 — 권한은 본인/관리자/소속 관리자.
+ *
+ * 인덱싱된 단일조회(`findReportById`) 로 리포트를 먼저 가져온 뒤
+ * `userCanActOnTargetUserId` 로 인가 검사 — 본인 / ADMIN / 같은 조직 매니저가
+ * 부하 사용자 리포트를 id 로 직접 열 수 있다 (기존 동작 보존).
  */
 router.get('/:reportId', optionalAuth, async (req: Request, res: Response) => {
   try {
@@ -179,14 +192,13 @@ router.get('/:reportId', optionalAuth, async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
     const { reportId } = req.params;
-    const reports = (await db.get('reports')) || [];
-    const report = reports.find((r: Report) => r.id === reportId);
 
+    const report = await findReportById(reportId);
     if (!report) {
       return res.status(404).json({ success: false, error: 'Report not found' });
     }
 
-    const users: User[] = (await db.get('users')) || [];
+    const users = await actorTargetUsers(authReq.user, report.userId);
     if (!userCanActOnTargetUserId(authReq.user, report.userId, users)) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }

@@ -1,24 +1,49 @@
 /**
- * Repository 공통 유틸 (Task #157)
+ * Repository 공통 유틸 (Task #157 + Task #158)
  *
- * - getPool(): PostgresDB 의 풀에 안전하게 접근. db.query/transaction 을 거치지 않고
- *   직접 SQL 을 실행해야 하는 repository 함수가 사용한다.
- * - rowsToObjects(): pg row → snake_case → camelCase 변환 헬퍼.
+ * Task #158: 모든 repository 함수가 dual-mode 로 동작한다.
+ *  - Postgres 백엔드: SQL 경로 사용 (성능/메모리 이득).
+ *  - Replit KV / LocalDB / 테스트 mock 백엔드: 기존 KV 컬렉션
+ *    (`db.get(collection)` / `db.set(collection, ...)`) 으로 폴백.
  *
- * 주의: 이 모듈은 Postgres 백엔드 전용이다. DB_TYPE 이 replit/local 인 환경에서
- * repository 호출은 명시적 throw 로 실패한다 — 그 환경에서는 기존 db.get/set 패턴을
- * 그대로 쓰면 된다. Repository → SQL 경로는 운영 (DB_TYPE=postgres) 에서만 활성화.
+ *  이 폴백 덕분에 service/route 코드는 모든 환경에서 repository 함수만
+ *  호출하면 되고, 테스트는 종전처럼 `vi.mock('../db.js')` 의 KV 인메모리
+ *  store 를 그대로 사용할 수 있다.
  */
 
 import type { Pool } from 'pg';
 import { db } from '../../db.js';
 
+let pgPoolCache: Pool | null = null;
+let pgChecked = false;
+let pgAvailable = false;
+
 /**
- * 현재 db 인스턴스에서 pg Pool 을 꺼낸다.
- * - PostgresDB 인 경우만 동작 (PostgresDB.getPool() 메서드 사용).
- * - 다른 어댑터 (Replit KV / LocalDB) 면 명시적으로 throw.
+ * 현재 db 백엔드가 Postgres 인지 확인하고 Pool 을 캐시한다.
+ * 결과는 프로세스 lifetime 동안 캐시된다 (DB 백엔드는 부팅 시 결정됨).
  */
+export async function isPostgresBackend(): Promise<boolean> {
+  if (pgChecked) return pgAvailable;
+  try {
+    if (!db.isConnected()) await db.connect();
+  } catch {
+    // ignore — fall through to availability check
+  }
+  const maybe = db as unknown as { getPool?: () => Promise<Pool> };
+  pgAvailable = typeof maybe.getPool === 'function';
+  pgChecked = true;
+  return pgAvailable;
+}
+
+/** 테스트용 — 캐시 무효화. */
+export function _resetBackendCacheForTests(): void {
+  pgChecked = false;
+  pgAvailable = false;
+  pgPoolCache = null;
+}
+
 export async function getPool(): Promise<Pool> {
+  if (pgPoolCache) return pgPoolCache;
   if (!db.isConnected()) {
     await db.connect();
   }
@@ -28,7 +53,8 @@ export async function getPool(): Promise<Pool> {
       'getPool(): 현재 DB 백엔드가 Postgres 가 아닙니다. DB_TYPE=postgres 환경에서만 repository 를 호출하세요.'
     );
   }
-  return await maybe.getPool();
+  pgPoolCache = await maybe.getPool();
+  return pgPoolCache;
 }
 
 /** snake_case → camelCase */
@@ -69,4 +95,51 @@ export function rowToCamel<T = any>(row: Record<string, any> | undefined): T | n
 /** row 배열을 camelCase 키로 변환 */
 export function rowsToCamel<T = any>(rows: Record<string, any>[]): T[] {
   return rows.map((r) => rowToCamel<T>(r) as T);
+}
+
+/* ───────────────────────────────────────────────────────────
+ * KV 폴백 헬퍼 — Postgres 가 아닌 백엔드 (Replit KV / Local JSON / 테스트 mock) 에서
+ * 사용. 컬렉션 이름은 기존 KV 키와 일치한다.
+ * ─────────────────────────────────────────────────────────── */
+
+export async function kvGetCollection<T = any>(collection: string): Promise<T[]> {
+  const v = await db.get(collection);
+  return Array.isArray(v) ? (v as T[]) : [];
+}
+
+export async function kvSetCollection<T = any>(
+  collection: string,
+  rows: T[]
+): Promise<void> {
+  await db.set(collection, rows);
+}
+
+/** id 기반 upsert (push or replace by predicate). */
+export async function kvUpsert<T>(
+  collection: string,
+  item: T,
+  match: (existing: T) => boolean
+): Promise<void> {
+  const all = await kvGetCollection<T>(collection);
+  const idx = all.findIndex(match);
+  if (idx >= 0) all[idx] = item;
+  else all.push(item);
+  await kvSetCollection(collection, all);
+}
+
+/** 조건 일치하는 첫 항목 제거. */
+export async function kvDelete<T>(
+  collection: string,
+  match: (existing: T) => boolean
+): Promise<void> {
+  const all = await kvGetCollection<T>(collection);
+  const filtered = all.filter((x) => !match(x));
+  if (filtered.length !== all.length) {
+    await kvSetCollection(collection, filtered);
+  }
+}
+
+/** 컬렉션 전체 삭제. */
+export async function kvClear(collection: string): Promise<void> {
+  await db.set(collection, []);
 }

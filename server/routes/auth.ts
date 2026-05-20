@@ -1,10 +1,12 @@
 import { Router, Request, Response } from 'express';
-import { db } from '../db.js';
 import type { User } from '@noilink/shared';
 import { generateToken } from '../utils/jwt.js';
 import { withKeyLock } from '../utils/key-mutex.js';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
 import { cascadeDeleteUser } from './users.js';
+import {
+  findUserById, findUserBySocial, findUserByEmail, findUserByUsername, upsertUser,
+} from '../db/repositories/index.js';
 
 /**
  * 네이버 소셜 로그인 (A안 — WebView 안에서 동일 origin 으로 처리).
@@ -186,8 +188,7 @@ router.post('/naver/withdraw/init', requireAuth, async (req: AuthRequest, res: R
 
   // 사용자가 실제 네이버 가입자인지 확인 — 아닌 경우(이메일 가입/카카오)
   // 잘못된 경로 호출이므로 거부.
-  const users: any[] = (await db.get('users')) || [];
-  const u = users.find((x) => x.id === userId);
+  const u: any = await findUserById(userId);
   if (!u || u.socialProvider !== 'naver') {
     return res
       .status(400)
@@ -287,8 +288,7 @@ router.get('/naver/callback', async (req: Request, res: Response) => {
         console.error('[naver withdraw] profile fetch failed', profileJson);
         return res.redirect('/profile?withdraw_error=profile_fetch_failed');
       }
-      const users: any[] = (await db.get('users')) || [];
-      const targetUser = users.find((u) => u.id === withdrawUserId);
+      const targetUser: any = await findUserById(withdrawUserId);
       if (!targetUser || targetUser.socialProvider !== 'naver' || targetUser.socialId !== naverId) {
         console.error('[naver withdraw] account mismatch', {
           withdrawUserId,
@@ -348,17 +348,13 @@ router.get('/naver/callback', async (req: Request, res: Response) => {
     // 3) users[] upsert (socialProvider+socialId 우선, 없으면 email 매칭으로 통합)
     let resolvedUser: User | null = null;
     await withKeyLock(KV_LOCK_USERS, async () => {
-      const users: any[] = (await db.get('users')) || [];
-      let existing = users.find(
-        (u) => u.socialProvider === 'naver' && u.socialId === naverId,
-      );
+      let existing: any = await findUserBySocial('naver', naverId);
       if (!existing && naverEmail) {
         // 같은 이메일로 이미 가입된 사용자가 있으면 소셜 식별자만 연결한다.
-        existing = users.find((u) => u.email && u.email === naverEmail);
+        existing = await findUserByEmail(naverEmail);
         if (existing) {
           existing.socialProvider = 'naver';
           existing.socialId = naverId;
-          existing.lastLoginAt = new Date().toISOString();
         }
       }
 
@@ -379,16 +375,16 @@ router.get('/naver/callback', async (req: Request, res: Response) => {
         };
         // username 충돌 회피 (네이버 닉네임이 이미 다른 계정과 겹치는 경우 suffix 추가)
         let suffix = 0;
-        while (users.find((u) => u.username === newUser.username)) {
+        while (await findUserByUsername(newUser.username)) {
           suffix += 1;
           newUser.username = `${naverNickname}_${suffix}`;
         }
-        users.push(newUser);
+        await upsertUser(newUser);
         existing = newUser;
       } else {
         existing.lastLoginAt = new Date().toISOString();
+        await upsertUser(existing);
       }
-      await db.set('users', users);
       resolvedUser = existing as User;
     });
 
@@ -542,16 +538,12 @@ router.get('/kakao/callback', async (req: Request, res: Response) => {
     // 3) users[] upsert (socialProvider+socialId 우선, 없으면 email 매칭)
     let resolvedUser: User | null = null;
     await withKeyLock(KV_LOCK_USERS, async () => {
-      const users: any[] = (await db.get('users')) || [];
-      let existing = users.find(
-        (u) => u.socialProvider === 'kakao' && u.socialId === kakaoId,
-      );
+      let existing: any = await findUserBySocial('kakao', kakaoId);
       if (!existing && kakaoEmail) {
-        existing = users.find((u) => u.email && u.email === kakaoEmail);
+        existing = await findUserByEmail(kakaoEmail);
         if (existing) {
           existing.socialProvider = 'kakao';
           existing.socialId = kakaoId;
-          existing.lastLoginAt = new Date().toISOString();
         }
       }
 
@@ -570,11 +562,11 @@ router.get('/kakao/callback', async (req: Request, res: Response) => {
           lastLoginAt: new Date().toISOString(),
         };
         let suffix = 0;
-        while (users.find((u) => u.username === newUser.username)) {
+        while (await findUserByUsername(newUser.username)) {
           suffix += 1;
           newUser.username = `${kakaoNickname}_${suffix}`;
         }
-        users.push(newUser);
+        await upsertUser(newUser);
         existing = newUser;
       } else {
         existing.lastLoginAt = new Date().toISOString();
@@ -589,8 +581,8 @@ router.get('/kakao/callback', async (req: Request, res: Response) => {
         if (kakaoEmail && !existing.email) {
           existing.email = kakaoEmail;
         }
+        await upsertUser(existing);
       }
-      await db.set('users', users);
       resolvedUser = existing as User;
     });
 

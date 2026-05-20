@@ -2,7 +2,7 @@
  * 인증 미들웨어
  */
 import { Request, Response, NextFunction } from 'express';
-import { db } from '../db.js';
+import { findUserById } from '../db/repositories/index.js';
 import { verifyToken, extractTokenFromHeader } from '../utils/jwt.js';
 import type { User } from '@noilink/shared';
 
@@ -15,35 +15,32 @@ export interface AuthRequest extends Request {
  */
 export async function requireAdmin(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    // 먼저 JWT 토큰으로 인증 시도
     const authHeader = req.headers.authorization;
     const token = extractTokenFromHeader(authHeader);
-    
-    let user: User | undefined;
-    
+
+    let user: User | null = null;
+
     if (token) {
       const payload = verifyToken(token);
       if (payload) {
-        const users = await db.get('users') || [];
-        user = users.find((u: any) => u.id === payload.userId) as User;
+        user = await findUserById(payload.userId);
       }
     }
-    
-    
+
     if (!user) {
       return res.status(401).json({
         success: false,
         error: 'Authentication required'
       });
     }
-    
+
     if (user.userType !== 'ADMIN') {
       return res.status(403).json({
         success: false,
         error: 'Admin access required'
       });
     }
-    
+
     req.user = user;
     next();
   } catch (error) {
@@ -61,14 +58,14 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
   try {
     const authHeader = req.headers.authorization;
     const token = extractTokenFromHeader(authHeader);
-    
+
     if (!token) {
       return res.status(401).json({
         success: false,
         error: 'Authentication required. Please provide a valid token.'
       });
     }
-    
+
     const payload = verifyToken(token);
     if (!payload) {
       return res.status(401).json({
@@ -76,18 +73,17 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
         error: 'Invalid or expired token'
       });
     }
-    
-    const users = await db.get('users') || [];
-    const user = users.find((u: any) => u.id === payload.userId);
-    
+
+    const user = await findUserById(payload.userId);
+
     if (!user) {
       return res.status(401).json({
         success: false,
         error: 'User not found'
       });
     }
-    
-    req.user = user as User;
+
+    req.user = user;
     next();
   } catch (error) {
     res.status(500).json({
@@ -104,19 +100,17 @@ export async function optionalAuth(req: AuthRequest, res: Response, next: NextFu
   try {
     const authHeader = req.headers.authorization;
     const token = extractTokenFromHeader(authHeader);
-    
+
     if (token) {
       const payload = verifyToken(token);
       if (payload) {
-        const users = await db.get('users') || [];
-        const user = users.find((u: any) => u.id === payload.userId);
+        const user = await findUserById(payload.userId);
         if (user) {
-          req.user = user as User;
+          req.user = user;
         }
       }
     }
-    
-    
+
     next();
   } catch (error) {
     next();

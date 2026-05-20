@@ -1,13 +1,18 @@
 /**
  * 기관 인사이트 리포트 생성·조회
  */
-import { db } from '../db.js';
+import {
+  listUsersByOrganization,
+  listSessionsByUsers,
+  listMetricsByUsers,
+  insertOrgInsightReport,
+  findLatestOrgInsightReport,
+} from '../db/repositories/index.js';
 import type {
   BrainimalType,
   MetricsScore,
   OrganizationInsightReport,
   Session,
-  User,
 } from '@noilink/shared';
 import {
   buildMetricEvidenceCards,
@@ -78,14 +83,15 @@ function latestMetricsForUser(
 export async function generateAndSaveOrganizationInsightReport(
   organizationId: string
 ): Promise<OrganizationInsightReport | null> {
-  const users: User[] = (await db.get('users')) || [];
-  const members = users.filter(
-    (u) => u.organizationId === organizationId && !u.isDeleted
-  );
+  const members = await listUsersByOrganization(organizationId);
   if (members.length === 0) return null;
 
-  const sessions: Session[] = (await db.get('sessions')) || [];
-  const metricsScores: MetricsScore[] = (await db.get('metricsScores')) || [];
+  const memberIds = members.map((m) => m.id);
+  const sessions = await listSessionsByUsers(memberIds, {
+    isComposite: true,
+    isValid: true,
+  });
+  const metricsScores = await listMetricsByUsers(memberIds);
 
   const latestList: MetricsScore[] = [];
   for (const m of members) {
@@ -194,23 +200,12 @@ export async function generateAndSaveOrganizationInsightReport(
     createdAt: new Date().toISOString(),
   };
 
-  const store: OrganizationInsightReport[] =
-    (await db.get('organizationInsightReports')) || [];
-  store.push(report);
-  await db.set('organizationInsightReports', store);
-
+  await insertOrgInsightReport(report);
   return report;
 }
 
 export async function getLatestOrganizationInsightReport(
   organizationId: string
 ): Promise<OrganizationInsightReport | null> {
-  const store: OrganizationInsightReport[] =
-    (await db.get('organizationInsightReports')) || [];
-  const mine = store
-    .filter((r) => r.organizationId === organizationId)
-    .sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-  return mine[0] || null;
+  return findLatestOrgInsightReport(organizationId);
 }
