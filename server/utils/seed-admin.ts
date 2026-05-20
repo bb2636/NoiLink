@@ -1,7 +1,24 @@
-import { db } from '../db.js';
 import { hashPassword } from './password.js';
 import { withKeyLock } from './key-mutex.js';
 import type { MetricsScore, Session, User } from '@noilink/shared';
+import {
+  findUserByEmail,
+  findUserById,
+  findUserByUsername,
+  listAllUsers,
+  listUsersByOrganization,
+  upsertUser,
+} from '../db/repositories/users.js';
+import {
+  findPasswordByUserId,
+  upsertPassword,
+} from '../db/repositories/passwords.js';
+import {
+  findOrganizationById,
+  upsertOrganization,
+} from '../db/repositories/organizations.js';
+import { listSessions, upsertSession } from '../db/repositories/sessions.js';
+import { upsertMetricsScore } from '../db/repositories/metrics-scores.js';
 
 const MS_DAY = 24 * 60 * 60 * 1000;
 
@@ -71,21 +88,19 @@ async function seedUser(opts: {
   organizationName?: string;
   extra?: Partial<User>;
 }): Promise<void> {
-  // 락 안에서 존재 확인 + push. 이미 있으면 기존 user 를 반환해 password 보정 단계로 진입.
+  // 락 안에서 존재 확인 + upsert. 이미 있으면 기존 user 를 반환해 password 보정 단계로 진입.
   const { user, justCreated } = await withKeyLock(
     KV_LOCK.USERS,
     async (): Promise<{ user: User | null; justCreated: boolean }> => {
-      const users = (await db.get('users')) || [];
-      const exists = users.find(
-        (u: any) =>
-          u.email === opts.email ||
-          (u.username === opts.username && u.userType === opts.userType),
-      );
-      if (exists) return { user: exists as User, justCreated: false };
+      const byEmail = await findUserByEmail(opts.email);
+      if (byEmail) return { user: byEmail, justCreated: false };
+      const byUsername = await findUserByUsername(opts.username);
+      if (byUsername && byUsername.userType === opts.userType) {
+        return { user: byUsername, justCreated: false };
+      }
 
       const newUser: User = createUserShape(opts);
-      users.push(newUser);
-      await db.set('users', users);
+      await upsertUser(newUser);
       return { user: newUser, justCreated: true };
     },
   );
@@ -94,20 +109,18 @@ async function seedUser(opts: {
 
   // password 가 없으면(이전 시드 중 크래시 등) 생성, 있으면 약한 시드 password 에 한해 mustChange 보정.
   await withKeyLock(KV_LOCK.PASSWORDS, async () => {
-    const passwords = (await db.get('passwords')) || [];
-    const existingPwd = passwords.find((p: any) => p.userId === user.id);
+    const existingPwd = await findPasswordByUserId(user.id);
     const mustChange = isWeakSeedPassword(opts.password);
 
     if (!existingPwd) {
       const hashed = await hashPassword(opts.password);
-      passwords.push({
+      await upsertPassword({
         userId: user.id,
         email: opts.email,
-        password: hashed,
+        passwordHash: hashed,
         mustChange,
         createdAt: new Date().toISOString(),
       });
-      await db.set('passwords', passwords);
       console.log(
         `✅ ${opts.userType} account ${justCreated ? 'created' : 'password recovered'}: ${opts.email}` +
           (mustChange ? ' ⚠️  (weak default password — mustChange=true)' : ''),
@@ -116,8 +129,11 @@ async function seedUser(opts: {
     }
 
     if (mustChange && existingPwd.mustChange !== true) {
-      existingPwd.mustChange = true;
-      await db.set('passwords', passwords);
+      await upsertPassword({
+        ...existingPwd,
+        mustChange: true,
+        updatedAt: new Date().toISOString(),
+      });
       console.log(`⚠️  mustChange=true 보정: ${opts.email}`);
     } else if (!justCreated) {
       console.log(`✅ ${opts.userType} account already exists: ${opts.email}`);
@@ -166,23 +182,21 @@ async function patchUserMockData(
   patch: Partial<User>,
 ): Promise<void> {
   await withKeyLock(KV_LOCK.USERS, async () => {
-    const users = (await db.get('users')) || [];
-    const idx = users.findIndex((u: any) => u.email === email);
-    if (idx === -1) return;
-    const current = users[idx];
+    const current = await findUserByEmail(email);
+    if (!current) return;
     let changed = false;
-    const next = { ...current };
+    const next: any = { ...current };
     for (const [k, v] of Object.entries(patch)) {
       if (v === undefined || v === null) continue;
-      if (current[k] === undefined || current[k] === null || current[k] === 0) {
+      const cur = (current as any)[k];
+      if (cur === undefined || cur === null || cur === 0) {
         next[k] = v;
         changed = true;
       }
     }
     if (changed) {
       next.updatedAt = new Date().toISOString();
-      users[idx] = next;
-      await db.set('users', users);
+      await upsertUser(next);
       console.log(`✅ Mock data patched for ${email}`);
     }
   });
@@ -195,7 +209,7 @@ async function patchUserMockData(
  * - 조직 레코드의 memberUserIds 에 함께 등록.
  */
 /**
- * 마이그레이션: 이미 KV 에 시드된 demo-org 멤버(@demo-org.local)가
+ * 마이그레이션: 이미 시드된 demo-org 멤버(@demo-org.local)가
  * userType: 'ORGANIZATION' + approvalStatus: 'APPROVED' 로 들어가 있으면
  * PERSONAL 로 강제 패치한다. 관리자 페이지의 "기업회원" 탭에는 조직 admin
  * (org@org.com) 한 명만 남게 된다.
@@ -205,15 +219,13 @@ async function patchUserMockData(
  */
 async function migrateDemoOrgMembersToPersonal(): Promise<void> {
   await withKeyLock(KV_LOCK.USERS, async () => {
-    const users = (await db.get('users')) || [];
-    let demoCount = 0;
+    const all = await listAllUsers({ includeDeleted: true });
+    const demoMembers = all.filter(
+      (u) => typeof u.email === 'string' && u.email.endsWith('@demo-org.local'),
+    );
+    const demoCount = demoMembers.length;
     let changed = 0;
-    for (let i = 0; i < users.length; i += 1) {
-      const u = users[i];
-      const isDemoMember =
-        typeof u?.email === 'string' && u.email.endsWith('@demo-org.local');
-      if (!isDemoMember) continue;
-      demoCount += 1;
+    for (const u of demoMembers) {
       const next: any = { ...u };
       let touched = false;
       if (u.userType === 'ORGANIZATION') {
@@ -226,12 +238,11 @@ async function migrateDemoOrgMembersToPersonal(): Promise<void> {
       }
       if (touched) {
         next.updatedAt = new Date().toISOString();
-        users[i] = next;
+        await upsertUser(next);
         changed += 1;
       }
     }
     if (changed > 0) {
-      await db.set('users', users);
       console.log(`✅ Demo org members migrated to PERSONAL: ${changed}명 (총 ${demoCount}명 중)`);
     } else {
       console.log(`ℹ️  Demo org members migration: 변경 없음 (총 ${demoCount}명, 모두 이미 PERSONAL)`);
@@ -263,38 +274,31 @@ async function seedDemoOrgPersonalMember(): Promise<void> {
   // seedUser 는 신규 생성 시에만 extra 가 적용되고, 이후 시연 정합을 위해
   // 본 계정의 streak / lastTrainingDate 는 매번 강제 동기화한다.
   await withKeyLock(KV_LOCK.USERS, async () => {
-    const users = (await db.get('users')) || [];
-    const idx = users.findIndex((u: any) => u.email === ORG_MEMBER_EMAIL);
-    if (idx === -1) return;
-    users[idx] = {
-      ...users[idx],
+    const member = await findUserByEmail(ORG_MEMBER_EMAIL);
+    if (!member) return;
+    await upsertUser({
+      ...member,
       streak: 5,
-      bestStreak: Math.max(users[idx].bestStreak ?? 0, 14),
+      bestStreak: Math.max((member as any).bestStreak ?? 0, 14),
       lastTrainingDate: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-    };
-    await db.set('users', users);
+    });
   });
 
   // 조직 memberUserIds 에 추가 — 운영 코드(approval 엔드포인트)와 동일하게 USERS 락으로 보호하여
   // organizations RMW 가 다른 cross-collection write 와 직렬화되도록 한다.
   await withKeyLock(KV_LOCK.USERS, async () => {
-    const users = (await db.get('users')) || [];
-    const member = users.find((u: any) => u.email === ORG_MEMBER_EMAIL);
+    const member = await findUserByEmail(ORG_MEMBER_EMAIL);
     if (!member) return;
-    const organizations = (await db.get('organizations')) || [];
-    const idx = organizations.findIndex((o: any) => o.id === ORG_ID);
-    if (idx === -1) return;
-    const memberIds: string[] = Array.isArray(organizations[idx].memberUserIds)
-      ? organizations[idx].memberUserIds
-      : [];
+    const org = await findOrganizationById(ORG_ID);
+    if (!org) return;
+    const memberIds: string[] = Array.isArray(org.memberUserIds) ? org.memberUserIds : [];
     if (memberIds.includes(member.id)) return;
-    organizations[idx] = {
-      ...organizations[idx],
+    await upsertOrganization({
+      ...org,
       memberUserIds: [...memberIds, member.id],
       updatedAt: new Date().toISOString(),
-    };
-    await db.set('organizations', organizations);
+    });
     console.log(`✅ Personal org member linked to ${ORG_ID}: ${ORG_MEMBER_EMAIL}`);
   });
 }
@@ -336,14 +340,13 @@ async function seedDemoOrgMembers(): Promise<void> {
   let memberIds: string[] = [];
   let adminUserId: string | undefined;
   await withKeyLock(KV_LOCK.USERS, async () => {
-    const users: User[] = (await db.get('users')) || [];
+    const orgUsers = await listUsersByOrganization(ORG_ID, { includeDeleted: true });
+    const byUsername = new Map(orgUsers.map((u) => [u.username, u]));
     let added = 0;
     for (const m of DEMO_ORG_MEMBERS) {
-      const exists = users.find(
-        (u: any) => u.username === m.username && u.organizationId === ORG_ID,
-      );
+      const exists = byUsername.get(m.username);
       if (exists) {
-        memberIds.push((exists as any).id);
+        memberIds.push(exists.id);
         continue;
       }
       const now = Date.now();
@@ -370,14 +373,13 @@ async function seedDemoOrgMembers(): Promise<void> {
         lastLoginAt: lastTraining,
         updatedAt: undefined,
       };
-      users.push(newUser);
+      await upsertUser(newUser);
       memberIds.push(newUser.id);
       added += 1;
     }
-    const admin = users.find((u: any) => u.email === ORG_EMAIL);
-    if (admin) adminUserId = (admin as any).id;
+    const admin = await findUserByEmail(ORG_EMAIL);
+    if (admin) adminUserId = admin.id;
     if (added > 0) {
-      await db.set('users', users);
       console.log(`✅ Demo org members seeded: ${added}명 (organizationId=${ORG_ID})`);
     } else {
       console.log(`✅ Demo org members already present (organizationId=${ORG_ID})`);
@@ -388,26 +390,20 @@ async function seedDemoOrgMembers(): Promise<void> {
   // 다른 cross-collection 변경(승인 등)과 직렬화한다. 기존 memberUserIds 는 보존(union).
   await withKeyLock(KV_LOCK.USERS, async () => {
     const seededIds = adminUserId ? [adminUserId, ...memberIds] : memberIds;
-    const organizations: any[] = (await db.get('organizations')) || [];
-    const idx = organizations.findIndex((o: any) => o.id === ORG_ID);
+    const existing = await findOrganizationById(ORG_ID);
     const existingIds: string[] =
-      idx >= 0 && Array.isArray(organizations[idx].memberUserIds)
-        ? organizations[idx].memberUserIds
-        : [];
+      existing && Array.isArray(existing.memberUserIds) ? existing.memberUserIds : [];
     const merged = Array.from(new Set([...existingIds, ...seededIds]));
     const orgRecord = {
       id: ORG_ID,
       name: ORG_NAME,
       memberUserIds: merged,
-      createdAt: idx >= 0 ? organizations[idx].createdAt : new Date().toISOString(),
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    if (idx >= 0) {
-      organizations[idx] = { ...organizations[idx], ...orgRecord };
-    } else {
-      organizations.push(orgRecord);
-    }
-    await db.set('organizations', organizations);
+    await upsertOrganization(
+      existing ? { ...existing, ...orgRecord } : (orgRecord as any),
+    );
   });
 }
 
@@ -420,35 +416,35 @@ async function renameDemoOrganization(): Promise<void> {
   await withKeyLock(KV_LOCK.USERS, async () => {
     let changed = false;
 
-    const organizations = (await db.get('organizations')) || [];
-    const orgIdx = organizations.findIndex((o: any) => o.id === ORG_ID);
-    if (orgIdx >= 0 && organizations[orgIdx].name !== ORG_NAME) {
-      organizations[orgIdx] = {
-        ...organizations[orgIdx],
+    const org = await findOrganizationById(ORG_ID);
+    if (org && org.name !== ORG_NAME) {
+      await upsertOrganization({
+        ...org,
         name: ORG_NAME,
         updatedAt: new Date().toISOString(),
-      };
-      await db.set('organizations', organizations);
+      });
       changed = true;
     }
 
-    const users = (await db.get('users')) || [];
-    let userChanged = false;
-    for (let i = 0; i < users.length; i += 1) {
-      const u = users[i];
+    // organizationId 또는 pendingOrganizationId 가 ORG_ID 인 모든 사용자에서
+    // organizationName / pendingOrganizationName 을 동기화.
+    const allUsers = await listAllUsers({ includeDeleted: true });
+    for (const u of allUsers) {
+      let touched = false;
+      const next: any = { ...u };
       if (u.organizationId === ORG_ID && u.organizationName !== ORG_NAME) {
-        users[i] = { ...u, organizationName: ORG_NAME, updatedAt: new Date().toISOString() };
-        userChanged = true;
+        next.organizationName = ORG_NAME;
+        next.updatedAt = new Date().toISOString();
+        touched = true;
       }
-      // 가입 신청 중인 pendingOrganizationName 도 함께 동기화
-      if (u.pendingOrganizationId === ORG_ID && u.pendingOrganizationName !== ORG_NAME) {
-        users[i] = { ...users[i], pendingOrganizationName: ORG_NAME };
-        userChanged = true;
+      if ((u as any).pendingOrganizationId === ORG_ID && (u as any).pendingOrganizationName !== ORG_NAME) {
+        next.pendingOrganizationName = ORG_NAME;
+        touched = true;
       }
-    }
-    if (userChanged) {
-      await db.set('users', users);
-      changed = true;
+      if (touched) {
+        await upsertUser(next);
+        changed = true;
+      }
     }
 
     if (changed) {
@@ -485,16 +481,13 @@ const TEST_USER_TRAINING: Array<{
 
 async function seedTestUserTrainings(): Promise<void> {
   await withKeyLock(KV_LOCK.USERS, async () => {
-    const users: User[] = (await db.get('users')) || [];
-    const test = users.find((u: any) => u.email === TEST_EMAIL) as User | undefined;
+    const test = await findUserByEmail(TEST_EMAIL);
     if (!test) return;
 
-    const sessions: Session[] = (await db.get('sessions')) || [];
-    const metricsScores: MetricsScore[] = (await db.get('metricsScores')) || [];
-
     const seedMarker = 'test-10d-v1';
-    const alreadySeeded = sessions.some(
-      (s: any) => s.userId === test.id && s.meta?.seed === seedMarker,
+    const existing = await listSessions({ userId: test.id });
+    const alreadySeeded = existing.some(
+      (s: any) => s.meta?.seed === seedMarker,
     );
     if (alreadySeeded) {
       console.log('✅ test 사용자 10일치 트레이닝 시드 이미 존재');
@@ -506,7 +499,7 @@ async function seedTestUserTrainings(): Promise<void> {
     for (const t of TEST_USER_TRAINING) {
       const createdAt = new Date(now - t.daysAgo * MS_DAY).toISOString();
       const id = `seed_test_${t.daysAgo}_${now}_${Math.random().toString(36).slice(2, 6)}`;
-      sessions.push({
+      const session: Session = {
         id,
         userId: test.id,
         mode: 'COMPOSITE',
@@ -519,8 +512,9 @@ async function seedTestUserTrainings(): Promise<void> {
         phases: [],
         meta: { seed: seedMarker },
         createdAt,
-      });
-      metricsScores.push({
+      };
+      await upsertSession(session);
+      const metric: MetricsScore = {
         sessionId: id,
         userId: test.id,
         memory: t.metrics.memory,
@@ -531,29 +525,26 @@ async function seedTestUserTrainings(): Promise<void> {
         endurance: t.metrics.endurance,
         rhythm: t.score,
         createdAt,
-      });
+      };
+      await upsertMetricsScore(metric);
       added += 1;
     }
 
-    await db.set('sessions', sessions);
-    await db.set('metricsScores', metricsScores);
-
     // streak/lastTrainingDate/brainAge 등 사용자 필드 동기화
-    const idx = users.findIndex((u: any) => u.id === test.id);
-    if (idx >= 0) {
-      users[idx] = {
-        ...users[idx],
+    const current = await findUserById(test.id);
+    if (current) {
+      await upsertUser({
+        ...current,
         streak: 5,
-        bestStreak: Math.max((users[idx] as any).bestStreak ?? 0, 5),
+        bestStreak: Math.max((current as any).bestStreak ?? 0, 5),
         lastTrainingDate: new Date(now).toISOString(),
-        age: (users[idx] as any).age ?? 35,
-        brainAge: (users[idx] as any).brainAge ?? 32,
-        previousBrainAge: (users[idx] as any).previousBrainAge ?? 35,
-        brainimalType: (users[idx] as any).brainimalType ?? 'FOX_BALANCED',
-        brainimalConfidence: (users[idx] as any).brainimalConfidence ?? 0.86,
+        age: (current as any).age ?? 35,
+        brainAge: (current as any).brainAge ?? 32,
+        previousBrainAge: (current as any).previousBrainAge ?? 35,
+        brainimalType: (current as any).brainimalType ?? 'FOX_BALANCED',
+        brainimalConfidence: (current as any).brainimalConfidence ?? 0.86,
         updatedAt: new Date().toISOString(),
-      };
-      await db.set('users', users);
+      });
     }
 
     console.log(`✅ test 사용자 ${added}건 트레이닝 시드 완료 (합계 ${added * 24}분 = 4시간)`);
@@ -563,22 +554,21 @@ async function seedTestUserTrainings(): Promise<void> {
 async function backfillMustChangeFlag(): Promise<void> {
   // users는 read-only이므로 락 불필요. passwords는 RMW이므로 PASSWORDS 락으로 보호.
   await withKeyLock(KV_LOCK.PASSWORDS, async () => {
-    const users = await db.get('users') || [];
-    const passwords = await db.get('passwords') || [];
     const targets = [ADMIN_EMAIL, TEST_EMAIL];
-    let changed = false;
     for (const email of targets) {
-      const u = users.find((x: any) => x.email === email);
+      const u = await findUserByEmail(email);
       if (!u) continue;
-      const p = passwords.find((x: any) => x.userId === u.id);
-      if (p && p.mustChange === undefined) {
-        p.mustChange = true; // 약한 시드라고 가정 (안전하게 강제 변경 안내)
-        changed = true;
+      const p = await findPasswordByUserId(u.id);
+      // KV 마이그레이션 전(레거시) password 레코드는 mustChange 가 명시 안 됐고
+      // repo 가 false 로 normalize 하므로, 명시적으로 true 가 아니면 안전하게 true 보정.
+      if (p && p.mustChange !== true) {
+        await upsertPassword({
+          ...p,
+          mustChange: true,
+          updatedAt: new Date().toISOString(),
+        });
         console.log(`⚠️  [migration] mustChange=true 부여: ${email}`);
       }
-    }
-    if (changed) {
-      await db.set('passwords', passwords);
     }
   });
 }
