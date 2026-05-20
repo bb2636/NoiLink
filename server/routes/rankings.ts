@@ -127,7 +127,7 @@ function sortScratch(a: RankScratch, b: RankScratch, type: RankingType): number 
   return new Date(a._tie).getTime() - new Date(b._tie).getTime();
 }
 
-async function calculateRankings(): Promise<void> {
+export async function calculateRankings(): Promise<void> {
   const users = await listAllUsers();
   const now = Date.now();
   const fourteenAgo = now - 14 * MS_DAY;

@@ -8,6 +8,8 @@ import { db } from './db.js';
 import { initializeNormConfig } from './init-norm.js';
 import { runMigrations } from './utils/migration.js';
 import { seedAdminAccount } from './utils/seed-admin.js';
+import { startRankingsRefreshScheduler } from './services/rankings-cache.js';
+import { calculateRankings } from './routes/rankings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -117,6 +119,10 @@ async function bootstrap(): Promise<void> {
     // init 실패 시 listen 하지 않음 (잘못된 상태로 트래픽 받지 않도록)
     process.exit(1);
   }
+  // Task #168 — 부팅 후 랭킹 캐시 warmup 배치 등록.
+  // RANKINGS_REFRESH_INTERVAL_MS 환경변수로 주기 조절 (0/미설정 → 비활성).
+  startRankingsRefreshScheduler(() => calculateRankings());
+
   app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`🚀 Server is running on port ${PORT}`);
   });
