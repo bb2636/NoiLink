@@ -26,26 +26,26 @@ export class PostgresDB implements IDatabase {
       const database = url.pathname.slice(1).split('?')[0] || 'postgres';
       const user = url.username || 'postgres';
       const password = url.password || '';
-      
+      const sslmode = url.searchParams.get('sslmode');
+      // sslmode=disable 이면 SSL 끄기, 그 외엔 self-signed 허용 SSL
+      const ssl = sslmode === 'disable' ? false : { rejectUnauthorized: false };
+
       this.pool = new Pool({
         host,
         port,
         database,
         user,
         password,
-        ssl: {
-          rejectUnauthorized: false,
-        },
+        ssl,
         connectionTimeoutMillis: 15000,
         idleTimeoutMillis: 30000,
       });
     } catch (error) {
       // URL 파싱 실패 시 connectionString 사용
+      const sslDisabled = /[\?&]sslmode=disable(\b|&)/.test(connString);
       this.pool = new Pool({
         connectionString: connString,
-        ssl: {
-          rejectUnauthorized: false,
-        },
+        ssl: sslDisabled ? false : { rejectUnauthorized: false },
         connectionTimeoutMillis: 15000,
         idleTimeoutMillis: 30000,
       });
