@@ -9,6 +9,7 @@
  * 4. 그 외에는 로컬 JSON 파일
  */
 
+import type { Pool } from 'pg';
 import type { IDatabase } from './db/interface.js';
 
 let db: IDatabase | null = null;
@@ -115,4 +116,22 @@ const dbWrapper: IDatabase = {
   },
 };
 
-export { dbWrapper as db };
+/**
+ * Task #157: Postgres 백엔드의 pg Pool 에 안전하게 접근.
+ * 다른 백엔드(Replit KV / LocalDB) 에서 호출하면 throw.
+ * Repository 함수가 raw SQL/트랜잭션을 위해 사용한다.
+ */
+async function getPool(): Promise<Pool> {
+  if (!db) db = await dbPromise;
+  const maybe = db as unknown as { getPool?: () => Promise<Pool> };
+  if (typeof maybe.getPool !== 'function') {
+    throw new Error(
+      'db.getPool(): 현재 DB 백엔드가 Postgres 가 아닙니다. DB_TYPE=postgres 환경에서만 호출하세요.'
+    );
+  }
+  return await maybe.getPool();
+}
+
+const dbExport = Object.assign(dbWrapper, { getPool });
+
+export { dbExport as db };

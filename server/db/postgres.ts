@@ -4,7 +4,14 @@
  */
 
 import { Pool } from 'pg';
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import type { IDatabase } from './interface.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const SCHEMA_SQL_PATH = path.join(__dirname, 'schema.sql');
 
 export class PostgresDB implements IDatabase {
   private pool: Pool | null = null;
@@ -112,20 +119,17 @@ export class PostgresDB implements IDatabase {
    */
   private async initTables(): Promise<void> {
     if (!this.pool) throw new Error('Not connected');
-    
-    // Key-Value 스토어 테이블
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS kv_store (
-        key VARCHAR(255) PRIMARY KEY,
-        value JSONB NOT NULL,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    
-    // 인덱스 생성
-    await this.pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_kv_key ON kv_store(key)
-    `);
+
+    // Task #157: schema.sql 을 부팅 시 일괄 적용. 모든 CREATE 가 IF NOT EXISTS 라 멱등.
+    // kv_store 도 그 안에 포함되어 있음 (idempotency / normConfig / migrations 전용 유지).
+    let schemaSql: string;
+    try {
+      schemaSql = await fs.readFile(SCHEMA_SQL_PATH, 'utf-8');
+    } catch (err) {
+      console.error('❌ schema.sql 로드 실패:', err);
+      throw err;
+    }
+    await this.pool.query(schemaSql);
   }
   
   /**
@@ -268,5 +272,18 @@ export class PostgresDB implements IDatabase {
     if (!this.connected) {
       await this.connect();
     }
+  }
+
+  /**
+   * Task #157: repository 함수가 raw SQL/transaction 을 위해 pg Pool 에 직접 접근할 때 사용.
+   * Postgres 백엔드에서만 호출 가능 — 다른 백엔드는 이 메서드를 갖지 않으므로
+   * util.getPool() 이 throw 한다.
+   */
+  async getPool(): Promise<Pool> {
+    await this.ensureConnected();
+    if (!this.pool) {
+      throw new Error('PostgresDB: pool 이 초기화되지 않았습니다');
+    }
+    return this.pool;
   }
 }
