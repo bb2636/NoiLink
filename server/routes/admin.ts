@@ -12,6 +12,8 @@ import {
   RECOVERY_COACHING_MIN_SESSIONS,
 } from '@noilink/shared';
 import { getBleStabilityRemoteConfigStatus } from './config.js';
+import { clearRankingsAndCache } from './rankings.js';
+import { listRankings } from '../db/repositories/index.js';
 import {
   listAllUsers, listUsersByType, listOrganizations, listSessions, countAllSessions,
   upsertUser, listAllRawMetrics,
@@ -576,7 +578,7 @@ router.post('/reset-training-data', async (req: AuthRequest, res: Response) => {
       countAllDailyConditions(), countAllDailyMissions(),
       countBleAbortEvents(), countAckBannerEvents(),
     ]);
-    const rankingsBefore = ((await db.get('rankings')) || []).length;
+    const rankingsBefore = (await listRankings()).length;
     const before = {
       sessions: sessionsBefore,
       metricsScores: metricsBefore,
@@ -596,9 +598,8 @@ router.post('/reset-training-data', async (req: AuthRequest, res: Response) => {
       deleteAllDailyConditions(), deleteAllDailyMissions(),
       deleteAllBleAbortEvents(), deleteAllAckBannerEvents(),
     ]);
-    // rankings 컬렉션은 KV 호환 유지 — repository 의 replaceAllRankings 는 source-of-truth replace 용도라
-    // 명시적 clear 경로로 set([]) 유지.
-    await db.set('rankings', []);
+    // Task #164: 정규화 `rankings` 테이블 + 캐시 모두 클리어 (Postgres / KV 백엔드 공통).
+    await clearRankingsAndCache();
 
     const users = await listAllUsers({ includeDeleted: true });
     let usersReset = 0;

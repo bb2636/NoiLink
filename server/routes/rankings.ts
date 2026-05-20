@@ -10,11 +10,16 @@ import {
   listSessions,
   listRankings,
   replaceAllRankings,
+  clearRankings,
 } from '../db/repositories/index.js';
 import type { RankingEntry, RankingType, Session, User } from '@noilink/shared';
 import { isoToKstLocalDate } from '@noilink/shared';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
 import { userCanActOnTargetUserId } from '../utils/session-user-policy.js';
+import {
+  ensureRankings as ensureRankingsCached,
+  invalidateRankingsCache,
+} from '../services/rankings-cache.js';
 
 const router = Router();
 
@@ -221,11 +226,31 @@ async function calculateRankings(): Promise<void> {
   await replaceAllRankings(rankings);
 }
 
+/* ───────────────────────────────────────────────────────────
+ * Task #164 — 랭킹 캐싱
+ *
+ * `calculateRankings()` 는 14일 창 sessions 를 전 사용자에 대해 재계산해 `rankings`
+ * 테이블에 replace 한다. 과거에는 `/api/rankings*` 요청마다 무조건 한 번씩 실행돼
+ * 사용자/세션 수가 늘면 응답 비용이 선형으로 따라 올라갔다. TTL + 싱글플라이트는
+ * `services/rankings-cache.ts` 에 분리 — 세션/메트릭/유저 라우트가 invalidate hook
+ * 만 깨끗하게 끌어다 쓸 수 있게 (rankings 라우트의 requireAuth 의존 회피).
+ * ─────────────────────────────────────────────────────────── */
+
+async function ensureRankings(): Promise<void> {
+  await ensureRankingsCached(() => calculateRankings());
+}
+
+/** admin reset 등에서 호출 — rankings 테이블을 비우고 캐시도 무효화. */
+export async function clearRankingsAndCache(): Promise<void> {
+  await clearRankings();
+  invalidateRankingsCache();
+}
+
 router.get('/', async (req: Request, res: Response) => {
   try {
     const { type, limit = '100', organizationId } = req.query;
 
-    await calculateRankings();
+    await ensureRankings();
 
     let rankings: RankingEntry[] = await listRankings({
       rankingType: type as RankingType | undefined,
@@ -267,7 +292,7 @@ router.get('/user/:userId', async (req: Request, res: Response) => {
   try {
     const { userId } = req.params;
 
-    await calculateRankings();
+    await ensureRankings();
 
     const userRankings = await listRankings({ userId });
 
@@ -313,7 +338,7 @@ router.get('/user/:userId/card', requireAuth, async (req: Request, res: Response
     }
     const attendanceRate = Math.round((attendedDays.size / RANKING_WINDOW_DAYS) * 100);
 
-    await calculateRankings();
+    await ensureRankings();
     const myList = await listRankings({ userId });
     const myRanks: { composite?: number; time?: number; streak?: number } = {};
     for (const r of myList) {

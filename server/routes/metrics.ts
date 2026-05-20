@@ -32,6 +32,7 @@ import {
 import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
 import { userCanActOnTargetUserId } from '../utils/session-user-policy.js';
 import { withIdempotency } from '../utils/idempotency.js';
+import { invalidateRankingsCache } from '../services/rankings-cache.js';
 
 function normalizeRecoveryInPlace(rawMetrics: RawMetrics): void {
   const sanitized = sanitizeRecoveryRawMetrics(rawMetrics.recovery);
@@ -224,6 +225,7 @@ router.post('/calculate', optionalAuth, async (req: Request, res: Response) => {
             const avgScore = scores.reduce((sum, s) => sum + s, 0) / scores.length;
             session.score = Math.round(avgScore);
             await upsertSession(session);
+            invalidateRankingsCache();
           }
         }
 

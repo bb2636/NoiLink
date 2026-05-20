@@ -20,6 +20,7 @@ import { isoToKstLocalDate, KST_TIME_ZONE } from '@noilink/shared';
 import { optionalAuth, type AuthRequest } from '../middleware/auth.js';
 import { userCanActOnTargetUserId, canAccessOrganizationResource } from '../utils/session-user-policy.js';
 import { withIdempotency } from '../utils/idempotency.js';
+import { invalidateRankingsCache } from '../services/rankings-cache.js';
 
 const router = Router();
 
@@ -126,6 +127,7 @@ router.post('/', optionalAuth, async (req: Request, res: Response) => {
         };
 
         await upsertSession(session);
+        invalidateRankingsCache();
 
         // streak/bestStreak 갱신 — KST 기준.
         const targetUser = await findUserById(userId);
@@ -389,6 +391,7 @@ router.put('/:sessionId', optionalAuth, async (req: Request, res: Response) => {
 
     const merged: Session = { ...existing, ...updateData, id: sessionId };
     await upsertSession(merged);
+    invalidateRankingsCache();
 
     res.json({ success: true, data: merged });
   } catch (error) {

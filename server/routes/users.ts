@@ -10,6 +10,7 @@ import { issueResetToken, consumeResetToken } from '../utils/reset-token.js';
 import { checkRateLimit, getClientIp } from '../utils/rate-limit.js';
 import { sendError } from '../utils/error-response.js';
 import { withKeyLock } from '../utils/key-mutex.js';
+import { invalidateRankingsCache } from '../services/rankings-cache.js';
 import {
   findUserById, findUserByUsername, findUserByEmail, findUserByPhone,
   listUsersByOrganization, listAllUsers, upsertUser,
@@ -517,6 +518,9 @@ export async function cascadeDeleteUser(userId: string): Promise<any | null> {
       /* best-effort — 잔여 데이터는 다음 cleanup 에서 정리 */
     }
   }
+
+  // Task #164: 사용자 세션이 사라졌으니 캐시된 랭킹 (전 사용자 14일 창) 도 무효화.
+  invalidateRankingsCache();
 
   // 카카오 연결 끊기 — DB cleanup 이 모두 끝난 뒤 호출. 실패해도 호출자
   // 응답을 막지 않는다. 네이버는 access token 이 필요해 호출자가 직접 처리.
