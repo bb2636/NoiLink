@@ -3,12 +3,11 @@
  * Key-Value 스토어 인터페이스를 PostgreSQL 테이블로 변환
  */
 
-import { Pool, PoolClient } from 'pg';
+import { Pool } from 'pg';
 import type { IDatabase } from './interface.js';
 
 export class PostgresDB implements IDatabase {
   private pool: Pool | null = null;
-  private client: PoolClient | null = null;
   private connected = false;
   
   constructor(connectionString?: string) {
@@ -56,17 +55,19 @@ export class PostgresDB implements IDatabase {
     if (this.connected) return;
     
     try {
-      // 연결 타임아웃 설정
+      // 연결 타임아웃 설정 — 풀에서 client 잡아 SELECT 1 만 검증 후 즉시 release
       const connectPromise = this.pool!.connect();
       const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error('Connection timeout after 15 seconds')), 15000)
       );
       
       const testClient = await Promise.race([connectPromise, timeoutPromise]) as any;
-      await testClient.query('SELECT 1');
-      testClient.release();
+      try {
+        await testClient.query('SELECT 1');
+      } finally {
+        testClient.release();
+      }
       
-      this.client = await this.pool!.connect();
       await this.initTables();
       this.connected = true;
       console.log('✅ Connected to PostgreSQL (Neon/Supabase)');
@@ -94,10 +95,6 @@ export class PostgresDB implements IDatabase {
   }
   
   async disconnect(): Promise<void> {
-    if (this.client) {
-      this.client.release();
-      this.client = null;
-    }
     if (this.pool) {
       await this.pool.end();
       this.pool = null;
@@ -114,10 +111,10 @@ export class PostgresDB implements IDatabase {
    * Key-Value 스토어를 시뮬레이션하기 위한 단일 테이블 사용
    */
   private async initTables(): Promise<void> {
-    if (!this.client) throw new Error('Not connected');
+    if (!this.pool) throw new Error('Not connected');
     
     // Key-Value 스토어 테이블
-    await this.client.query(`
+    await this.pool.query(`
       CREATE TABLE IF NOT EXISTS kv_store (
         key VARCHAR(255) PRIMARY KEY,
         value JSONB NOT NULL,
@@ -126,7 +123,7 @@ export class PostgresDB implements IDatabase {
     `);
     
     // 인덱스 생성
-    await this.client.query(`
+    await this.pool.query(`
       CREATE INDEX IF NOT EXISTS idx_kv_key ON kv_store(key)
     `);
   }
@@ -137,7 +134,7 @@ export class PostgresDB implements IDatabase {
   async get(key: string): Promise<any> {
     await this.ensureConnected();
     
-    const result = await this.client!.query(
+    const result = await this.pool!.query(
       'SELECT value FROM kv_store WHERE key = $1',
       [key]
     );
@@ -157,7 +154,7 @@ export class PostgresDB implements IDatabase {
     // JSONB 타입이므로 JSON 문자열로 변환
     const jsonValue = JSON.stringify(value);
     
-    await this.client!.query(
+    await this.pool!.query(
       `INSERT INTO kv_store (key, value, updated_at)
        VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP)
        ON CONFLICT (key) 
@@ -169,7 +166,7 @@ export class PostgresDB implements IDatabase {
   async delete(key: string): Promise<void> {
     await this.ensureConnected();
     
-    await this.client!.query(
+    await this.pool!.query(
       'DELETE FROM kv_store WHERE key = $1',
       [key]
     );
@@ -186,7 +183,7 @@ export class PostgresDB implements IDatabase {
       params.push(`${prefix}%`);
     }
     
-    const result = await this.client!.query(query, params);
+    const result = await this.pool!.query(query, params);
     return result.rows.map(row => row.key);
   }
   
@@ -196,7 +193,7 @@ export class PostgresDB implements IDatabase {
   async query(sql: string, params?: any[]): Promise<any> {
     await this.ensureConnected();
     
-    const result = await this.client!.query(sql, params || []);
+    const result = await this.pool!.query(sql, params || []);
     return result.rows;
   }
   
