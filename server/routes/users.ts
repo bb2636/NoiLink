@@ -16,7 +16,8 @@ import {
   findPasswordByUserId, findPasswordByEmail, upsertPassword, deletePassword,
   findOrganizationById, upsertOrganization, listOrganizations,
   insertInquiry, listInquiries, deleteInquiriesByUser,
-  deleteSessionsByUser, deleteMetricsByUser, deleteRawMetricsByUser,
+  deleteSessionsByUser, deleteCompositeParticipantByUser,
+  deleteMetricsByUser, deleteRawMetricsByUser,
   deleteReportsByUser, deleteDailyConditionsByUser, deleteDailyMissionsByUser,
   deleteUser,
 } from '../db/repositories/index.js';
@@ -467,11 +468,11 @@ router.put('/me', async (req: Request, res: Response) => {
  *    보존된다 — 멤버의 organizationId 만 끊는 것은 별도 정책 결정이라
  *    이 단순 탈퇴 플로우에서는 손대지 않는다 (관리자는 멤버 이관 후 탈퇴
  *    필요).
- *  - Task #158 drift: 합성/composite 세션 중 본인이 `participantIds` 로만
- *    참여한 레코드는 `deleteSessionsByUser(userId)` 로는 정리되지 않는다.
- *    KV 시절 manual filter 로 처리되던 부분 — 정규화 테이블 전환 후에는
- *    rare-path drift 로 두고, 필요 시 별도 follow-up task 에서 sessions
- *    repo 에 `deleteCompositeParticipantByUser` 같은 helper 를 추가한다.
+ *  - 합성/composite 세션 중 본인이 `participantIds` 로만 참여한 레코드는
+ *    `deleteSessionsByUser(userId)` 로 정리되지 않으므로,
+ *    `deleteCompositeParticipantByUser(userId)` 가 `meta.participantIds`
+ *    배열에서 본인 id 만 splice 한다 (Task #162). 다른 참여자의 결과 row 는
+ *    보존된다.
  *  - users / passwords 동시성 보호를 위해 기존 KV_LOCK 사용. 다른 entity
  *    (sessions/metrics/...) 는 단일 사용자 cascade 라 락 없이 best-effort.
  */
@@ -502,6 +503,7 @@ export async function cascadeDeleteUser(userId: string): Promise<any | null> {
   // 부가 entity cascade — 한 컬렉션 실패가 나머지 cleanup 을 막지 않도록 try/catch.
   for (const step of [
     () => deleteSessionsByUser(userId),
+    () => deleteCompositeParticipantByUser(userId),
     () => deleteMetricsByUser(userId),
     () => deleteRawMetricsByUser(userId),
     () => deleteInquiriesByUser(userId),

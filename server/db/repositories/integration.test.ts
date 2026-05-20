@@ -455,6 +455,46 @@ describeIntegration('Repository integration (Postgres, isolated schema)', () => 
       await Sessions.deleteSession('s2');
       expect(await Sessions.findSessionById('s2')).toBeNull();
     });
+
+    it('deleteCompositeParticipantByUser — participantIds 에서 본인만 splice, row 유지 (Task #162)', async () => {
+      // 합동 세션 1건 — u1(1차), u2 가 보조 참여자로 함께 등록.
+      await Sessions.upsertSession({
+        ...baseSession,
+        id: 'sc1',
+        userId: 'u1',
+        meta: { participantIds: ['u1', 'u2'] } as any,
+        createdAt: '2026-03-10T00:00:00.000Z',
+      } as any);
+      // u2 만 보조 참여자인 다른 합동 세션 — 1차는 u3.
+      await Sessions.upsertSession({
+        ...baseSession,
+        id: 'sc2',
+        userId: 'u3',
+        meta: { participantIds: ['u3', 'u2'] } as any,
+        createdAt: '2026-03-11T00:00:00.000Z',
+      } as any);
+      // u2 가 참여하지 않은 세션 — 그대로 보존돼야 함.
+      await Sessions.upsertSession({
+        ...baseSession,
+        id: 'sc3',
+        userId: 'u3',
+        meta: { participantIds: ['u3'] } as any,
+        createdAt: '2026-03-12T00:00:00.000Z',
+      } as any);
+
+      await Sessions.deleteCompositeParticipantByUser('u2');
+
+      const sc1 = await Sessions.findSessionById('sc1');
+      const sc2 = await Sessions.findSessionById('sc2');
+      const sc3 = await Sessions.findSessionById('sc3');
+
+      expect(sc1).not.toBeNull();
+      expect(sc2).not.toBeNull();
+      expect(sc3).not.toBeNull();
+      expect((sc1!.meta as any).participantIds).toEqual(['u1']);
+      expect((sc2!.meta as any).participantIds).toEqual(['u3']);
+      expect((sc3!.meta as any).participantIds).toEqual(['u3']);
+    });
   });
 
   // ------------------------------------------------------------------

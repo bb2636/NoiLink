@@ -184,6 +184,53 @@ export async function updateSessionScore(id: string, score: number): Promise<voi
   await pool.query(`UPDATE sessions SET score = $1 WHERE id = $2`, [score, id]);
 }
 
+/**
+ * 합동(composite) 세션의 `meta.participantIds` 배열에서 `userId` 만 제거한다.
+ * Task #162 — `deleteSessionsByUser(userId)` 가 본인이 1차 사용자(userId 컬럼)
+ * 인 세션만 정리하기 때문에, 본인이 다른 사용자의 합동 세션에 보조 참여자로만
+ * 등록된 케이스에서 탈퇴 후에도 식별자가 잔존하는 문제를 막는다.
+ *
+ * 세션 row 자체는 보존하고 배열에서 본인 id 만 splice — 다른 참여자의 결과가
+ * 사라지지 않도록. 배열이 빈 배열이 되어도 row 는 유지한다 (드물지만 1인
+ * 참여 합동 세션이 있을 수 있고, 본인이 1차 사용자라면 이미 별도로 row 자체가
+ * 삭제됐을 것).
+ */
+export async function deleteCompositeParticipantByUser(userId: string): Promise<void> {
+  if (!(await isPostgresBackend())) {
+    const all = await kvGetCollection<Session>(KV);
+    let changed = false;
+    const next = all.map((s) => {
+      const ids = (s.meta as any)?.participantIds;
+      if (!Array.isArray(ids) || !ids.includes(userId)) return s;
+      changed = true;
+      const filtered = ids.filter((id: unknown) => id !== userId);
+      return { ...s, meta: { ...(s.meta as any), participantIds: filtered } } as Session;
+    });
+    if (changed) await kvSetCollection(KV, next);
+    return;
+  }
+  const pool = await getPool();
+  // jsonb_set 으로 participantIds 배열에서 해당 userId 만 제외한 새 배열로 교체.
+  // 필터 결과가 0건이면 jsonb_agg 가 NULL 을 반환하므로 COALESCE 로 빈 배열 보장.
+  await pool.query(
+    `UPDATE sessions
+       SET meta = jsonb_set(
+         meta,
+         '{participantIds}',
+         COALESCE(
+           (SELECT jsonb_agg(elem)
+              FROM jsonb_array_elements(meta->'participantIds') AS elem
+              WHERE elem <> to_jsonb($1::text)),
+           '[]'::jsonb
+         )
+       )
+     WHERE meta ? 'participantIds'
+       AND jsonb_typeof(meta->'participantIds') = 'array'
+       AND meta->'participantIds' @> to_jsonb(ARRAY[$1::text])`,
+    [userId]
+  );
+}
+
 export async function deleteSessionsByUser(userId: string): Promise<void> {
   if (!(await isPostgresBackend())) {
     const all = await kvGetCollection<Session>(KV);
