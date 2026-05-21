@@ -2,7 +2,7 @@
 // 운영 스크립트 (Task #128).
 //
 // docs/operations/ack-banner-telemetry.md §3 의 SQL 한 건은 PostgreSQL 백엔드
-// (Neon/Supabase) 에서만 동작한다. 로컬 JSON / Replit DB 백엔드(개발/QA)에서는
+// 에서만 동작한다. 로컬 JSON / Replit DB 백엔드(개발/QA)에서는
 // `ackBannerEvents` 키를 직접 읽어 같은 집계를 돌려야 임계값 튜닝 회의 자료를
 // 동일한 명령으로 뽑을 수 있다.
 //

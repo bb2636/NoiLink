@@ -52,7 +52,7 @@
 
 ## 3. SQL 한 건으로 조회
 
-PostgreSQL 백엔드(Neon/Supabase)에서 `kv_store.value` 가 JSONB 배열이므로,
+PostgreSQL 백엔드에서 `kv_store.value` 가 JSONB 배열이므로,
 다음 한 건으로 "지난 7일 BLE 자동 종료 중 환경 점검 안내가 떴던 비율" 을
 조회한다.
 

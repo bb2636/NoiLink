@@ -6,7 +6,7 @@
 
 - **Frontend**: React.js (Vite), Tailwind CSS, Framer Motion
 - **Backend**: Node.js (Express), TypeScript
-- **Database**: PostgreSQL (Supabase) / Replit Database / Local JSON
+- **Database**: PostgreSQL / Replit Database / Local JSON
 - **Authentication**: JWT (JSON Web Token)
 - **Language**: TypeScript
 
@@ -121,13 +121,13 @@ DATABASE_URL=postgresql://user:password@host:port/database
 JWT_SECRET=your-secret-key
 JWT_EXPIRES_IN=7d
 
-# 서버 포트 (선택사항)
-PORT=5000
+# 서버 포트 (선택사항, 기본 3001)
+PORT=3001
 ```
 
-**Supabase 사용 시:**
-- Supabase 대시보드에서 Connection Pooling URL을 복사하여 `DATABASE_URL`에 설정
-- 형식: `postgresql://postgres.xxx:password@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres`
+**Replit 내장 Postgres 사용 시:**
+- host 는 `helium`, `sslmode=disable` 로 설정
+- 형식: `postgresql://user:password@helium/database?sslmode=disable`
 
 ### 개발 서버 실행
 
@@ -136,7 +136,7 @@ PORT=5000
 npm run dev
 ```
 
-이 명령어는 클라이언트(포트 3000)와 서버(포트 5000)를 동시에 실행합니다.
+이 명령어는 클라이언트(포트 5000)와 서버(포트 3001)를 동시에 실행합니다.
 
 ### 개별 실행
 
@@ -224,7 +224,7 @@ npm start
 
 여러 데이터베이스 백엔드를 지원합니다:
 
-- **PostgreSQL (Supabase)** - 개발 환경 권장 ✅ 현재 사용 중
+- **PostgreSQL** - 개발·프로덕션 공통 ✅ 현재 사용 중 (Replit 내장 Postgres)
 - **Replit Database** - Replit 배포 환경
 - **로컬 JSON 파일** - 간단한 테스트 (fallback)
 
@@ -321,13 +321,13 @@ npx tsx utils/migration.ts
 ### 환경 변수
 
 필수 환경 변수:
-- `DATABASE_URL`: PostgreSQL 연결 문자열 (Supabase 사용 시)
+- `DATABASE_URL`: PostgreSQL 연결 문자열
 
 선택적 환경 변수:
 - `DB_TYPE`: 데이터베이스 타입 (`postgres`, `replit`, `local`)
-- `JWT_SECRET`: JWT 서명 키 (기본값: `noilink-secret-key`)
+- `JWT_SECRET`: JWT 서명 키 (프로덕션 필수)
 - `JWT_EXPIRES_IN`: JWT 만료 시간 (기본값: `7d`)
-- `PORT`: 서버 포트 (기본값: `5000`)
+- `PORT`: 서버 포트 (기본값: `3001`)
 
 ## 📚 문서
 

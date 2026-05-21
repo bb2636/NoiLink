@@ -4,7 +4,7 @@
  * 
  * 우선순위:
  * 1. DB_TYPE 환경 변수로 명시적 지정
- * 2. DATABASE_URL이 있으면 PostgreSQL (Neon/Supabase)
+ * 2. DATABASE_URL이 있으면 PostgreSQL
  * 3. REPLIT_DB_URL 또는 REPL_ID가 있으면 Replit Database
  * 4. 그 외에는 로컬 JSON 파일
  */
@@ -18,7 +18,7 @@ async function initializeDB(): Promise<IDatabase> {
   const dbType = process.env.DB_TYPE?.toLowerCase();
   
   // 1. 명시적 DB 타입 지정
-  if (dbType === 'postgres' || dbType === 'postgresql' || dbType === 'neon' || dbType === 'supabase') {
+  if (dbType === 'postgres' || dbType === 'postgresql') {
     const { PostgresDB } = await import('./db/postgres.js');
     const dbInstance = new PostgresDB();
     await dbInstance.connect();
@@ -39,7 +39,7 @@ async function initializeDB(): Promise<IDatabase> {
     return dbInstance;
   }
   
-  // 2. DATABASE_URL이 있으면 PostgreSQL (Neon/Supabase)
+  // 2. DATABASE_URL이 있으면 PostgreSQL
   if (process.env.DATABASE_URL) {
     const { PostgresDB } = await import('./db/postgres.js');
     const dbInstance = new PostgresDB();

@@ -69,7 +69,7 @@ Task #129 에서 `user-dismiss` 의 의미를 좁히고 `banner-timeout` 을 분
 
 ## 3. SQL 한 건으로 조회
 
-PostgreSQL 백엔드(Neon/Supabase)에서 `kv_store.value` 가 JSONB 배열이므로,
+PostgreSQL 백엔드에서 `kv_store.value` 가 JSONB 배열이므로,
 다음 한 건으로 "지난 7일 ack 거부 토스트의 자동 닫힘 vs 사용자 닫힘 vs 화면 이탈 비율"을
 조회한다.
 

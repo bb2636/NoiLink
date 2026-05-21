@@ -1,5 +1,5 @@
 /**
- * PostgreSQL 데이터베이스 어댑터 (Neon/Supabase)
+ * PostgreSQL 데이터베이스 어댑터
  * Key-Value 스토어 인터페이스를 PostgreSQL 테이블로 변환
  */
 
@@ -77,7 +77,7 @@ export class PostgresDB implements IDatabase {
       
       await this.initTables();
       this.connected = true;
-      console.log('✅ Connected to PostgreSQL (Neon/Supabase)');
+      console.log('✅ Connected to PostgreSQL');
     } catch (error) {
       console.error('❌ Failed to connect to PostgreSQL:', error);
       if (error instanceof Error) {
@@ -87,8 +87,7 @@ export class PostgresDB implements IDatabase {
         }
         if (error.message.includes('ENOTFOUND') || error.message.includes('getaddrinfo') || (error as any).code === 'ENOTFOUND') {
           console.error('   → 호스트 주소가 올바른지 확인하세요');
-          console.error('   → Supabase 프로젝트가 활성화되어 있는지 확인하세요');
-          console.error('   → 프로젝트 생성 후 몇 분 기다린 후 다시 시도하세요');
+          console.error('   → DB 서버가 활성화되어 있는지 확인하세요');
         }
         if (error.message.includes('timeout') || (error as any).code === 'ETIMEDOUT') {
           console.error('   → 네트워크 연결을 확인하세요');

@@ -10,7 +10,7 @@ export interface IDatabase {
   delete(key: string): Promise<void>;
   list(prefix?: string): Promise<string[]>;
   
-  // PostgreSQL 메서드 (Neon/Supabase용)
+  // PostgreSQL 메서드
   query(sql: string, params?: any[]): Promise<any>;
   transaction<T>(callback: (tx: IDatabase) => Promise<T>): Promise<T>;
   
