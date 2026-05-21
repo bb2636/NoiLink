@@ -18,7 +18,8 @@ async function initializeDB(): Promise<IDatabase> {
   const dbType = process.env.DB_TYPE?.toLowerCase();
   
   // 1. 명시적 DB 타입 지정
-  if (dbType === 'postgres' || dbType === 'postgresql') {
+  // 'neon' / 'supabase' 는 옛 환경 변수 값 호환을 위한 alias — 동작은 동일.
+  if (dbType === 'postgres' || dbType === 'postgresql' || dbType === 'neon' || dbType === 'supabase') {
     const { PostgresDB } = await import('./db/postgres.js');
     const dbInstance = new PostgresDB();
     await dbInstance.connect();
