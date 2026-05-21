@@ -22,6 +22,8 @@ import {
   deleteAllSessions, deleteAllMetrics, deleteAllRawMetrics, deleteAllReports,
   deleteAllOrgInsightReports, deleteAllDailyConditions, deleteAllDailyMissions,
   deleteAllBleAbortEvents, deleteAllAckBannerEvents,
+  listAllTerms, findTermsById, upsertTerms,
+  listInquiries, findInquiry, insertInquiry,
 } from '../db/repositories/index.js';
 
 const router = Router();
@@ -157,7 +159,7 @@ router.get('/sessions', async (req: AuthRequest, res: Response) => {
  */
 router.get('/terms', async (req: AuthRequest, res: Response) => {
   try {
-    const terms = await db.get('terms') || [];
+    const terms = await listAllTerms();
     res.json({ success: true, data: terms });
   } catch (error) {
     res.status(500).json({
@@ -174,22 +176,21 @@ router.get('/terms', async (req: AuthRequest, res: Response) => {
 router.post('/terms', async (req: AuthRequest, res: Response) => {
   try {
     const { type, title, content, isRequired } = req.body;
-    
+
     if (!type || !title || !content) {
       return res.status(400).json({
         success: false,
         error: 'Type, title, and content are required'
       });
     }
-    
-    const terms = await db.get('terms') || [];
-    
-    // 해당 타입의 최신 버전 찾기
-    const typeTerms = terms.filter((t: Terms) => t.type === type);
+
+    // 해당 타입의 최신 버전 찾기 — 정규화 테이블에서 동일 타입 전체 조회 후 max 버전 +1
+    const allTerms = await listAllTerms();
+    const typeTerms = allTerms.filter((t: Terms) => t.type === type);
     const latestVersion = typeTerms.length > 0
       ? Math.max(...typeTerms.map((t: Terms) => t.version || 1))
       : 0;
-    
+
     const newTerm: Terms = {
       id: `terms_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       type: type as TermsType,
@@ -201,10 +202,9 @@ router.post('/terms', async (req: AuthRequest, res: Response) => {
       createdAt: new Date().toISOString(),
       createdBy: req.user?.id,
     };
-    
-    terms.push(newTerm);
-    await db.set('terms', terms);
-    
+
+    await upsertTerms(newTerm);
+
     res.status(201).json({ success: true, data: newTerm });
   } catch (error) {
     res.status(500).json({
@@ -222,29 +222,27 @@ router.put('/terms/:id', async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const { title, content, isRequired, isActive } = req.body;
-    
-    const terms = await db.get('terms') || [];
-    const termIndex = terms.findIndex((t: Terms) => t.id === id);
-    
-    if (termIndex === -1) {
+
+    const existing = await findTermsById(id);
+    if (!existing) {
       return res.status(404).json({
         success: false,
         error: 'Terms not found'
       });
     }
-    
-    terms[termIndex] = {
-      ...terms[termIndex],
+
+    const updated: Terms = {
+      ...existing,
       ...(title && { title }),
       ...(content && { content }),
       ...(isRequired !== undefined && { isRequired: Boolean(isRequired) }),
       ...(isActive !== undefined && { isActive: Boolean(isActive) }),
       updatedAt: new Date().toISOString(),
     };
-    
-    await db.set('terms', terms);
-    
-    res.json({ success: true, data: terms[termIndex] });
+
+    await upsertTerms(updated);
+
+    res.json({ success: true, data: updated });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -260,23 +258,22 @@ router.put('/terms/:id', async (req: AuthRequest, res: Response) => {
 router.delete('/terms/:id', async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    
-    const terms = await db.get('terms') || [];
-    const termIndex = terms.findIndex((t: Terms) => t.id === id);
-    
-    if (termIndex === -1) {
+
+    const existing = await findTermsById(id);
+    if (!existing) {
       return res.status(404).json({
         success: false,
         error: 'Terms not found'
       });
     }
-    
+
     // 실제 삭제 대신 비활성화
-    terms[termIndex].isActive = false;
-    terms[termIndex].updatedAt = new Date().toISOString();
-    
-    await db.set('terms', terms);
-    
+    await upsertTerms({
+      ...existing,
+      isActive: false,
+      updatedAt: new Date().toISOString(),
+    });
+
     res.json({ success: true, message: 'Terms deactivated' });
   } catch (error) {
     res.status(500).json({
@@ -432,7 +429,7 @@ router.delete('/banners/:id', async (req: AuthRequest, res: Response) => {
  */
 router.get('/inquiries', async (req: AuthRequest, res: Response) => {
   try {
-    const inquiries = await db.get('inquiries') || [];
+    const inquiries = await listInquiries();
     res.json({ success: true, data: inquiries });
   } catch (error) {
     res.status(500).json({
@@ -450,34 +447,36 @@ router.post('/inquiries/:id/answer', async (req: AuthRequest, res: Response) => 
   try {
     const { id } = req.params;
     const { answer } = req.body;
-    
+
     if (!answer) {
       return res.status(400).json({
         success: false,
         error: 'Answer is required'
       });
     }
-    
-    const inquiries = await db.get('inquiries') || [];
-    const inquiryIndex = inquiries.findIndex((i: any) => i.id === id);
-    
-    if (inquiryIndex === -1) {
+
+    const existing = await findInquiry(id);
+    if (!existing) {
       return res.status(404).json({
         success: false,
         error: 'Inquiry not found'
       });
     }
-    
-    inquiries[inquiryIndex] = {
-      ...inquiries[inquiryIndex],
+
+    const updated = {
+      ...(existing as any),
+      id,
+      userId: existing.userId,
+      createdAt: existing.createdAt,
       answer,
       status: 'ANSWERED',
       answerDate: new Date().toISOString(),
     };
-    
-    await db.set('inquiries', inquiries);
-    
-    res.json({ success: true, data: inquiries[inquiryIndex] });
+
+    // insertInquiry 는 ON CONFLICT (id) DO UPDATE payload 라 동일 id 면 in-place 갱신.
+    await insertInquiry(updated);
+
+    res.json({ success: true, data: updated });
   } catch (error) {
     res.status(500).json({
       success: false,
