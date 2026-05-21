@@ -19,6 +19,7 @@ import {
 } from '../db/repositories/organizations.js';
 import { listSessions, upsertSession } from '../db/repositories/sessions.js';
 import { upsertMetricsScore } from '../db/repositories/metrics-scores.js';
+import { clearRankingsAndCache } from '../routes/rankings.js';
 
 const MS_DAY = 24 * 60 * 60 * 1000;
 
@@ -479,6 +480,136 @@ const TEST_USER_TRAINING: Array<{
   { daysAgo:  0, durationMin: 24, score: 80, metrics: { memory: 78, comprehension: 82, focus: 88, judgment: 74, agility: 91, endurance: 69 } },
 ];
 
+/**
+ * 마이그레이션: test@test.com 의 `organizationId` 가 잘못 'demo-org-001' 로 박혀있던
+ * 레거시 데이터 정리. test@test.com 은 "일반 개인 회원" 시나리오 시드라서 어떤
+ * 조직에도 속하면 안 된다. 잘못된 값 때문에 (a) 기업 관리자 랭킹에 일반 개인이
+ * 섞이고 (b) 본인 화면에서도 같은 조직 사람만 보이는 회귀가 생긴다. 멱등.
+ */
+async function migrateTestUserOrgIdToNull(): Promise<boolean> {
+  let changed = false;
+  await withKeyLock(KV_LOCK.USERS, async () => {
+    const test = await findUserByEmail(TEST_EMAIL);
+    if (!test) return;
+    if (!test.organizationId && !test.organizationName) return;
+    await upsertUser({
+      ...test,
+      organizationId: undefined,
+      organizationName: undefined,
+      updatedAt: new Date().toISOString(),
+    });
+    changed = true;
+    console.log(`✅ [migration] ${TEST_EMAIL} organizationId 정리 (일반 개인 회원으로 복원)`);
+  });
+  return changed;
+}
+
+/**
+ * 데모 기업 소속 12명에게 14일치 임의 트레이닝 세션을 시드.
+ *  - 데모 멤버는 user 레코드만 있고 session 이 없어 랭킹에 표시되지 않았다.
+ *  - username 으로 결정적 시드 → 매 부팅 동일한 결과 (멱등 marker 로 재시드 방지)
+ *  - 점수/세션수/연속일을 멤버별로 다양화해 랭킹 3종(종합/누적시간/연속) 이 모두 의미있게 채워짐.
+ */
+const DEMO_MEMBER_TRAINING_SEED_MARKER = 'demo-org-member-14d-v1';
+
+function pseudoRandom(seed: string): () => number {
+  // 간단한 mulberry32 — username 으로 결정적이라 같은 멤버는 항상 같은 데이터.
+  let h = 1779033703 ^ seed.length;
+  for (let i = 0; i < seed.length; i++) {
+    h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let s = h >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+async function seedDemoOrgMemberTrainings(): Promise<boolean> {
+  let anyAdded = false;
+  await withKeyLock(KV_LOCK.USERS, async () => {
+    const orgUsers = await listUsersByOrganization(ORG_ID);
+    const members = orgUsers.filter(
+      (u) => u.userType === 'PERSONAL' && u.email?.endsWith('@demo-org.local'),
+    );
+    if (members.length === 0) return;
+
+    let totalAdded = 0;
+    let skipped = 0;
+    for (const member of members) {
+      const existing = await listSessions({ userId: member.id });
+      const alreadySeeded = existing.some(
+        (s: any) => s.meta?.seed === DEMO_MEMBER_TRAINING_SEED_MARKER,
+      );
+      if (alreadySeeded) {
+        skipped += 1;
+        continue;
+      }
+
+      const rng = pseudoRandom(member.username);
+      // 멤버별 5~10세션 (다양한 누적시간 랭킹). 점수는 55~92 사이 결정적.
+      const sessionCount = 5 + Math.floor(rng() * 6);
+      // 연속일 — 멤버별 1~7일 연속, 나머지는 흩어져 비연속.
+      const streakLen = 1 + Math.floor(rng() * 7);
+      const now = Date.now();
+      // 점수 기본선 — 멤버별 55~85, 매 세션 ±5 흔들림.
+      const baseScore = 55 + Math.floor(rng() * 30);
+
+      for (let i = 0; i < sessionCount; i++) {
+        // 연속 streakLen 일 (0..streakLen-1 일전), 그 뒤는 비연속(랜덤 4~13일전).
+        const daysAgo = i < streakLen
+          ? i
+          : 4 + Math.floor(rng() * 10);
+        const durationMin = 18 + Math.floor(rng() * 14); // 18~31분
+        const score = Math.max(50, Math.min(95, baseScore + Math.floor((rng() - 0.5) * 12)));
+        const createdAt = new Date(now - daysAgo * MS_DAY - Math.floor(rng() * 6 * 3600 * 1000)).toISOString();
+        const id = `seed_demo_${member.username}_${i}_${now}_${Math.random().toString(36).slice(2, 6)}`;
+        const session: Session = {
+          id,
+          userId: member.id,
+          mode: 'COMPOSITE',
+          bpm: 88 + Math.floor(rng() * 12),
+          level: (2 + Math.floor(rng() * 3)) as 2 | 3 | 4,
+          duration: durationMin * 60 * 1000,
+          score,
+          isComposite: true,
+          isValid: true,
+          phases: [],
+          meta: { seed: DEMO_MEMBER_TRAINING_SEED_MARKER },
+          createdAt,
+        };
+        await upsertSession(session);
+        const metric: MetricsScore = {
+          sessionId: id,
+          userId: member.id,
+          memory: Math.max(40, Math.min(98, score + Math.floor((rng() - 0.5) * 16))),
+          comprehension: Math.max(40, Math.min(98, score + Math.floor((rng() - 0.5) * 16))),
+          focus: Math.max(40, Math.min(98, score + Math.floor((rng() - 0.5) * 16))),
+          judgment: Math.max(40, Math.min(98, score + Math.floor((rng() - 0.5) * 16))),
+          agility: Math.max(40, Math.min(98, score + Math.floor((rng() - 0.5) * 16))),
+          endurance: Math.max(40, Math.min(98, score + Math.floor((rng() - 0.5) * 16))),
+          rhythm: score,
+          createdAt,
+        };
+        await upsertMetricsScore(metric);
+        totalAdded += 1;
+      }
+    }
+
+    if (totalAdded > 0) {
+      anyAdded = true;
+      console.log(`✅ 데모 기업 멤버 ${members.length - skipped}명에게 ${totalAdded}건 트레이닝 시드 (skip ${skipped}명)`);
+    } else {
+      console.log(`✅ 데모 기업 멤버 트레이닝 시드 이미 존재 (${skipped}명)`);
+    }
+  });
+  return anyAdded;
+}
+
 async function seedTestUserTrainings(): Promise<void> {
   await withKeyLock(KV_LOCK.USERS, async () => {
     const test = await findUserByEmail(TEST_EMAIL);
@@ -614,7 +745,18 @@ export async function seedAdminAccount(): Promise<void> {
       // (관리자 페이지 "기업회원" 탭 분류 정정 — admin 한 명만 남도록).
       await migrateDemoOrgMembersToPersonal();
       await seedDemoOrgPersonalMember();
+      // 잘못된 organizationId 가 박힌 test@test.com 레거시 정리 (멱등).
+      const migratedTestOrg = await migrateTestUserOrgIdToNull();
       await seedTestUserTrainings();
+      // 데모 기업 멤버 12명에게 14일치 임의 트레이닝 시드 — 랭킹/리포트가 의미있게 채워짐.
+      const seededDemoMembers = await seedDemoOrgMemberTrainings();
+      // 위 변경 중 하나라도 실제로 일어났을 때만 랭킹 테이블/캐시 무효화.
+      // 매 부팅 무조건 호출하면 변경 없는 재시동에서도 다음 조회 1회가 전 사용자
+      // 14일 창을 재계산해야 해서 비용이 발생한다 (architect 효율성 제안).
+      if (migratedTestOrg || seededDemoMembers) {
+        await clearRankingsAndCache();
+        console.log('🔄 시드 변경 감지 → rankings 테이블/캐시 무효화');
+      }
       // 기업명이 변경된 경우 기존 organization/users 레코드의 organizationName 도 동기화
       await renameDemoOrganization();
       // 기존에 시드된 기업 관리자에게 본인용 목업 데이터(브레이니멀/뇌나이/연속) 보강
