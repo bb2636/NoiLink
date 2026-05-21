@@ -86,8 +86,7 @@ NoiLink/
 │   │   └── seed-admin.ts   # 관리자 계정 시드
 │   ├── index.ts            # 서버 진입점
 │   ├── db.ts               # 데이터베이스 초기화
-│   ├── init-norm.ts        # Norm 설정 초기화
-│   └── db-schema.md        # 데이터베이스 스키마 문서
+│   └── init-norm.ts        # Norm 설정 초기화
 ├── shared/                 # 공통 타입 정의
 │   ├── types.ts            # 공통 TypeScript 타입
 │   └── package.json
@@ -233,7 +232,7 @@ npm start
 2. Replit 환경이면 Replit Database 사용
 3. 그 외에는 로컬 JSON 파일 사용
 
-스키마 설계는 `server/db-schema.md`를 참고하세요.
+정규화 스키마는 `server/db/schema.sql` (부팅 시 멱등 적용), KV → 정규화 리팩토링 이력은 `docs/architecture/db-refactor.md` 를 참고하세요.
 
 ## 🔐 인증 시스템
 
@@ -331,9 +330,11 @@ npx tsx utils/migration.ts
 
 ## 📚 문서
 
-- `PROJECT_STRUCTURE.md`: 프로젝트 폴더 구조 상세 설명
+- `replit.md`: 프로젝트 개요·운영 가이드 (live guards)
 - `DATABASE_SETUP.md`: 데이터베이스 설정 가이드
-- `server/db-schema.md`: 데이터베이스 스키마 설계 문서
+- `docs/architecture/db-refactor.md`: KV → 정규화 Postgres 리팩토링 이력
+- `docs/architecture/training-engine.md`: 트레이닝 엔진 결정 사항 + 회귀 이력
+- `server/db/schema.sql`: 정규화 스키마 단일 출처
 
 ## 🔧 스크립트
 
