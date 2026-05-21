@@ -62,6 +62,12 @@ CREATE INDEX IF NOT EXISTS idx_users_organization ON users(organization_id);
 CREATE INDEX IF NOT EXISTS idx_users_user_type ON users(user_type);
 CREATE INDEX IF NOT EXISTS idx_users_social ON users(social_provider, social_id);
 CREATE INDEX IF NOT EXISTS idx_users_is_deleted ON users(is_deleted);
+-- 중복 가입 방지 — email/username 이 NULL 또는 빈 문자열이면 허용, 값이 있으면 유일.
+-- (소셜 가입 등 email 없는 케이스를 깨지 않기 위해 partial unique index 사용.)
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_users_email
+  ON users(email) WHERE email IS NOT NULL AND email <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_users_username
+  ON users(username) WHERE username IS NOT NULL AND username <> '';
 
 CREATE TABLE IF NOT EXISTS passwords (
   user_id        VARCHAR(64) PRIMARY KEY,
