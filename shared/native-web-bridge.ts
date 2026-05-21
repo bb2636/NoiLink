@@ -76,6 +76,14 @@ export type WebToNativeMessage =
       payload?: Record<string, never>;
     }
   | {
+      // 홈에서 시스템 뒤로가기 두 번 → 앱 종료 신호.
+      // 네이티브 측 dispatcher 가 `BackHandler.exitApp()` 으로 처리한다.
+      v: BridgeVersion;
+      id: string;
+      type: 'app.exit';
+      payload?: Record<string, never>;
+    }
+  | {
       v: BridgeVersion;
       id: string;
       type: 'ble.ensureReady';
@@ -873,6 +881,7 @@ function validateWebToNativePayload(type: string, payload: unknown): BridgeValid
   switch (type) {
     case 'auth.requestSession':
     case 'auth.clearSession':
+    case 'app.exit':
     case 'ble.ensureReady':
     case 'ble.stopScan':
     case 'ble.discoverGatt':

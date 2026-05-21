@@ -13,7 +13,7 @@ import {
   type NoiPodCharacteristicKey,
   type WebToNativeMessage,
 } from '@noilink/shared';
-import { AppState, type AppStateStatus, type NativeEventSubscription } from 'react-native';
+import { AppState, BackHandler, type AppStateStatus, type NativeEventSubscription } from 'react-native';
 import { BleManagerError, bleManager } from '../ble/BleManager';
 import type { BleScanFilter } from '../ble/ble.types';
 import { clearStoredAuth, getStoredToken, getStoredUserDisplay, setStoredAuth } from '../auth/storage';
@@ -246,6 +246,13 @@ async function handleWebMessage(msg: WebToNativeMessage): Promise<void> {
       await clearStoredAuth();
       pushSessionUpdate(null, null, null);
       ack(msg.id, true);
+      return;
+    }
+
+    case 'app.exit': {
+      // 홈에서 시스템 뒤로가기 두 번 → 안드로이드 앱 종료. iOS 는 노옵.
+      ack(msg.id, true);
+      BackHandler.exitApp();
       return;
     }
 

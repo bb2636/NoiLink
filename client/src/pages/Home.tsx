@@ -8,7 +8,93 @@ import Logo from '../components/Logo';
 import { getBrainimalIcon, BRAINIMAL_INFO, DEFAULT_BRAINIMAL } from '../utils/brainimalIcons';
 import { placeholderImage, fallbackImg } from '../utils/imagePlaceholder';
 import { api } from '../utils/api';
+import { notifyNativeExitApp } from '../native/nativeBridgeClient';
+import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import type { User } from '@noilink/shared';
+
+/**
+ * 홈에서 시스템 뒤로가기 두 번 → 앱 종료 가드.
+ *  - 마운트 시 history entry 를 한 칸 push 해서 첫 번째 뒤로가기를 인터셉트.
+ *  - 첫 번째 popstate: 토스트 "한 번 더 누르면 종료됩니다" + entry 재push.
+ *  - 두 번째 popstate (2초 이내): 네이티브 쉘에 `app.exit` 송신.
+ *  - 웹 브라우저(쉘 외부) 에서는 토스트만 보이고 정상 history 흐름 유지.
+ */
+const BACK_TO_EXIT_WINDOW_MS = 2000;
+
+function useBackToExitGuard(): { showToast: boolean } {
+  const [showToast, setShowToast] = useState(false);
+  const lastBackRef = useRef(0);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    // 가드 entry 를 고유 토큰으로 표시 — 언마운트/사용자 네비게이션 시
+    // 현재 top 이 우리 가드인지 정확히 판정 가능. boolean 플래그는 정상 네비게이션
+    // (탭 클릭 등) 후에도 true 로 남아 의도치 않은 history.back() 을 일으킨다 (architect 지적).
+    const guardId = `home-back-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const isOurGuard = (): boolean => {
+      const s = window.history.state as { __homeBackGuard?: string } | null;
+      return !!s && s.__homeBackGuard === guardId;
+    };
+    window.history.pushState({ __homeBackGuard: guardId }, '');
+
+    const handlePopState = () => {
+      const now = Date.now();
+      if (now - lastBackRef.current < BACK_TO_EXIT_WINDOW_MS) {
+        // 두 번째 뒤로가기 — 네이티브 쉘 종료. 토스트 정리, 가드 재push 없이 통과.
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        setShowToast(false);
+        lastBackRef.current = 0;
+        if (isNoiLinkNativeShell()) {
+          notifyNativeExitApp();
+        }
+        // 쉘 외부에선 종료할 수단이 없어 popstate 만 흘려보낸다 (홈 history entry 1 칸 추가 소비).
+        return;
+      }
+      // 첫 번째 뒤로가기 — 토스트 + 다음 인터셉트용 entry 재push.
+      lastBackRef.current = now;
+      setShowToast(true);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setShowToast(false), BACK_TO_EXIT_WINDOW_MS);
+      window.history.pushState({ __homeBackGuard: guardId }, '');
+    };
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      // 정상 네비게이션(하단 탭 클릭 등) 후엔 router 가 새 entry 를 push 해서
+      // 우리 가드는 더 이상 top 이 아니다 → 건드리지 않음. top 이 여전히 우리
+      // 가드일 때만(예: 어드민 라우트 진입 등 react-router 외부 unmount) 정리.
+      if (isOurGuard()) {
+        window.history.back();
+      }
+    };
+  }, []);
+
+  return { showToast };
+}
+
+function BackToExitToast({ visible }: { visible: boolean }) {
+  return (
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 20 }}
+          className="fixed left-1/2 -translate-x-1/2 z-[70] px-4 py-3 rounded-full text-sm text-white shadow-lg pointer-events-none"
+          style={{
+            bottom: 'calc(96px + env(safe-area-inset-bottom))',
+            backgroundColor: 'rgba(26, 26, 26, 0.95)',
+            border: '1px solid #333',
+          }}
+        >
+          한 번 더 누르면 앱이 종료됩니다
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
 
 type HomeVariant = 'first-time' | 'streak-active' | 'streak-broken' | 'enterprise';
 
@@ -37,6 +123,7 @@ export default function Home() {
   const home = useHome(user?.id || null);
   const card = useUserRankingCard(user?.id || null);
   const stats = useUserStats(user?.id || null);
+  const { showToast: showExitToast } = useBackToExitGuard();
   // first-time 판정은 "세션이 하나도 없는 진짜 신규" 만 — 점수 산출이 안 된 사용자
   // (FREE 만 한 케이스 / 채점 실패 케이스) 는 Standard/Enterprise 에 머무르며 부분
   // 데이터를 "—" + 안내로 가린다. `hasData`(scored.length>0) 로 판정하면 점수만 없는
@@ -55,14 +142,29 @@ export default function Home() {
   }
 
   if (variant === 'first-time') {
-    return <FirstTimeHome />;
+    return (
+      <>
+        <FirstTimeHome />
+        <BackToExitToast visible={showExitToast} />
+      </>
+    );
   }
 
   if (variant === 'enterprise') {
-    return <EnterpriseHome home={home} user={user as any} />;
+    return (
+      <>
+        <EnterpriseHome home={home} user={user as any} />
+        <BackToExitToast visible={showExitToast} />
+      </>
+    );
   }
 
-  return <StandardHome variant={variant} home={home} user={user as any} streakDays={card.streakDays} />;
+  return (
+    <>
+      <StandardHome variant={variant} home={home} user={user as any} streakDays={card.streakDays} />
+      <BackToExitToast visible={showExitToast} />
+    </>
+  );
 }
 
 // Task #151 — 랭킹 카드 4종 stat 중 streakDays 만 홈 화면에서 사용 (다른 stat 은

@@ -29,3 +29,15 @@ export function notifyNativeClearSession(): void {
     type: 'auth.clearSession',
   });
 }
+
+/** 홈에서 시스템 뒤로가기 두 번 → 네이티브 측 앱 종료 요청 (Android 만 의미 있음). */
+export function notifyNativeExitApp(): void {
+  postToNative({
+    v: NATIVE_BRIDGE_VERSION,
+    id: newRequestId(),
+    type: 'app.exit',
+  });
+}
+
+/** 네이티브 쉘 안에서 실행 중인지 — 홈 가드가 BackHandler 인터셉트 조건 판정에 사용. */
+export { isNoiLinkNativeShell } from './initNativeBridge';

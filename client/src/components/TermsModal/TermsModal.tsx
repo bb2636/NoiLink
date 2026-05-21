@@ -65,7 +65,7 @@ export default function TermsModal({ isOpen, onClose, terms, title }: TermsModal
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 z-50"
+            className="fixed inset-0 z-[60]"
             style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
           />
 
@@ -74,7 +74,7 @@ export default function TermsModal({ isOpen, onClose, terms, title }: TermsModal
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
-            className="fixed inset-x-0 bottom-0 top-0 z-50 overflow-hidden"
+            className="fixed inset-x-0 bottom-0 top-0 z-[60] overflow-hidden"
             style={{ backgroundColor: '#0A0A0A' }}
             onClick={(e) => e.stopPropagation()}
           >
