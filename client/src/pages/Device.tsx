@@ -15,7 +15,7 @@ import {
   getLegacyLastEmittedFrameHex,
 } from '../native/bleBridge';
 import { getBleFirmwareReady } from '../native/bleFirmwareReady';
-import { getLegacyBleMode, setLegacyBleMode, subscribeLegacyBleMode } from '../native/legacyBleMode';
+import { getLegacyBleMode } from '../native/legacyBleMode';
 import { isNoiLinkNativeShell } from '../native/initNativeBridge';
 import { subscribeAckErrorBanner, type AckBannerSubscription } from '../native/nativeAckErrors';
 import type { NativeToWebMessage } from '@noilink/shared';
@@ -80,10 +80,9 @@ export default function Device() {
     emitted: number;
     lastFrame: string;
   }>({ fwLabel: '?', legacyLabel: '?', emitted: 0, lastFrame: '' });
-  // 레거시 모드 토글 — ON 이면 3B `4e XX 0d`, OFF 면 정식 12B `A5 01 …` 프레임 송신.
-  // 사용자 패드 펌웨어가 어떤 프로토콜을 받는지 모를 때 토글로 둘 다 시험.
-  const [legacyOn, setLegacyOn] = useState(getLegacyBleMode());
-  useEffect(() => subscribeLegacyBleMode(setLegacyOn), []);
+  // 레거시 모드(3B `4e XX 0d`) 는 현행 NINA-B1 펌웨어 고정 — 사용자 화면 토글 제거.
+  // NoiPod 정식(12B) 펌웨어가 다시 필요해지면 `legacyBleMode.ts` storage 키에
+  // '0' 을 직접 박거나 토글을 되살려 사용. 진단 라인의 L=ON/OFF 표시는 그대로 유지.
 
   useEffect(() => {
     const tick = () => {
@@ -278,23 +277,6 @@ export default function Device() {
                   BLE: FW={bleDiag.fwLabel} · L={bleDiag.legacyLabel} · 송신={bleDiag.emitted}
                   {bleDiag.lastFrame ? ` · ${bleDiag.lastFrame}` : ''}
                 </div>
-              )}
-              {/* 레거시 모드 토글 — 펌웨어가 어떤 프레임을 받는지 모를 때 둘 다 시험.
-                  ON: 3B `4e XX 0d` (현행 NINA-B1) · OFF: 12B `A5 01 …` (NoiPod 정식). */}
-              {device.isConnected && (
-                <button
-                  type="button"
-                  onClick={() => setLegacyBleMode(!legacyOn)}
-                  className="mb-2 w-full py-2 rounded-xl text-xs font-semibold"
-                  style={{
-                    backgroundColor: '#0A0A0A',
-                    border: '1px solid #555',
-                    color: '#CCC',
-                  }}
-                  data-testid={`device-legacy-toggle-${device.id}`}
-                >
-                  레거시 모드: {legacyOn ? 'ON (3B)' : 'OFF (12B)'} — 탭하여 전환
-                </button>
               )}
               <div className="flex gap-2">
                 <button
