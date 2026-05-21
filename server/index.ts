@@ -6,6 +6,7 @@ import { dirname, join } from 'path';
 import { existsSync } from 'fs';
 import { db } from './db.js';
 import { initializeNormConfig } from './init-norm.js';
+import { migrateKvTermsToNormalized } from './utils/migrate-kv-terms.js';
 import { runMigrations } from './utils/migration.js';
 import { seedAdminAccount } from './utils/seed-admin.js';
 import { startRankingsRefreshScheduler } from './services/rankings-cache.js';
@@ -113,6 +114,7 @@ async function bootstrap(): Promise<void> {
   try {
     await runMigrations();
     await initializeNormConfig();
+    await migrateKvTermsToNormalized();
     await seedAdminAccount();
   } catch (error) {
     console.error('⚠️  Failed to initialize database:', error);
