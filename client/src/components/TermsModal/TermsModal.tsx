@@ -1,6 +1,7 @@
 /**
  * 약관 표시 모달 컴포넌트
  */
+import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Terms } from '@noilink/shared';
 
@@ -12,6 +13,39 @@ interface TermsModalProps {
 }
 
 export default function TermsModal({ isOpen, onClose, terms, title }: TermsModalProps) {
+  // 모바일/브라우저 뒤로가기를 모달 닫기로만 한정.
+  // 모달이 열릴 때 history entry 를 push 하고, popstate(뒤로가기) 가 오면
+  // 그 entry 가 소비되어 모달만 닫히고 회원가입 폼 상태는 보존된다.
+  // 닫기 버튼/오버레이 클릭 같은 정상 close 시엔 push 했던 entry 를 history.back()
+  // 으로 정리해서 history stack 이 부풀지 않도록 한다.
+  const pushedHistoryRef = useRef(false);
+  const closingViaPopRef = useRef(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    window.history.pushState({ __termsModal: true }, '');
+    pushedHistoryRef.current = true;
+
+    const handlePopState = () => {
+      // popstate 로 닫히는 케이스 — entry 가 이미 소비됐으므로 history.back() 호출 금지.
+      closingViaPopRef.current = true;
+      pushedHistoryRef.current = false;
+      onClose();
+    };
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      // 닫기 버튼/오버레이로 닫힌 경우엔 push 했던 entry 를 되감아준다.
+      if (pushedHistoryRef.current && !closingViaPopRef.current) {
+        pushedHistoryRef.current = false;
+        window.history.back();
+      }
+      closingViaPopRef.current = false;
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   // 약관 업데이트 날짜 포맷팅
