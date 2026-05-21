@@ -836,6 +836,23 @@ export class TrainingEngine {
 
   // ───── tick 루프 ────────────────────────────────────────────────────
   private startTickLoop(durationMs: number, onPhaseEnd?: () => void): void {
+    // 페이즈 경계 정리 — 이전 페이즈가 예약했던 모든 pendingTimers 를 cancel 한다.
+    // 종합트레이닝(특히 150s RHYTHM→FOCUS 경계) 회귀의 직접 원인:
+    //   1) RHYTHM 마지막 박자의 8분 뒷박 schedule (`fireRhythmTick` 의
+    //      `schedule(() => lightSinglePod(...), beatMs*0.5)`) 가 페이즈 종료 직후에
+    //      늦게 발사되어 GREEN LED 를 점등.
+    //   2) 그 안의 `lightSinglePod` 가 다시 `schedule(() => allOff(), windowMs)` 를
+    //      예약 → FOCUS 의 첫 BLUE LED 가 켜진 직후 `allOff()` 가 전 pod 강제 OFF.
+    //   3) `allOff` 는 pod 마다 `bleOffPod` 를 호출 (legacy 큐 120ms 직렬화) →
+    //      후속 FOCUS tick 의 BLUE ON 프레임들이 줄지어 들어가며 펌웨어가 무시,
+    //      "BLUE 전환 이후 점등 신호 안 들어옴" 으로 보임.
+    // tickTimer 만 cancel 하고 pendingTimers 는 그대로 두면 위 leak 이 풀린다.
+    // MEMORY 페이즈는 진입 직후 `runMemorySequence()` 가 새 schedule 을 채우므로
+    // 여기서 비워도 안전 (오히려 이전 MEMORY 의 잔여 advance 콜백도 함께 정리됨).
+    this.pendingTimers.forEach((t) => window.clearTimeout(t));
+    this.pendingTimers = [];
+    // 시각/펌웨어 LED 상태도 새 페이즈 시작 시점에 명시적으로 초기화.
+    this.allOff();
     // 내부 tick 주기 계산도 BPM 안전벨트(60~200)를 거친 값으로. cfg.bpm 이
     // 어떤 경로로든 0/Infinity/NaN 으로 들어오면 60_000/bpm 가 NaN 이 되어
     // tick 루프가 멈춘다. Math.max(120, …) 가 NaN 을 잡지 못하므로 입력
