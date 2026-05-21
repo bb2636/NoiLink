@@ -47,7 +47,10 @@ export default function RadarChart({
   // 같은 꼭짓점을 다시 클릭하면 다시 사라진다 (단일 토글 상태로 통합).
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const center = size / 2;
-  const radius = size * 0.4;
+  // 반경 0.4 → 0.36: 외곽 라벨(label offset 20)이 canvas 안에 완전히 들어오도록
+  // 여유 확보. 0.4 일 때 "기억력"(상단 라벨) 중심 y = -2px 라 윗부분이 잘렸다.
+  const radius = size * 0.36;
+  const labelOffset = 20;
   const selectedMetric = selectedKey ? METRICS.find((m) => m.key === selectedKey) ?? null : null;
   const selectedValue = selectedMetric
     ? Math.round((data[selectedMetric.key as keyof typeof data] as number) || 0)
@@ -59,6 +62,17 @@ export default function RadarChart({
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    // HiDPI 모바일 화면(특히 Retina/안드로이드 xxhdpi) 에서 1:1 픽셀로 그리면
+    // 라벨·폴리곤 외곽선이 흐릿하게 보인다. backing store 를 DPR 배로 키우고
+    // 컨텍스트를 그만큼 스케일해 논리 좌표는 그대로 쓴다.
+    const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
+    const pixelSize = Math.round(size * dpr);
+    if (canvas.width !== pixelSize || canvas.height !== pixelSize) {
+      canvas.width = pixelSize;
+      canvas.height = pixelSize;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     ctx.clearRect(0, 0, size, size);
 
@@ -128,7 +142,7 @@ export default function RadarChart({
     ctx.textBaseline = 'middle';
     METRICS.forEach((metric) => {
       const angle = ((metric.angle - 90) * Math.PI) / 180;
-      const labelRadius = radius + 22;
+      const labelRadius = radius + labelOffset;
       const x = center + labelRadius * Math.cos(angle);
       const y = center + labelRadius * Math.sin(angle);
       ctx.fillText(metric.label, x, y);
